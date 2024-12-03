@@ -3,6 +3,7 @@ import bmesh
 from bpy.types import Context
 from .drawing import *
 from . import pz_globals
+from . import objective_functions
 
 class TestOperator(bpy.types.Operator):
     bl_label = "Test Operator"
@@ -18,6 +19,7 @@ class TestOperator(bpy.types.Operator):
         wm = context.window_manager
         # get the currently selected object
         ao = bpy.context.active_object
+        objective_func = objective_functions.ObjectiveFunction(ao)
         return wm.invoke_props_dialog(self)
 
     def draw(self, context: Context):
