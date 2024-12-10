@@ -3,13 +3,15 @@ import bpy
 import bmesh
 import math
 import mathutils
+from itertools import combinations
 import sympy as sp
 import time
 import torch
+import torch.nn as nn
+from . import geometry
 
-print("all imports working!")
 
-class ObjectiveFunction():
+class ObjectiveFunction(nn.Module):
     """
     A class that stores the flattening objective function for a mesh.
     It offers evaluation of
@@ -18,128 +20,96 @@ class ObjectiveFunction():
     - Hessian
     """
 
-    def __init__(self, ao : bpy.types.Object):
+    def __init__(self, ao : bpy.types.Object, closeness_weight, angle_weight, det_weight):
+        super().__init__()
         self.mesh : bmesh.types.BMesh = bmesh.new()
         bpy.ops.object.mode_set(mode="EDIT")
         self.mesh = bmesh.from_edit_mesh(ao.data).copy()
         bpy.ops.object.mode_set(mode="OBJECT")
+        self.closeness_w = closeness_weight
+        self.angle_w = angle_weight
+        self.det_w = det_weight
+        self.bb_diameter = geometry.compute_bb_diameter(self.mesh)
+        self.voronoi_areas = geometry.compute_voronoi_areas(self.mesh)
 
         # create variables
         self.vertex_to_variables = {}
-        self.variables = []
+        self.initial_vertex_positions = []
+        self.vertex_weights = []
 
         for vertex in self.mesh.verts:
-            suffix = str(vertex.index)
-            self.vertex_to_variables[vertex.index] = len(self.variables)
-            self.variables.append(sp.symbols("x_" + suffix))
-            self.variables.append(sp.symbols("y_" + suffix))
-            self.variables.append(sp.symbols("z_" + suffix))
+            self.vertex_to_variables[vertex.index] = len(self.vertex_to_variables)
+            v_pos = np.asarray(vertex.co).reshape((3,))
+            self.initial_vertex_positions.append(v_pos)
+            self.vertex_weights.append(self.voronoi_areas[vertex.index])
 
-        # add objective function elements
-        self.closeness_terms = []
+        self.initial_vertex_positions = torch.Tensor(np.asarray(self.initial_vertex_positions))
+        self.vertex_weights = torch.Tensor(np.asarray(self.vertex_weights))
 
-        closeness_start_time = time.time()
-        for vertex in self.mesh.verts:
-            current_elem = {}
-            v_id = vertex.index
-            v_pos = np.asarray(vertex.co).reshape((3,1))
+        self.weights = nn.Parameter(self.initial_vertex_positions.detach(), requires_grad=True)  # [vertex, xyz]
 
-            x_var = self.variables[self.vertex_to_variables[v_id] + 0]
-            y_var = self.variables[self.vertex_to_variables[v_id] + 1]
-            z_var = self.variables[self.vertex_to_variables[v_id] + 2]
+    def forward(self):
+        # add objective function elements 
+        # face_vertices: [face_id, vertex_id] padded with -1
 
-            v_var = sp.Matrix([x_var, y_var, z_var])
+        dist = (self.weights - self.initial_vertex_positions.detach())  # [vertex, xyz]
+        dist = torch.einsum("i,ik->ik", torch.sqrt(self.vertex_weights.detach()), dist)
+        closeness = torch.einsum("ij,ik->", dist, dist)
 
-            # value
-            closeness_f = (v_var - v_pos).dot(v_var - v_pos)
-            closeness_f_lambdified = sp.lambdify((x_var, y_var, z_var), closeness_f, "numpy")
-            # gradient
-            closeness_gradient = sp.Matrix([closeness_f]).jacobian([x_var, y_var, z_var])
-            closeness_gradient_lambdified = sp.lambdify((x_var, y_var, z_var), closeness_gradient, "numpy")
-            # hessian
-            closeness_hessian = sp.hessian(closeness_f, [x_var, y_var, z_var])
-            closeness_hessian_lambdified = sp.lambdify((x_var, y_var, z_var), closeness_hessian, "numpy")
-
-            current_elem["f"] = closeness_f
-            current_elem["g"] = closeness_gradient
-            current_elem["H"] = closeness_hessian
-            current_elem["f_np"] = closeness_f_lambdified
-            current_elem["g_np"] = closeness_gradient_lambdified
-            current_elem["H_np"] = closeness_hessian_lambdified
-            current_elem["variables"] = [x_var, y_var, z_var]
-            current_elem["variable_indices"] = [self.vertex_to_variables[v_id] + 0,
-                                                self.vertex_to_variables[v_id] + 1,
-                                                self.vertex_to_variables[v_id] + 2]
-
-            self.closeness_terms.append(current_elem)
-
-        closeness_time = time.time() - closeness_start_time
-        print("Closeness term preperation took ", closeness_time, "seconds.")
-
-
-        self.angle_based_planarity_terms = []
-
-        planarity_start_time = time.time()
+        angle_term = 0
+        det_term = 0
         for face in self.mesh.faces:
-            if (len(face.verts) == 3):
+            if len(face.verts) == 3:
                 continue
 
             v_ids = [v.index for v in face.verts]
-            used_variables = []    
-            used_variable_indices = []
-
-            for v_id in v_ids:
-                used_variables.append(self.variables[self.vertex_to_variables[v_id] + 0])
-                used_variables.append(self.variables[self.vertex_to_variables[v_id] + 1])
-                used_variables.append(self.variables[self.vertex_to_variables[v_id] + 2])
-                used_variable_indices.append(self.vertex_to_variables[v_id] + 0)
-                used_variable_indices.append(self.vertex_to_variables[v_id] + 1)
-                used_variable_indices.append(self.vertex_to_variables[v_id] + 2)
-
-            
             n = len(v_ids)
-            planarity_f = - (n - 2) * sp.pi
-            for i in range(len(v_ids)):
-                a_id = v_ids[(i + n - 1) % n]
-                b_id = v_ids[i]
-                c_id = v_ids[(i + 1) % n]
 
-                v_a = sp.Matrix([self.variables[self.vertex_to_variables[a_id] + 0], 
-                                 self.variables[self.vertex_to_variables[a_id] + 1],
-                                 self.variables[self.vertex_to_variables[a_id] + 2]])
-                v_b = sp.Matrix([self.variables[self.vertex_to_variables[b_id] + 0], 
-                                 self.variables[self.vertex_to_variables[b_id] + 1],
-                                 self.variables[self.vertex_to_variables[b_id] + 2]])
-                v_c = sp.Matrix([self.variables[self.vertex_to_variables[c_id] + 0], 
-                                 self.variables[self.vertex_to_variables[c_id] + 1],
-                                 self.variables[self.vertex_to_variables[c_id] + 2]])
+            if self.angle_w != 0:
+                planarity_f = - (n - 2) * np.pi
+                for i in range(n):
+                    a_id = v_ids[(i + n - 1) % n]
+                    b_id = v_ids[i]
+                    c_id = v_ids[(i + 1) % n]
+
+                    v_a = self.weights[self.vertex_to_variables[a_id]]
+                    v_b = self.weights[self.vertex_to_variables[b_id]]
+                    v_c = self.weights[self.vertex_to_variables[c_id]]
+                    
+                    ba = (v_a - v_b) / torch.sqrt((v_a - v_b).dot(v_a - v_b))
+                    bc = (v_c - v_b) / torch.sqrt((v_c - v_b).dot(v_c - v_b))
+
+                    angle = torch.acos(ba.dot(bc))
+                    planarity_f += angle
+                angle_term += planarity_f**2
+            
+            if self.det_w == 0:
+                continue
                 
-                ba = (v_a - v_b) / sp.sqrt((v_a - v_b).dot(v_a - v_b))
-                bc = (v_c - v_b) / sp.sqrt((v_c - v_b).dot(v_c - v_b))
-
-                angle = sp.acos(ba.dot(bc))
-                planarity_f += angle
-
-            planarity_f = planarity_f ** 2
-            planarity_f_lambdified = sp.lambdify(used_variables, planarity_f, "numpy")
-            print(planarity_f)
-            # gradient
-            planarity_gradient = sp.Matrix([planarity_f]).jacobian(used_variables)
-            planarity_gradient_lambdified = sp.lambdify(used_variables, planarity_gradient, "numpy")
-            print(planarity_gradient)
-            # hessian
-            planarity_hessian = sp.hessian(planarity_f, used_variables)
-            planarity_hessian_lambdified = sp.lambdify(used_variables, planarity_hessian, "numpy")
-            print(planarity_hessian)
-
-        planarity_time = time.time() - planarity_start_time
-        print("Planarity term preperation took ", planarity_time, "seconds.")
+            normalized_edges = []
+            for i in range(n):
+                a_id = v_ids[i]
+                b_id = v_ids[(i + 1) % n]
+                v_a = self.weights[self.vertex_to_variables[a_id]]
+                v_b = self.weights[self.vertex_to_variables[b_id]]
+                normalized_edges.append((v_b - v_a) / torch.linalg.norm(v_b - v_a))
+            for a, b, c in combinations(normalized_edges, 3):
+                det_term += torch.square(torch.linalg.det(torch.stack((a,b,c))))
 
 
-    def eval_passive(self, x):
-        print("TODO")
+        final_energy = self.closeness_w * closeness / (geometry.compute_mesh_surface_area(self.mesh)**2)
+        if self.angle_w != 0:
+            final_energy += self.angle_w * angle_term / len(self.mesh.faces)
+        if self.det_w != 0:
+            final_energy += self.det_w * det_term / len(self.mesh.faces)
 
-    def eval_with_derivatives(self, x):
-        print("TODO")
+        return final_energy
 
-
+    def apply_back_to_mesh(self, ao : bpy.types.Object):
+        for vertex in self.mesh.verts:
+            new_pos = self.weights[self.vertex_to_variables[vertex.index]]
+            vertex.co = tuple(new_pos.tolist())
+            
+        bpy.ops.object.mode_set(mode="OBJECT")
+        self.mesh.to_mesh(ao.data)
+        bpy.ops.object.mode_set(mode="EDIT")
