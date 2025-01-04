@@ -21,6 +21,7 @@ else:
     from .polyzamboni import ui
     from .polyzamboni import operators
     from .polyzamboni import properties
+    from .polyzamboni import callbacks
 
 def register():
     # Init globals
@@ -30,11 +31,18 @@ def register():
     # Other stuff later
     operators.register()
     ui.register()
-    
+    bpy.app.handlers.load_post.append(callbacks.on_file_load)
+    bpy.app.handlers.depsgraph_update_post.append(callbacks.on_object_select)
+
 def unregister():
     operators.unregister()
     ui.unregister()
     properties.unregister()
+    if callbacks.on_file_load in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(callbacks.on_file_load)
+    if callbacks.on_object_select in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.remove(callbacks.on_object_select)
 
 if __name__ == "__main__":
     register()
+    

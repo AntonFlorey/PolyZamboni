@@ -4,9 +4,9 @@ import bmesh
 import math
 import mathutils
 from itertools import combinations
-import sympy as sp
 import time
 import torch
+
 import torch.nn as nn
 from . import geometry
 
@@ -31,7 +31,7 @@ class ObjectiveFunction(nn.Module):
         self.det_w = det_weight
         self.bb_diameter = geometry.compute_bb_diameter(self.mesh)
         self.voronoi_areas = geometry.compute_voronoi_areas(self.mesh)
-
+        
         # create variables
         self.vertex_to_variables = {}
         self.initial_vertex_positions = []

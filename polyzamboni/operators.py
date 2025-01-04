@@ -5,15 +5,14 @@ from bpy.types import Context
 from .drawing import *
 from . import pz_globals
 from . import objective_functions
+from . import cutgraph
 import torch
 
-class TestOperator(bpy.types.Operator):
+class FlatteningOperator(bpy.types.Operator):
     bl_label = "Flatten Polygons"
-    bl_idname  = "wm.test_op"
+    bl_idname  = "wm.flattening_op"
     _handle = None
 
-    my_float : bpy.props.FloatProperty(name="TestFloat")
-    
     def execute(self, context):
         return {'FINISHED'}
     
@@ -21,18 +20,18 @@ class TestOperator(bpy.types.Operator):
         wm = context.window_manager
         # get the currently selected object
         ao = bpy.context.active_object
-        polyzamboni_settings = context.scene.polyzamboni_settings
+        flattening_settings = context.scene.polyzamboni_flattening_settings
         print("Attempting to create objective")
-        objective_func = objective_functions.ObjectiveFunction(ao, polyzamboni_settings.shape_preservation_weight, 
-                                                                   polyzamboni_settings.angle_weight, 
-                                                                   polyzamboni_settings.det_weight)
+        objective_func = objective_functions.ObjectiveFunction(ao, flattening_settings.shape_preservation_weight, 
+                                                                   flattening_settings.angle_weight, 
+                                                                   flattening_settings.det_weight)
         print("Attempting to create optimizer")
         # print("parameters", list(objective_func.parameters()))
-        optimizer = torch.optim.Adam(objective_func.parameters(), lr=polyzamboni_settings.learning_rate)
+        optimizer = torch.optim.Adam(objective_func.parameters(), lr=flattening_settings.learning_rate)
 
         print("Starting the best optimizer in the world.")
     
-        max_steps = polyzamboni_settings.optimization_iterations
+        max_steps = flattening_settings.optimization_iterations
         for step in range(max_steps):
             print("step", step)
 
@@ -61,37 +60,19 @@ class TestOperator(bpy.types.Operator):
             
         return wm.invoke_props_dialog(self)
 
+    @classmethod
+    def poll(cls, context):
+        active_object = context.active_object
+        return active_object is not None and active_object.type == 'MESH' and (context.mode == 'EDIT_MESH' or active_object.select_get())
+
     def draw(self, context: Context):
-        layout = self.layout
-        col = layout.column()
-        row = col.row()
-        row.prop(self, "my_float")
-        row = col.row()
-        row.operator("wm.sub_op")
+        pass
 
     def cancel(self, context: Context):
         pass
 
-class SubOperator(bpy.types.Operator):
-    bl_label = "Sub-Operator"
-    bl_idname  = "wm.sub_op"
-
-    def execute(self, context):
-        print("I am a nested operator")
-        return {'FINISHED'}
-    
-    def invoke(self, context, event):
-        wm = context.window_manager
-        return wm.invoke_props_dialog(self)
-
-    def draw(self, context: Context):
-        layout = self.layout
-        col = layout.column()
-        row = col.row()
-        row.label(text="I am a nested  operator")
-
 class PrintPlanarityOperator(bpy.types.Operator):
-    bl_label = "PlanarityInfo-Operator"
+    bl_label = "Check planarity"
     bl_idname = "wm.planarity_printer"
 
     def execute(self, context):
@@ -102,24 +83,53 @@ class PrintPlanarityOperator(bpy.types.Operator):
 
         ao = bpy.context.active_object
         
-        polyzamboni_settings = context.scene.polyzamboni_settings
+        flattening_settings = context.scene.polyzamboni_flattening_settings
 
         objective_func = objective_functions.ObjectiveFunction(ao, 0, 
-                                                               polyzamboni_settings.angle_weight, 
-                                                               polyzamboni_settings.det_weight)
+                                                               flattening_settings.angle_weight, 
+                                                               flattening_settings.det_weight)
         value = objective_func()
 
-        print("AVG Angle-based flatness measure:", value)
+        print("AVG Angle-based flatness measure:", value.item())
 
         return wm.invoke_props_dialog(self, title="AVG Angle-based flatness measure: " + str(value.item()))    
-    
 
+class InitializeCuttingOperator(bpy.types.Operator):
+    """Start the unfolding process for this mesh"""
+    bl_label = "Unfold this mesh"
+    bl_idname  = "wm.cut_initialization_op"
+
+    def invoke(self, context, event):     
+        return self.execute(context)
+ 
+    def execute(self, context):
+        # get the currently selected object
+        ao = bpy.context.active_object
+        new_cutgraph = cutgraph.CutGraph(ao)
+        pz_globals.add_cutgraph(ao, new_cutgraph)
+        return { 'FINISHED' }
+
+    @classmethod
+    def poll(cls, context):
+        active_object = context.active_object
+        is_mesh = active_object is not None and active_object.type == 'MESH' and (context.mode == 'EDIT_MESH' or active_object.select_get())
+
+        return is_mesh and "cut_graph_id" not in active_object
+
+    def draw(self, context: Context):
+        pass
+
+    def cancel(self, context: Context):
+        pass
+
+# bpy.types.SpaceView3D.
+ 
 def register():
-    bpy.utils.register_class(TestOperator)
-    bpy.utils.register_class(SubOperator)
+    bpy.utils.register_class(FlatteningOperator)
     bpy.utils.register_class(PrintPlanarityOperator)
+    bpy.utils.register_class(InitializeCuttingOperator)
 
 def unregister():
-    bpy.utils.unregister_class(TestOperator)
-    bpy.utils.unregister_class(SubOperator)
+    bpy.utils.unregister_class(FlatteningOperator)
     bpy.utils.unregister_class(PrintPlanarityOperator)
+    bpy.utils.unregister_class(InitializeCuttingOperator)
