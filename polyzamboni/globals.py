@@ -1,4 +1,5 @@
 import bpy
+from .constants import CUT_CONSTRAINTS_PROP_NAME, LOCKED_EDGES_PROP_NAME, CUTGRAPH_ID_PROPERTY_NAME
 
 PZ_CUTGRAPHS = None
 PZ_REMOVE_EXISTING_CUT_IDS = None
@@ -11,8 +12,9 @@ def init():
 
 def add_cutgraph(obj, cutgraph):
     global PZ_CUTGRAPHS    
-    obj["cut_graph_id"] = len(PZ_CUTGRAPHS)
-    obj["manual_cuts"] = cutgraph.get_manual_cuts_list()
+    obj[CUTGRAPH_ID_PROPERTY_NAME] = len(PZ_CUTGRAPHS)
+    obj[CUT_CONSTRAINTS_PROP_NAME] = cutgraph.get_manual_cuts_list()
+    obj[LOCKED_EDGES_PROP_NAME] = cutgraph.get_locked_edges_list()
     PZ_CUTGRAPHS.append(cutgraph)
 
 def reset_file_dependent_globals():
@@ -31,8 +33,8 @@ def remove_all_existing_cutgraph_ids():
     print("removing pre existing cut graph ids...")
     # remove all cut graph ids that might exist
     for obj in bpy.data.objects:
-        if "cut_graph_id" in obj:
+        if CUTGRAPH_ID_PROPERTY_NAME in obj:
             print("deleting cut graph id from object:", obj.name)
-            del obj["cut_graph_id"]
+            del obj[CUTGRAPH_ID_PROPERTY_NAME]
     PZ_REMOVE_EXISTING_CUT_IDS = False
     

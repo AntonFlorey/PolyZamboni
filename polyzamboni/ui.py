@@ -1,5 +1,6 @@
 import bpy
 from bpy.types import Panel
+from .constants import CUTGRAPH_ID_PROPERTY_NAME
 
 class MainPanel(bpy.types.Panel):
     bl_label = "Poly Zamboni"
@@ -15,7 +16,7 @@ class MainPanel(bpy.types.Panel):
         row.label(text="thanks for using me!", icon="FUND")
         layout.operator("wm.flattening_op")
 
-        if "cut_graph_id" not in context.active_object:
+        if CUTGRAPH_ID_PROPERTY_NAME not in context.active_object:
             layout.operator("wm.cut_initialization_op")
         else:
             # TODO unfolding UI

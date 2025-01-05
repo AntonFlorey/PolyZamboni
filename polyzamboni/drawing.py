@@ -2,7 +2,7 @@ import bpy
 import gpu
 import bgl
 from gpu_extras.batch import batch_for_shader
-from . import pz_globals
+from . import globals
 from . import cutgraph
 
 # colors
@@ -22,6 +22,7 @@ LILAC = (122 / 255, 111 / 255, 172 / 255, 1.0)
 # Keep track of active draw callbacks 
 _drawing_handle_errors = None
 _drawing_handle_user_provided_cuts = None
+_drawing_handle_locked_edges = None
 _drawing_handle_auto_completed_cuts = None
 _drawing_handle_region_quality_triangles = None
 
@@ -99,6 +100,21 @@ def show_user_provided_cuts(cuts_as_line_array):
     _drawing_handle_user_provided_cuts = bpy.types.SpaceView3D.draw_handler_add(lines_draw_callback, (cuts_as_line_array, user_cuts_color), "WINDOW", "POST_VIEW")
 
 #################################
+#         Locked Edges          #
+#################################
+
+def hide_locked_edges():
+    global _drawing_handle_locked_edges
+    deactivate_draw_callback(_drawing_handle_locked_edges)
+    _drawing_handle_locked_edges = None
+
+def show_locked_edges(cuts_as_line_array):
+    hide_locked_edges()
+    global _drawing_handle_locked_edges
+    locked_edges_color = GREEN
+    _drawing_handle_locked_edges = bpy.types.SpaceView3D.draw_handler_add(lines_draw_callback, (cuts_as_line_array, locked_edges_color), "WINDOW", "POST_VIEW")
+
+#################################
 #           Auto Cuts           #
 #################################
 
@@ -146,6 +162,11 @@ def show_region_quality_triangles(vertex_positions, regions_by_quality):
 #          Update all           #
 #################################
 
+def hide_all_drawings():
+    hide_user_provided_cuts()
+    hide_auto_completed_cuts()
+    hide_region_quality_triangles()
+
 def update_all_polyzamboni_drawings(self, context):
     print("draw update called")
     try:
@@ -155,22 +176,20 @@ def update_all_polyzamboni_drawings(self, context):
         return
     
     # hide everything
-    hide_user_provided_cuts()
-    hide_auto_completed_cuts()
-    hide_region_quality_triangles()
+    hide_all_drawings()
 
     # draw user provided cuts
     if not draw_settings.drawing_enabled:
         return
     
     # obtain current cutgraph to draw
-    cutgraph_to_draw : cutgraph.CutGraph = pz_globals.PZ_CUTGRAPHS[pz_globals.PZ_CURRENT_CUTGRAPH_ID]
+    cutgraph_to_draw : cutgraph.CutGraph = globals.PZ_CUTGRAPHS[globals.PZ_CURRENT_CUTGRAPH_ID]
 
     # draw user provided cuts
-    show_user_provided_cuts(cutgraph_to_draw.get_user_provided_cuts_as_coordinate_list())
+    show_user_provided_cuts(cutgraph_to_draw.mesh_edge_id_list_to_coordinate_list(cutgraph_to_draw.get_manual_cuts_list()))
 
     if draw_settings.show_auto_completed_cuts:
-        # TODO Draw auto completed cuts
+        show_locked_edges(cutgraph_to_draw.mesh_edge_id_list_to_coordinate_list(cutgraph_to_draw.get_locked_edges_list()))
         pass
 
     if draw_settings.color_faces_by_quality:

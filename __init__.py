@@ -16,7 +16,7 @@ if "bpy" in locals():
     importlib.reload(locals()["properties"])
 else:
     import bpy
-    from .polyzamboni import pz_globals
+    from .polyzamboni import globals
     from .polyzamboni import drawing
     from .polyzamboni import ui
     from .polyzamboni import operators
@@ -25,7 +25,7 @@ else:
 
 def register():
     # Init globals
-    pz_globals.init()
+    globals.init()
     # Properties first!
     properties.register()
     # Other stuff later
@@ -35,6 +35,8 @@ def register():
     bpy.app.handlers.depsgraph_update_post.append(callbacks.on_object_select)
 
 def unregister():
+    drawing.hide_all_drawings()
+    globals.remove_all_existing_cutgraph_ids()
     operators.unregister()
     ui.unregister()
     properties.unregister()
