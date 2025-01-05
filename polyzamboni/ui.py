@@ -19,6 +19,7 @@ class MainPanel(bpy.types.Panel):
         if CUTGRAPH_ID_PROPERTY_NAME not in context.active_object:
             layout.operator("wm.cut_initialization_op")
         else:
+            layout.operator("wm.cut_reset_op")
             # TODO unfolding UI
             pass
 

@@ -7,7 +7,7 @@ from . import globals
 from . import objective_functions
 from . import cutgraph
 import torch
-from .constants import CUTGRAPH_ID_PROPERTY_NAME
+from .constants import CUTGRAPH_ID_PROPERTY_NAME, CUT_CONSTRAINTS_PROP_NAME, LOCKED_EDGES_PROP_NAME
 
 class FlatteningOperator(bpy.types.Operator):
     bl_label = "Flatten Polygons"
@@ -117,11 +117,28 @@ class InitializeCuttingOperator(bpy.types.Operator):
 
         return is_mesh and CUTGRAPH_ID_PROPERTY_NAME not in active_object
 
-    def draw(self, context: Context):
-        pass
+class ResetAllCutsOperator(bpy.types.Operator):
+    """Restart the unfolding process for this mesh"""
+    bl_label = "Reset Unfolding"
+    bl_idname  = "wm.cut_reset_op"
+    
+    def execute(self, context):
+        # get the currently selected object
+        ao = bpy.context.active_object
+        ao[CUT_CONSTRAINTS_PROP_NAME] = []
+        ao[LOCKED_EDGES_PROP_NAME] = []
+        new_cutgraph = cutgraph.CutGraph(ao)
+        globals.reset_cutgraph(ao, new_cutgraph)
+        update_all_polyzamboni_drawings(None, context)
+        return { 'FINISHED' }
 
-    def cancel(self, context: Context):
-        pass
+    @classmethod
+    def poll(cls, context):
+        active_object = context.active_object
+        is_mesh = active_object is not None and active_object.type == 'MESH' and (context.mode == 'EDIT_MESH' or active_object.select_get())
+
+        return is_mesh and CUTGRAPH_ID_PROPERTY_NAME in active_object
+
 
 class ZamboniDesignOperator(bpy.types.Operator):
     """Add or remove cuts"""
@@ -141,9 +158,15 @@ class ZamboniDesignOperator(bpy.types.Operator):
     )
 
     def execute(self, context):
-
-        ao_mesh = context.active_object.data
+        ao = context.active_object
+        ao_mesh = ao.data
         ao_bmesh = bmesh.from_edit_mesh(ao_mesh)
+        active_cutgraph_index = ao[CUTGRAPH_ID_PROPERTY_NAME]
+        if active_cutgraph_index < len(globals.PZ_CUTGRAPHS):
+            active_cutgraph : cutgraph.CutGraph = globals.PZ_CUTGRAPHS[active_cutgraph_index]
+        else:
+            print("huch?!")
+            print("cutgraph", active_cutgraph_index, "not in", globals.PZ_CUTGRAPHS)
 
         selected_verts = [v.index for v in ao_bmesh.verts if v.select] 
         selected_edges = [e.index for e in ao_bmesh.edges if e.select] 
@@ -154,21 +177,26 @@ class ZamboniDesignOperator(bpy.types.Operator):
         print("selected faces are:", selected_faces)
 
         if self.design_actions == "ADD_CUT":
-            print("Adding a cut")
+            for e_index in selected_edges:
+                active_cutgraph.add_cut_constraint(e_index)
         elif self.design_actions == "GLUE_EDGE":
-            print("Glueing an edge")
+            for e_index in selected_edges:
+                active_cutgraph.add_lock_constraint(e_index)
         elif self.design_actions == "RESET_EDGE":
-            print("Resetting edge")
+            for e_index in selected_edges:  
+                active_cutgraph.clear_edge_constraint(e_index)
         elif self.design_actions == "REGION_CUTOUT":
             print("Cutting out a region")
 
+        update_all_polyzamboni_drawings(None, context)
+                
         return {"FINISHED"}
 
     @classmethod
     def poll(cls, context):
         active_object = context.active_object
         is_mesh = active_object is not None and active_object.type == 'MESH' 
-        return is_mesh and context.mode == 'EDIT_MESH'
+        return is_mesh and context.mode == 'EDIT_MESH' and CUTGRAPH_ID_PROPERTY_NAME in active_object
 
 class ZamboniDesignPieMenu(bpy.types.Menu):
     """This is a custom pie menu for all Zamboni design operators"""
@@ -188,6 +216,7 @@ def register():
     bpy.utils.register_class(InitializeCuttingOperator)
     bpy.utils.register_class(ZamboniDesignOperator)
     bpy.utils.register_class(ZamboniDesignPieMenu)
+    bpy.utils.register_class(ResetAllCutsOperator)
 
     windowmanager = bpy.context.window_manager
     if windowmanager.keyconfigs.addon:
@@ -203,6 +232,7 @@ def unregister():
     bpy.utils.unregister_class(InitializeCuttingOperator)
     bpy.utils.unregister_class(ZamboniDesignOperator)
     bpy.utils.unregister_class(ZamboniDesignPieMenu)
+    bpy.utils.unregister_class(ResetAllCutsOperator)
 
     for keymap, keymap_item in polyzamboni_keymaps:
         keymap.keymap_items.remove(keymap_item)

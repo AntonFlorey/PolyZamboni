@@ -24,6 +24,7 @@ else:
     from .polyzamboni import callbacks
 
 def register():
+    print("register called!")
     # Init globals
     globals.init()
     # Properties first!
@@ -33,10 +34,12 @@ def register():
     ui.register()
     bpy.app.handlers.load_post.append(callbacks.on_file_load)
     bpy.app.handlers.depsgraph_update_post.append(callbacks.on_object_select)
+    bpy.app.handlers.save_pre.append(callbacks.save_all_edge_constraints)
 
 def unregister():
-    drawing.hide_all_drawings()
+    print("unregister called!")
     globals.remove_all_existing_cutgraph_ids()
+    drawing.hide_all_drawings()
     operators.unregister()
     ui.unregister()
     properties.unregister()
@@ -44,6 +47,8 @@ def unregister():
         bpy.app.handlers.load_post.remove(callbacks.on_file_load)
     if callbacks.on_object_select in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.remove(callbacks.on_object_select)
+    if callbacks.save_all_edge_constraints in bpy.app.handlers.save_pre:
+        bpy.app.handlers.save_pre.remove(callbacks.save_all_edge_constraints)
 
 if __name__ == "__main__":
     register()

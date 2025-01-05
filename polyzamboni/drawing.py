@@ -57,7 +57,6 @@ class ColorGenerator():
 
 def deactivate_draw_callback(callback_handle, region_type='WINDOW'):
     if callback_handle is not None:
-        print("removing callback handle:", callback_handle)
         bpy.types.SpaceView3D.draw_handler_remove(callback_handle, region_type)
 
 def lines_draw_callback(line_array, color, width=3.0):
@@ -164,6 +163,7 @@ def show_region_quality_triangles(vertex_positions, regions_by_quality):
 
 def hide_all_drawings():
     hide_user_provided_cuts()
+    hide_locked_edges()
     hide_auto_completed_cuts()
     hide_region_quality_triangles()
 
@@ -179,7 +179,7 @@ def update_all_polyzamboni_drawings(self, context):
     hide_all_drawings()
 
     # draw user provided cuts
-    if not draw_settings.drawing_enabled:
+    if not draw_settings.drawing_enabled and globals.PZ_CURRENT_CUTGRAPH_ID is not None:
         return
     
     # obtain current cutgraph to draw
@@ -195,8 +195,12 @@ def update_all_polyzamboni_drawings(self, context):
     if draw_settings.color_faces_by_quality:
         # TODO Draw face quality
         pass
-    
-    print("TODO: Update all drawings :)")
+
+    # Trigger a redraw of all screen areas
+        for area in bpy.context.screen.areas:
+            if area.type == 'VIEW_3D':
+                area.tag_redraw()
+
 
 def draw_errors():
     print("drawing not implemented yet")

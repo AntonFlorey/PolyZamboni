@@ -23,7 +23,7 @@ class CutGraph():
                 self.designer_constraints[edge_index] = "cut"
         if LOCKED_EDGES_PROP_NAME in ao:
             for edge_index in ao[LOCKED_EDGES_PROP_NAME]:
-                self.designer_constraints[edge_index] = "locked"
+                self.designer_constraints[edge_index] = "glued"
 
         for face in self.mesh.faces:
             self.dualgraph.add_node(face.index)
@@ -48,8 +48,18 @@ class CutGraph():
             cut_coordinates.append(self.world_matrix @ vert2.co)
         return cut_coordinates
 
+    def add_cut_constraint(self, cut_edge_id):
+        self.designer_constraints[cut_edge_id] = "cut"
+
+    def add_lock_constraint(self, locked_edge_id):
+        self.designer_constraints[locked_edge_id] = "glued"
+
+    def clear_edge_constraint(self, edge_id):
+        if edge_id in self.designer_constraints.keys():
+            del self.designer_constraints[edge_id]
+
     def get_manual_cuts_list(self):
         return [edge_index for edge_index in self.designer_constraints if self.designer_constraints[edge_index] == "cut"]
     
     def get_locked_edges_list(self):
-        return [edge_index for edge_index in self.designer_constraints if self.designer_constraints[edge_index] == "locked"]
+        return [edge_index for edge_index in self.designer_constraints if self.designer_constraints[edge_index] == "glued"]
