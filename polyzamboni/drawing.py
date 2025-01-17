@@ -1,9 +1,11 @@
 import bpy
 import gpu
 import bgl
+import numpy as np
 from gpu_extras.batch import batch_for_shader
 from . import globals
 from . import cutgraph
+from .constants import PERFECT_REGION, BAD_GLUE_FLAPS_REGION, OVERLAPPING_REGION, NOT_FOLDABLE_REGION
 
 # colors
 BLUE = (  0 / 255,  84 / 255, 159 / 255, 1.0)
@@ -51,6 +53,27 @@ class ColorGenerator():
         self.index = (self.index + 1) % len(self.colors)
         return col
     
+def make_dotted_lines(line_array, target_line_length, max_segments = 100):
+    if target_line_length <= 0:
+        return line_array
+    dotted_lines_array = []
+    line_index = 0
+    while line_index < len(line_array):
+        v_from = np.asarray(line_array[line_index])
+        v_to = np.asarray(line_array[line_index + 1])
+
+        line_len = np.linalg.norm(v_from - v_to)
+        segments = min(int(line_len / target_line_length), max_segments)
+        
+        total_segments = 2 * segments + 1
+        for segment_i in range(1, total_segments, 2):
+            t_from = segment_i / total_segments
+            t_to = (segment_i + 1) / total_segments
+            dotted_lines_array.append((1.0 - t_from) * v_from + t_from * v_to)
+            dotted_lines_array.append((1.0 - t_to) * v_from + t_to * v_to)
+        line_index += 2
+    return dotted_lines_array
+
 #################################
 #     General Draw Callbacks    #
 #################################
@@ -72,7 +95,7 @@ def lines_draw_callback(line_array, color, width=3.0):
     gpu.state.line_width_set(1.0)
 
 def triangles_draw_callback(vertex_positions, triangle_indices, color):
-    shader = gpu.shader.from_builtin('3D_UNIFORM_COLOR')
+    shader = gpu.shader.from_builtin('UNIFORM_COLOR')
     gpu.state.face_culling_set("BACK")
     gpu.state.depth_test_set('LESS_EQUAL')
     gpu.state.depth_mask_set(True)
@@ -92,11 +115,12 @@ def hide_user_provided_cuts():
     deactivate_draw_callback(_drawing_handle_user_provided_cuts)
     _drawing_handle_user_provided_cuts = None
 
-def show_user_provided_cuts(cuts_as_line_array):
+def show_user_provided_cuts(cuts_as_line_array, dotted_line_length = 0.1):
     hide_user_provided_cuts()
     global _drawing_handle_user_provided_cuts
     user_cuts_color = RED
-    _drawing_handle_user_provided_cuts = bpy.types.SpaceView3D.draw_handler_add(lines_draw_callback, (cuts_as_line_array, user_cuts_color), "WINDOW", "POST_VIEW")
+    dotted_cuts = make_dotted_lines(cuts_as_line_array, dotted_line_length)
+    _drawing_handle_user_provided_cuts = bpy.types.SpaceView3D.draw_handler_add(lines_draw_callback, (dotted_cuts, user_cuts_color), "WINDOW", "POST_VIEW")
 
 #################################
 #         Locked Edges          #
@@ -107,11 +131,12 @@ def hide_locked_edges():
     deactivate_draw_callback(_drawing_handle_locked_edges)
     _drawing_handle_locked_edges = None
 
-def show_locked_edges(cuts_as_line_array):
+def show_locked_edges(cuts_as_line_array, dotted_line_length = 0.1):
     hide_locked_edges()
     global _drawing_handle_locked_edges
     locked_edges_color = GREEN
-    _drawing_handle_locked_edges = bpy.types.SpaceView3D.draw_handler_add(lines_draw_callback, (cuts_as_line_array, locked_edges_color), "WINDOW", "POST_VIEW")
+    dotted_cuts = make_dotted_lines(cuts_as_line_array, dotted_line_length)
+    _drawing_handle_locked_edges = bpy.types.SpaceView3D.draw_handler_add(lines_draw_callback, (dotted_cuts, locked_edges_color), "WINDOW", "POST_VIEW")
 
 #################################
 #           Auto Cuts           #
@@ -133,10 +158,10 @@ def show_auto_completed_cuts(cuts_as_line_array):
 #################################
 
 quality_color_mapping = {
-    "perfect" : GREEN,
-    "bad flaps" : YELLOW,
-    "foldovers" : ORANGE,
-    "not foldable" : RED
+    PERFECT_REGION : GREEN,
+    BAD_GLUE_FLAPS_REGION : YELLOW,
+    OVERLAPPING_REGION : ORANGE,
+    NOT_FOLDABLE_REGION : RED
 }
 
 def hide_region_quality_triangles():
@@ -179,27 +204,27 @@ def update_all_polyzamboni_drawings(self, context):
     hide_all_drawings()
 
     # draw user provided cuts
-    if not draw_settings.drawing_enabled and globals.PZ_CURRENT_CUTGRAPH_ID is not None:
+    if not draw_settings.drawing_enabled or globals.PZ_CURRENT_CUTGRAPH_ID is None:
         return
     
     # obtain current cutgraph to draw
     cutgraph_to_draw : cutgraph.CutGraph = globals.PZ_CUTGRAPHS[globals.PZ_CURRENT_CUTGRAPH_ID]
 
     # draw user provided cuts
-    show_user_provided_cuts(cutgraph_to_draw.mesh_edge_id_list_to_coordinate_list(cutgraph_to_draw.get_manual_cuts_list()))
+    show_user_provided_cuts(cutgraph_to_draw.mesh_edge_id_list_to_coordinate_list(cutgraph_to_draw.get_manual_cuts_list(), draw_settings.normal_offset), dotted_line_length=draw_settings.dotted_line_length)
+    show_locked_edges(cutgraph_to_draw.mesh_edge_id_list_to_coordinate_list(cutgraph_to_draw.get_locked_edges_list(), draw_settings.normal_offset), dotted_line_length=draw_settings.dotted_line_length)
 
     if draw_settings.show_auto_completed_cuts:
-        show_locked_edges(cutgraph_to_draw.mesh_edge_id_list_to_coordinate_list(cutgraph_to_draw.get_locked_edges_list()))
         pass
 
     if draw_settings.color_faces_by_quality:
-        # TODO Draw face quality
-        pass
+        all_v_positions, quality_dict = cutgraph_to_draw.get_triangle_list_per_cluster_quality(draw_settings.normal_offset)
+        show_region_quality_triangles(all_v_positions, quality_dict)
 
     # Trigger a redraw of all screen areas
-        for area in bpy.context.screen.areas:
-            if area.type == 'VIEW_3D':
-                area.tag_redraw()
+    for area in bpy.context.screen.areas:
+        if area.type == 'VIEW_3D':
+            area.tag_redraw()
 
 
 def draw_errors():

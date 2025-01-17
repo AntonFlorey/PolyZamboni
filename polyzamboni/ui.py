@@ -20,6 +20,7 @@ class MainPanel(bpy.types.Panel):
             layout.operator("wm.cut_initialization_op")
         else:
             layout.operator("wm.cut_reset_op")
+            layout.operator("wm.mesh_sync_op")
             # TODO unfolding UI
             pass
 
@@ -85,6 +86,10 @@ class DrawSettingsPanel(bpy.types.Panel):
         row.prop(drawing_settings, "show_auto_completed_cuts")
         row = layout.row()
         row.prop(drawing_settings, "color_faces_by_quality")
+        row = layout.row()
+        row.prop(drawing_settings, "dotted_line_length")
+        row = layout.row()
+        row.prop(drawing_settings, "normal_offset")
 
 class DebugPanel(bpy.types.Panel):
     bl_label = "Debug Info"

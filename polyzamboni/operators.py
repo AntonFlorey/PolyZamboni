@@ -132,6 +132,9 @@ class ResetAllCutsOperator(bpy.types.Operator):
         update_all_polyzamboni_drawings(None, context)
         return { 'FINISHED' }
 
+    def invoke(self, context, event):
+        return context.window_manager.invoke_confirm(self, event, message="Sure? This will delete all cuts.", confirm_text="Reset")
+
     @classmethod
     def poll(cls, context):
         active_object = context.active_object
@@ -139,6 +142,25 @@ class ResetAllCutsOperator(bpy.types.Operator):
 
         return is_mesh and CUTGRAPH_ID_PROPERTY_NAME in active_object
 
+class SyncMeshOperator(bpy.types.Operator):
+    """Transfer mesh changes to the cutgraph to repair it"""
+    bl_label = "Sync Mesh Changes"
+    bl_idname = "wm.mesh_sync_op"
+
+    def execute(self, context):
+        ao = bpy.context.active_object
+        cutgraph = globals.PZ_CUTGRAPHS[ao[CUTGRAPH_ID_PROPERTY_NAME]]
+        cutgraph.construct_dual_graph_from_mesh(ao)
+        update_all_polyzamboni_drawings(None, context)
+        return { 'FINISHED' }
+    
+    @classmethod
+    def poll(cls, context):
+        active_object = context.active_object
+        is_mesh = active_object is not None and active_object.type == 'MESH'
+
+        return is_mesh and CUTGRAPH_ID_PROPERTY_NAME in active_object
+    
 
 class ZamboniDesignOperator(bpy.types.Operator):
     """Add or remove cuts"""
@@ -186,8 +208,10 @@ class ZamboniDesignOperator(bpy.types.Operator):
             for e_index in selected_edges:  
                 active_cutgraph.clear_edge_constraint(e_index)
         elif self.design_actions == "REGION_CUTOUT":
-            print("Cutting out a region")
-
+            active_cutgraph.add_cutout_region(selected_faces)
+        
+        active_cutgraph.compute_all_connected_components()
+        active_cutgraph.update_unfoldings_along_edges(selected_edges)
         update_all_polyzamboni_drawings(None, context)
                 
         return {"FINISHED"}
@@ -217,6 +241,7 @@ def register():
     bpy.utils.register_class(ZamboniDesignOperator)
     bpy.utils.register_class(ZamboniDesignPieMenu)
     bpy.utils.register_class(ResetAllCutsOperator)
+    bpy.utils.register_class(SyncMeshOperator)
 
     windowmanager = bpy.context.window_manager
     if windowmanager.keyconfigs.addon:
@@ -233,6 +258,7 @@ def unregister():
     bpy.utils.unregister_class(ZamboniDesignOperator)
     bpy.utils.unregister_class(ZamboniDesignPieMenu)
     bpy.utils.unregister_class(ResetAllCutsOperator)
+    bpy.utils.unregister_class(SyncMeshOperator)
 
     for keymap, keymap_item in polyzamboni_keymaps:
         keymap.keymap_items.remove(keymap_item)

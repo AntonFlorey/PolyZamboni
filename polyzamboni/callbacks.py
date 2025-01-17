@@ -30,7 +30,9 @@ def on_object_select(scene):
         hide_all_drawings()
         return
     if CUT_CONSTRAINTS_PROP_NAME not in active_object and LOCKED_EDGES_PROP_NAME not in active_object:
-        print("no preexisting cutgraph detected")
+        globals.PZ_CURRENT_CUTGRAPH_ID = None
+        hide_all_drawings()
+        #print("no preexisting cutgraph detected")
         return
     globals.PZ_LOCK_SELECT_CALLBACK = True
     # print("entering select callback lock")
@@ -44,8 +46,8 @@ def on_object_select(scene):
         # print("set a different cut graph as active:", active_object["cut_graph_id"])
         globals.PZ_CURRENT_CUTGRAPH_ID = active_object[CUTGRAPH_ID_PROPERTY_NAME]
         update_all_polyzamboni_drawings(None, bpy.context)
-    if in_edit_mode:
-        update_all_polyzamboni_drawings(None, bpy.context)
+    # if in_edit_mode:
+    #     update_all_polyzamboni_drawings(None, bpy.context)
     globals.PZ_LOCK_SELECT_CALLBACK = False
 
 @persistent

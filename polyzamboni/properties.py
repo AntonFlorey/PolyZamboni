@@ -65,6 +65,20 @@ class DrawSettings(bpy.types.PropertyGroup):
         default=True,
         update=update_all_polyzamboni_drawings
     )
+    dotted_line_length: FloatProperty(
+        name="Dotted line length",
+        default=0.1,
+        min=0,
+        max=10,
+        update=update_all_polyzamboni_drawings
+    )
+    normal_offset: FloatProperty(
+        name="Normal offset",
+        default=0.1,
+        min=0.01,
+        max=0.5,
+        update=update_all_polyzamboni_drawings
+    )
 
 class PrintSettings(bpy.types.PropertyGroup):
     target_model_height: FloatProperty(
