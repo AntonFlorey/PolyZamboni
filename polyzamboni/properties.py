@@ -79,6 +79,11 @@ class DrawSettings(bpy.types.PropertyGroup):
         max=0.5,
         update=update_all_polyzamboni_drawings
     )
+    show_glue_flaps: BoolProperty(
+        name="Show glue flaps",
+        default=True,
+        update=update_all_polyzamboni_drawings
+    )
 
 class PrintSettings(bpy.types.PropertyGroup):
     target_model_height: FloatProperty(
@@ -104,17 +109,30 @@ class PrintSettings(bpy.types.PropertyGroup):
         default=True
     )
 
-class ObjectTestProp(bpy.types.PropertyGroup):
-    some_test_number : IntProperty(
-        name="Test Int",
-        default=0,
-        min=0,
-        max=10
+class ZamboniSettingsPerObject(bpy.types.PropertyGroup):
+    glue_flap_height : FloatProperty(
+        name="Glue flap height",
+        description="Controls how far the glue flaps extend.",
+        default=1.0,
+        min=0.01
     )
-    def __init__(self):
-        super().__init__()
-        self.test_list = []
-
+    glue_flap_angle : FloatProperty(
+        name="Glue flap angle",
+        description="Determines the shape of all glue flaps.",
+        default=45,
+        min=10,
+        max=170
+    )
+    prefer_alternating_flaps : BoolProperty(
+        name="ZigZag Flaps",
+        description="If glue flaps should alternate along a patch boundary.",
+        default=True
+    )
+    apply_auto_cuts_to_previev : BoolProperty(
+        name="Auto cuts preview",
+        description="If set to True, all automatically generated cuts will be condidered when showing a preview of the mesh unfolding.",
+        default=False
+    )
 
 print("registering polyzamboni properties")
 
@@ -124,18 +142,18 @@ def register():
     bpy.utils.register_class(FlatteningSettings)
     bpy.utils.register_class(DrawSettings)
     bpy.utils.register_class(PrintSettings)
-    bpy.utils.register_class(ObjectTestProp)
+    bpy.utils.register_class(ZamboniSettingsPerObject)
     Scene.polyzamboni_flattening_settings = bpy.props.PointerProperty(type=FlatteningSettings)
     Scene.polyzamboni_drawing_settings = bpy.props.PointerProperty(type=DrawSettings)
     Scene.polyzamboni_print_settings = bpy.props.PointerProperty(type=PrintSettings)
-    bpy.types.Object.polyzamboni_test_prop = bpy.props.PointerProperty(type=ObjectTestProp)
+    bpy.types.Object.polyzamboni_object_prop = bpy.props.PointerProperty(type=ZamboniSettingsPerObject)
 
 def unregister():
     bpy.utils.unregister_class(FlatteningSettings)
     bpy.utils.unregister_class(DrawSettings)
     bpy.utils.unregister_class(PrintSettings)
-    bpy.utils.unregister_class(ObjectTestProp)
+    bpy.utils.unregister_class(ZamboniSettingsPerObject)
     del Scene.polyzamboni_flattening_settings
     del Scene.polyzamboni_drawing_settings
     del Scene.polyzamboni_print_settings
-    del bpy.types.Object.polyzamboni_test_prop
+    del bpy.types.Object.polyzamboni_object_prop

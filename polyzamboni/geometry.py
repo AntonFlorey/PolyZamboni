@@ -107,7 +107,7 @@ def draw_polygon(ax, vertices, number):
     
     ax.text(center_x, center_y, str(number), color='black', ha='center', va='center', fontsize=8)
 
-def debug_draw_polygons_2d(polygons_2d):
+def debug_draw_polygons_2d(polygons_2d, filename):
     fig, ax = plt.subplots()
 
     min_x = min([min([p[0] for p in polygon]) for polygon in polygons_2d])
@@ -124,11 +124,12 @@ def debug_draw_polygons_2d(polygons_2d):
     for i, polygon in enumerate(polygons_2d):
         draw_polygon(ax, polygon, i)
 
+    plt.axis('equal')
     plt.xlabel('X-Achse')
     plt.ylabel('Y-Achse')
     plt.title('Unfolded Polygons')
     plt.grid(False)
-    plt.savefig("debug-unfolding.png")
+    plt.savefig(filename)
     plt.close(fig)
 
 def compute_bb_diameter(mesh : bmesh.types.BMesh):

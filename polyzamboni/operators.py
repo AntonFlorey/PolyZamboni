@@ -149,18 +149,43 @@ class SyncMeshOperator(bpy.types.Operator):
 
     def execute(self, context):
         ao = bpy.context.active_object
-        cutgraph = globals.PZ_CUTGRAPHS[ao[CUTGRAPH_ID_PROPERTY_NAME]]
-        cutgraph.construct_dual_graph_from_mesh(ao)
+        curr_cutgraph : cutgraph.CutGraph = globals.PZ_CUTGRAPHS[ao[CUTGRAPH_ID_PROPERTY_NAME]]
+        curr_cutgraph.construct_dual_graph_from_mesh(ao)
+        curr_cutgraph.unfold_all_connected_components()
+        curr_cutgraph.greedy_place_all_flaps()
         update_all_polyzamboni_drawings(None, context)
         return { 'FINISHED' }
     
     @classmethod
     def poll(cls, context):
         active_object = context.active_object
-        is_mesh = active_object is not None and active_object.type == 'MESH'
+        is_mesh = active_object is not None and active_object.type == 'MESH' and (context.mode == 'EDIT_MESH' or active_object.select_get())
 
         return is_mesh and CUTGRAPH_ID_PROPERTY_NAME in active_object
+
+class RecomputeFlapsOperator(bpy.types.Operator):
+    """ Applies the current flap settings and recomputes all glue flaps """
+    bl_label = "Recompute Flaps"
+    bl_idname = "wm.flaps_recompute_op"
+
+    def execute(self, context):
+        ao = bpy.context.active_object
+        ao_zamboni_settings = ao.polyzamboni_object_prop
+        curr_cutgraph : cutgraph.CutGraph = globals.PZ_CUTGRAPHS[ao[CUTGRAPH_ID_PROPERTY_NAME]]
+        curr_cutgraph.flap_height = ao_zamboni_settings.glue_flap_height
+        curr_cutgraph.flap_angle =  np.deg2rad(ao_zamboni_settings.glue_flap_angle)
+        curr_cutgraph.prefer_zigzag = ao_zamboni_settings.prefer_alternating_flaps
+        curr_cutgraph.greedy_place_all_flaps() # recompute flaps
+        update_all_polyzamboni_drawings(None, context)
+        return { 'FINISHED' }
     
+    @classmethod
+    def poll(cls, context):
+        active_object = context.active_object
+        is_mesh = active_object is not None and active_object.type == 'MESH' and (context.mode == 'EDIT_MESH' or active_object.select_get())
+
+        return is_mesh and CUTGRAPH_ID_PROPERTY_NAME in active_object
+
 
 class ZamboniDesignOperator(bpy.types.Operator):
     """Add or remove cuts"""
@@ -212,8 +237,9 @@ class ZamboniDesignOperator(bpy.types.Operator):
         
         active_cutgraph.compute_all_connected_components()
         active_cutgraph.update_unfoldings_along_edges(selected_edges)
+        active_cutgraph.greedy_update_flaps_around_changed_components(selected_edges)
         update_all_polyzamboni_drawings(None, context)
-                
+
         return {"FINISHED"}
 
     @classmethod
@@ -242,6 +268,7 @@ def register():
     bpy.utils.register_class(ZamboniDesignPieMenu)
     bpy.utils.register_class(ResetAllCutsOperator)
     bpy.utils.register_class(SyncMeshOperator)
+    bpy.utils.register_class(RecomputeFlapsOperator)
 
     windowmanager = bpy.context.window_manager
     if windowmanager.keyconfigs.addon:
@@ -259,6 +286,7 @@ def unregister():
     bpy.utils.unregister_class(ZamboniDesignPieMenu)
     bpy.utils.unregister_class(ResetAllCutsOperator)
     bpy.utils.unregister_class(SyncMeshOperator)
+    bpy.utils.unregister_class(RecomputeFlapsOperator)
 
     for keymap, keymap_item in polyzamboni_keymaps:
         keymap.keymap_items.remove(keymap_item)

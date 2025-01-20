@@ -21,7 +21,48 @@ class MainPanel(bpy.types.Panel):
         else:
             layout.operator("wm.cut_reset_op")
             layout.operator("wm.mesh_sync_op")
-            # TODO unfolding UI
+            
+            ao = context.active_object
+            zamboni_object_settings = ao.polyzamboni_object_prop
+            row = layout.row()
+            col1 = row.column()
+            col2 = row.column()
+            col1.prop(zamboni_object_settings, "apply_auto_cuts_to_previev", toggle=1)
+            col2.label(icon="LIGHT_DATA")
+            pass
+
+class GlueFlapSettingsPanel(bpy.types.Panel):
+    bl_label = "Glue Flap Settings"
+    bl_idname  = "POLYZAMBONI_PT_GlueFlapSettingsPanel"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = "PolyZamboni"
+    bl_parent_id = "POLYZAMBONI_PT_MainPanel"
+
+    def draw(self, context : bpy.types.Context):
+        layout = self.layout
+        if CUTGRAPH_ID_PROPERTY_NAME not in context.active_object:
+            layout.label(text="No Cutgraph selected", icon="GHOST_DISABLED")
+        else:
+            ao = context.active_object
+            zamboni_object_settings = ao.polyzamboni_object_prop
+            row = layout.row()
+            row.operator("wm.flaps_recompute_op")
+            row = layout.row()
+            col1 = row.column()
+            col2 = row.column()
+            col1.prop(zamboni_object_settings, "glue_flap_height", icon="DRIVER_DISTANCE")
+            col2.label(icon="DRIVER_DISTANCE")
+            row = layout.row()
+            col1 = row.column()
+            col2 = row.column()
+            col1.prop(zamboni_object_settings, "glue_flap_angle", icon="DRIVER_ROTATIONAL_DIFFERENCE")
+            col2.label(icon="DRIVER_ROTATIONAL_DIFFERENCE")
+            row = layout.row()
+            col1 = row.column()
+            col2 = row.column()
+            col1.prop(zamboni_object_settings, "prefer_alternating_flaps", toggle=1)
+            col2.label(icon="RIGID_BODY")
             pass
 
 class FlatteningSettingsPanel(bpy.types.Panel):
@@ -85,6 +126,8 @@ class DrawSettingsPanel(bpy.types.Panel):
         row = layout.row()
         row.prop(drawing_settings, "show_auto_completed_cuts")
         row = layout.row()
+        row.prop(drawing_settings, "show_glue_flaps")
+        row = layout.row()
         row.prop(drawing_settings, "color_faces_by_quality")
         row = layout.row()
         row.prop(drawing_settings, "dotted_line_length")
@@ -104,13 +147,9 @@ class DebugPanel(bpy.types.Panel):
         scene = context.scene
         layout.operator("wm.planarity_printer")
 
-        test_prop = context.active_object.polyzamboni_test_prop
-
-        row = layout.row()
-        row.prop(test_prop, "some_test_number")
-
 def register():
     bpy.utils.register_class(MainPanel)
+    bpy.utils.register_class(GlueFlapSettingsPanel)
     bpy.utils.register_class(FlatteningSettingsPanel)
     bpy.utils.register_class(PrintSettingsPanel)
     bpy.utils.register_class(DrawSettingsPanel)
@@ -118,6 +157,7 @@ def register():
 
 def unregister():
     bpy.utils.unregister_class(MainPanel)
+    bpy.utils.unregister_class(GlueFlapSettingsPanel)
     bpy.utils.unregister_class(FlatteningSettingsPanel)
     bpy.utils.unregister_class(PrintSettingsPanel)
     bpy.utils.unregister_class(DrawSettingsPanel)
