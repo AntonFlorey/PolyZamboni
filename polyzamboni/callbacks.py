@@ -4,11 +4,14 @@ from .drawing import update_all_polyzamboni_drawings, hide_all_drawings
 from . import cutgraph
 from bpy.app.handlers import persistent
 from .constants import LOCKED_EDGES_PROP_NAME, CUT_CONSTRAINTS_PROP_NAME, CUTGRAPH_ID_PROPERTY_NAME
+import numpy as np
 
 @persistent
 def on_file_load(dummy):
+    print("PolyZamboni is cleaning up after herself...")
     globals.reset_file_dependent_globals()
     globals.remove_all_existing_cutgraph_ids()
+    print("Done.")
 
 @persistent
 def on_object_select(scene):
@@ -38,7 +41,10 @@ def on_object_select(scene):
     # print("entering select callback lock")
     if CUTGRAPH_ID_PROPERTY_NAME not in active_object:
         # print("initializing cutgraph from existing cuts")
-        loaded_cutgraph = cutgraph.CutGraph(active_object)
+        loaded_cutgraph = cutgraph.CutGraph(active_object, 
+                                            np.deg2rad(active_object.polyzamboni_object_prop.glue_flap_angle),
+                                            active_object.polyzamboni_object_prop.glue_flap_height,
+                                            active_object.polyzamboni_object_prop.prefer_alternating_flaps)
         globals.add_cutgraph(active_object, loaded_cutgraph)
         # print("We now have", len(pz_globals.PZ_CUTGRAPHS), "cutgraphs")
     

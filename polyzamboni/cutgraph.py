@@ -5,7 +5,7 @@ import networkx as nx
 import random
 import mathutils
 from .geometry import triangulate_3d_polygon, solve_for_weird_point
-from .constants import LOCKED_EDGES_PROP_NAME, CUT_CONSTRAINTS_PROP_NAME, PERFECT_REGION, BAD_GLUE_FLAPS_REGION, OVERLAPPING_REGION, NOT_FOLDABLE_REGION
+from .constants import LOCKED_EDGES_PROP_NAME, CUT_CONSTRAINTS_PROP_NAME, PERFECT_REGION, BAD_GLUE_FLAPS_REGION, OVERLAPPING_REGION, NOT_FOLDABLE_REGION, GLUE_FLAP_NO_OVERLAPS, GLUE_FLAP_WITH_OVERLAPS, GLUE_FLAP_TO_LARGE
 from .unfolding import Unfolding
 from collections import deque
 
@@ -28,7 +28,7 @@ class CutGraph():
         self.compute_all_connected_components()
         self.unfold_all_connected_components()
         self.greedy_place_all_flaps()
-        
+
         print("Generated a dual graph with", self.dualgraph.number_of_nodes(), "nodes and", self.dualgraph.number_of_edges(), "edges.")
 
     #################################
@@ -105,7 +105,7 @@ class CutGraph():
             return False
         return True
 
-    def ensure_all_faces_have_components_and_unfoldings(self):
+    def assert_all_faces_have_components_and_unfoldings(self):
         for f in self.dualgraph.nodes:
             assert f in self.vertex_to_component_dict.keys()
             c_id = self.vertex_to_component_dict[f]
@@ -158,7 +158,7 @@ class CutGraph():
         for c_id, component in self.components_as_sets.items():
             self.unfolded_components[c_id] = old_unfolded_components[old_vertex_to_component_dict[list(component)[0]]]
         # do a sanity check
-        self.ensure_all_faces_have_components_and_unfoldings()
+        self.assert_all_faces_have_components_and_unfoldings()
 
     #################################
     #           Unfolding           #
@@ -215,8 +215,6 @@ class CutGraph():
             assert len(linked_face_ids) == 2 # manifold mesh please!
             for f_id in linked_face_ids:
                 components_to_update.add(self.vertex_to_component_dict[f_id])
-
-        print("updating unfolding of components:", components_to_update)
 
         for c_id in components_to_update:
             self.unfolded_components[c_id] = self.unfold_connected_component(c_id)
@@ -319,6 +317,42 @@ class CutGraph():
             quality_dict[PERFECT_REGION] += triangles
         return all_v_positions, quality_dict
 
+    def get_lines_array_per_glue_flap_quality(self, face_offset):
+        if not self.check_validity():
+            return {} # draw nothing but at least no crash
+        self.assert_all_faces_have_components_and_unfoldings()
+        self.ensure_halfedge_to_edge_table()
+        self.ensure_halfedge_to_face_table()
+        self.mesh.edges.ensure_lookup_table()
+        quality_dict = {
+            GLUE_FLAP_NO_OVERLAPS : [],
+            GLUE_FLAP_WITH_OVERLAPS : [],
+            GLUE_FLAP_TO_LARGE : []
+            }
+        for edge_index, halfedge in self.glue_flaps.items():
+            opp_halfedge = (halfedge[1], halfedge[0])
+            opp_face : bmesh.types.BMFace = self.halfedge_to_face[opp_halfedge]
+            opp_unfolding : Unfolding = self.unfolded_components[self.vertex_to_component_dict[opp_face.index]]
+            if opp_unfolding is None:
+                continue
+            flap_triangles_3d = opp_unfolding.compute_3d_glue_flap_triangles_inside_face(opp_face.index, self.halfedge_to_edge[halfedge], self.flap_angle, self.flap_height)
+            flap_line_array = []
+            if len(flap_triangles_3d) == 1:
+                tri = flap_triangles_3d[0]
+                flap_line_array = [tri[0], tri[1], tri[1], tri[2]]
+            else:
+                tri_0 = flap_triangles_3d[0]
+                tri_1 = flap_triangles_3d[1]
+                flap_line_array = [tri_0[0], tri_0[1], tri_0[1], tri_0[2], tri_1[0], tri_1[1]]
+            # apply offset
+            flap_line_array = [self.world_matrix @ (mathutils.Vector(v) + face_offset * opp_face.normal) for v in flap_line_array]
+            if opp_unfolding.flap_is_overlapping(self.mesh.edges[edge_index]):
+                quality_dict[GLUE_FLAP_WITH_OVERLAPS] += flap_line_array
+                continue
+            # TODO Flaps that are to large... maybe not needed
+            quality_dict[GLUE_FLAP_NO_OVERLAPS] += flap_line_array
+        return quality_dict
+
     #################################
     #           Glue Flaps          #
     #################################
@@ -362,7 +396,7 @@ class CutGraph():
 
         self.ensure_halfedge_to_edge_table()
         self.ensure_halfedge_to_face_table()
-        self.ensure_all_faces_have_components_and_unfoldings()
+        self.assert_all_faces_have_components_and_unfoldings()
         self.glue_flaps = {}
         # clear all flap info stored in the unfoldings
         for unfolding in self.unfolded_components.values():
@@ -443,12 +477,10 @@ class CutGraph():
 
         self.ensure_halfedge_to_edge_table()
         self.ensure_halfedge_to_face_table()
-        self.ensure_all_faces_have_components_and_unfoldings()
+        self.assert_all_faces_have_components_and_unfoldings()
 
         # build dfs tree of cut edges
         processed_edges = set()
-        print("changed components:", updated_components)
-        print("number of interesting edges:", len(all_interesting_edge_ids))
         for edge_id in all_interesting_edge_ids:
             edge = self.mesh.edges[edge_id]
 
@@ -510,6 +542,23 @@ class CutGraph():
                         continue
                     dfs_stack.append((v1, nb_v, curr_flap_01))
 
+    def update_all_flap_geometry(self):
+        """ This mehthod only changes flap geometry but not the flap placement """
+        self.ensure_halfedge_to_edge_table()
+        self.ensure_halfedge_to_face_table()
+        self.mesh.edges.ensure_lookup_table()
+        self.assert_all_faces_have_components_and_unfoldings()
+        # clear all flap info stored in the unfoldings
+        for unfolding in self.unfolded_components.values():
+            if unfolding is not None:
+                unfolding.remove_all_flap_info()
+
+        for edge_id, halfedge in self.glue_flaps.items():
+            face : bmesh.types.BMFace = self.halfedge_to_face[halfedge]
+            unfolding : Unfolding = self.unfolded_components[self.vertex_to_component_dict[face.index]]
+            new_geometry = unfolding.compute_2d_glue_flap_triangles(face.index, self.mesh.edges[edge_id], self.flap_angle, self.flap_height)
+            unfolding.add_glue_flap_to_face_edge(face.index, self.mesh.edges[edge_id], new_geometry)
+        
     #################################
     #  User Constraints Interface   #
     #################################
@@ -541,6 +590,18 @@ class CutGraph():
                 self.designer_constraints[e_id] = "cut"
             else:
                 self.designer_constraints[e_id] = "glued"
+
+    def add_cuts_between_different_materials(self):
+        edges_cut = []
+        for mesh_edge in self.mesh.edges:
+            if mesh_edge.is_boundary:
+                continue
+            face_0 = mesh_edge.link_faces[0]
+            face_1 = mesh_edge.link_faces[1]
+            if face_0.material_index != face_1.material_index:
+                self.add_cut_constraint(mesh_edge.index)
+                edges_cut.append(mesh_edge.index)
+        return edges_cut
 
     def get_manual_cuts_list(self):
         return [edge_index for edge_index in self.designer_constraints if self.designer_constraints[edge_index] == "cut"]

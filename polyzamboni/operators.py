@@ -106,7 +106,8 @@ class InitializeCuttingOperator(bpy.types.Operator):
     def execute(self, context):
         # get the currently selected object
         ao = bpy.context.active_object
-        new_cutgraph = cutgraph.CutGraph(ao)
+        ao_pz_settings = ao.polyzamboni_object_prop
+        new_cutgraph = cutgraph.CutGraph(ao, np.deg2rad(ao_pz_settings.glue_flap_angle), ao_pz_settings.glue_flap_height, ao_pz_settings.prefer_alternating_flaps)
         globals.add_cutgraph(ao, new_cutgraph)
         return { 'FINISHED' }
 
@@ -127,7 +128,8 @@ class ResetAllCutsOperator(bpy.types.Operator):
         ao = bpy.context.active_object
         ao[CUT_CONSTRAINTS_PROP_NAME] = []
         ao[LOCKED_EDGES_PROP_NAME] = []
-        new_cutgraph = cutgraph.CutGraph(ao)
+        ao_pz_settings = ao.polyzamboni_object_prop
+        new_cutgraph = cutgraph.CutGraph(ao, np.deg2rad(ao_pz_settings.glue_flap_angle), ao_pz_settings.glue_flap_height, ao_pz_settings.prefer_alternating_flaps)
         globals.reset_cutgraph(ao, new_cutgraph)
         update_all_polyzamboni_drawings(None, context)
         return { 'FINISHED' }
@@ -152,7 +154,29 @@ class SyncMeshOperator(bpy.types.Operator):
         curr_cutgraph : cutgraph.CutGraph = globals.PZ_CUTGRAPHS[ao[CUTGRAPH_ID_PROPERTY_NAME]]
         curr_cutgraph.construct_dual_graph_from_mesh(ao)
         curr_cutgraph.unfold_all_connected_components()
-        curr_cutgraph.greedy_place_all_flaps()
+        curr_cutgraph.update_all_flap_geometry()
+        update_all_polyzamboni_drawings(None, context)
+        return { 'FINISHED' }
+    
+    @classmethod
+    def poll(cls, context):
+        active_object = context.active_object
+        is_mesh = active_object is not None and active_object.type == 'MESH' and (context.mode == 'EDIT_MESH' or active_object.select_get())
+
+        return is_mesh and CUTGRAPH_ID_PROPERTY_NAME in active_object
+
+class SeparateAllMaterialsOperator(bpy.types.Operator):
+    """ Adds cuts to all edges between faces with a different material. """
+    bl_label = "Separate Materials"
+    bl_idname = "wm.material_separation_op"
+
+    def execute(self, context):
+        ao = bpy.context.active_object
+        active_cutgraph : cutgraph.CutGraph = globals.PZ_CUTGRAPHS[ao[CUTGRAPH_ID_PROPERTY_NAME]]
+        selected_edges = active_cutgraph.add_cuts_between_different_materials()
+        active_cutgraph.compute_all_connected_components()
+        active_cutgraph.update_unfoldings_along_edges(selected_edges)
+        active_cutgraph.greedy_update_flaps_around_changed_components(selected_edges)
         update_all_polyzamboni_drawings(None, context)
         return { 'FINISHED' }
     
@@ -175,7 +199,10 @@ class RecomputeFlapsOperator(bpy.types.Operator):
         curr_cutgraph.flap_height = ao_zamboni_settings.glue_flap_height
         curr_cutgraph.flap_angle =  np.deg2rad(ao_zamboni_settings.glue_flap_angle)
         curr_cutgraph.prefer_zigzag = ao_zamboni_settings.prefer_alternating_flaps
-        curr_cutgraph.greedy_place_all_flaps() # recompute flaps
+        if ao_zamboni_settings.lock_glue_flaps:
+            curr_cutgraph.update_all_flap_geometry() # recompute flap geometry
+        else:
+            curr_cutgraph.greedy_place_all_flaps() # replace flaps
         update_all_polyzamboni_drawings(None, context)
         return { 'FINISHED' }
     
@@ -215,13 +242,7 @@ class ZamboniDesignOperator(bpy.types.Operator):
             print("huch?!")
             print("cutgraph", active_cutgraph_index, "not in", globals.PZ_CUTGRAPHS)
 
-        selected_verts = [v.index for v in ao_bmesh.verts if v.select] 
         selected_edges = [e.index for e in ao_bmesh.edges if e.select] 
-        selected_faces = [f.index for f in ao_bmesh.faces if f.select]
-
-        print("selected vertices are:", selected_verts)
-        print("selected edges are:", selected_edges)
-        print("selected faces are:", selected_faces)
 
         if self.design_actions == "ADD_CUT":
             for e_index in selected_edges:
@@ -233,6 +254,7 @@ class ZamboniDesignOperator(bpy.types.Operator):
             for e_index in selected_edges:  
                 active_cutgraph.clear_edge_constraint(e_index)
         elif self.design_actions == "REGION_CUTOUT":
+            selected_faces = [f.index for f in ao_bmesh.faces if f.select]
             active_cutgraph.add_cutout_region(selected_faces)
         
         active_cutgraph.compute_all_connected_components()
@@ -269,6 +291,7 @@ def register():
     bpy.utils.register_class(ResetAllCutsOperator)
     bpy.utils.register_class(SyncMeshOperator)
     bpy.utils.register_class(RecomputeFlapsOperator)
+    bpy.utils.register_class(SeparateAllMaterialsOperator)
 
     windowmanager = bpy.context.window_manager
     if windowmanager.keyconfigs.addon:
@@ -287,8 +310,8 @@ def unregister():
     bpy.utils.unregister_class(ResetAllCutsOperator)
     bpy.utils.unregister_class(SyncMeshOperator)
     bpy.utils.unregister_class(RecomputeFlapsOperator)
+    bpy.utils.unregister_class(SeparateAllMaterialsOperator)
 
     for keymap, keymap_item in polyzamboni_keymaps:
         keymap.keymap_items.remove(keymap_item)
     polyzamboni_keymaps.clear()
-

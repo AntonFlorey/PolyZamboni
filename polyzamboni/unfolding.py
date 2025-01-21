@@ -125,7 +125,7 @@ class Unfolding():
         in_local_coords = geometry.to_local_coords(point_on_face_3d, *self.local_2d_coord_system_per_face[face_index])
         return self.affine_transform_to_root_coord_system_per_face[face_index] * in_local_coords
     
-    def compute_2d_glue_flap_triangles(self, face_index, edge : bmesh.types.BMEdge, flap_angle, flap_height):
+    def __compute_2d_glue_flap_triangles_edge_local(self, face_index, edge : bmesh.types.BMEdge, flap_angle, flap_height):
         x = flap_height / np.tan(flap_angle)
         h = flap_height
         l = edge.calc_length()
@@ -135,11 +135,7 @@ class Unfolding():
             p_1_local_edge = np.array([0, 0])
             p_2_local_edge = np.array([l / 2, -h])
             p_3_local_edge = np.array([l, 0])
-            edge_to_root = self.affine_transform_to_root_coord_system_per_face[face_index] @ self.interior_affine_transforms[face_index][edge_to_key_e(edge)]
-            p_1_root_coords = edge_to_root * p_1_local_edge
-            p_2_root_coords = edge_to_root * p_2_local_edge
-            p_3_root_coords = edge_to_root * p_3_local_edge
-            return [(p_1_root_coords, p_2_root_coords, p_3_root_coords)]
+            return [(p_1_local_edge, p_2_local_edge, p_3_local_edge)]
 
         # compute all flap points in local edge coordinates
         convex_flap = flap_angle <= np.pi / 2
@@ -147,15 +143,19 @@ class Unfolding():
         p_2_local_edge = np.array([x if convex_flap else 0, -h])
         p_3_local_edge = np.array([l - x if convex_flap else l, -h])
         p_4_local_edge = np.array([l if convex_flap else l + x, 0])
+        return [(p_1_local_edge, p_2_local_edge, p_3_local_edge), (p_1_local_edge, p_3_local_edge, p_4_local_edge)]
 
-        # transform to root face coords
+    def compute_2d_glue_flap_triangles(self, face_index, edge : bmesh.types.BMEdge, flap_angle, flap_height):
+        triangles_in_local_edge_coords = self.__compute_2d_glue_flap_triangles_edge_local(face_index, edge, flap_angle, flap_height)
         edge_to_root = self.affine_transform_to_root_coord_system_per_face[face_index] @ self.interior_affine_transforms[face_index][edge_to_key_e(edge)]
-        p_1_root_coords = edge_to_root * p_1_local_edge
-        p_2_root_coords = edge_to_root * p_2_local_edge
-        p_3_root_coords = edge_to_root * p_3_local_edge
-        p_4_root_coords = edge_to_root * p_4_local_edge
+        return [tuple([edge_to_root * local_coord for local_coord in triangle]) for triangle in triangles_in_local_edge_coords]
 
-        return [(p_1_root_coords, p_2_root_coords, p_3_root_coords), (p_1_root_coords, p_3_root_coords, p_4_root_coords)]
+    def compute_3d_glue_flap_triangles_inside_face(self, face_index, edge : bmesh.types.BMEdge, flap_angle, flap_height):
+        triangles_in_local_edge_coords = self.__compute_2d_glue_flap_triangles_edge_local(face_index, edge, flap_angle, flap_height)
+        triangles_flipped = [tuple([np.array([local_coord[0], -local_coord[1]]) for local_coord in triangle]) for triangle in triangles_in_local_edge_coords]
+        edge_to_local_coords = self.interior_affine_transforms[face_index][edge_to_key_e(edge)]
+        triangles_in_3d = [tuple(reversed([geometry.to_world_coords(edge_to_local_coords * local_coord, *self.local_2d_coord_system_per_face[face_index]) for local_coord in triangle])) for triangle in triangles_flipped]
+        return triangles_in_3d
 
     def check_for_flap_collisions(self, flap_triangles, store_collisions=False, edge : bmesh.types.BMEdge =None):
         """ Returns true if the provided triangles overlap with any face or existing flap triangles """
@@ -205,6 +205,9 @@ class Unfolding():
                         unfolded_polygons.append(flap_triangle)
 
             geometry.debug_draw_polygons_2d(unfolded_polygons, "debug-unfolding-with-flaps.png")
+
+    def flap_is_overlapping(self, edge : bmesh.types.BMEdge):
+        return edge_to_key_e(edge) in self.flap_collides_with.keys() and len(self.flap_collides_with[edge_to_key_e(edge)]) > 0
 
     def has_overlapping_glue_flaps(self):
         """ Return True if there is any glue flap that overlaps with any other geometry"""

@@ -14,16 +14,37 @@ class MainPanel(bpy.types.Panel):
         row = layout.row()
 
         row.label(text="thanks for using me!", icon="FUND")
-        layout.operator("wm.flattening_op")
+        row = layout.row()
+        col1 = row.column()
+        col2 = row.column()
+        col1.operator("wm.flattening_op")
+        col2.label(icon="AUTO")
 
         if CUTGRAPH_ID_PROPERTY_NAME not in context.active_object:
-            layout.operator("wm.cut_initialization_op")
+            row = layout.row()
+            col1 = row.column()
+            col2 = row.column()
+            col1.operator("wm.cut_initialization_op")
+            col2.label(icon="SHADERFX")
         else:
-            layout.operator("wm.cut_reset_op")
-            layout.operator("wm.mesh_sync_op")
-            
+            row = layout.row()
+            col1 = row.column()
+            col2 = row.column()
+            col1.operator("wm.cut_reset_op")
+            col2.label(icon="TRASH")
+            row = layout.row()
+            col1 = row.column()
+            col2 = row.column()
+            col1.operator("wm.mesh_sync_op")
+            col2.label(icon="FILE_REFRESH")
+
             ao = context.active_object
             zamboni_object_settings = ao.polyzamboni_object_prop
+            row = layout.row()
+            col1 = row.column()
+            col2 = row.column()
+            col1.operator("wm.material_separation_op")
+            col2.label(icon="MATERIAL")
             row = layout.row()
             col1 = row.column()
             col2 = row.column()
@@ -47,7 +68,11 @@ class GlueFlapSettingsPanel(bpy.types.Panel):
             ao = context.active_object
             zamboni_object_settings = ao.polyzamboni_object_prop
             row = layout.row()
-            row.operator("wm.flaps_recompute_op")
+            col1 = row.column()
+            col2 = row.column()
+            col1.operator("wm.flaps_recompute_op")
+            flaps_locked = zamboni_object_settings.lock_glue_flaps
+            col2.prop(zamboni_object_settings, "lock_glue_flaps", icon="LOCKED" if flaps_locked else "UNLOCKED", icon_only=True)
             row = layout.row()
             col1 = row.column()
             col2 = row.column()

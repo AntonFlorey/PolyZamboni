@@ -38,6 +38,7 @@ def register():
 
 def unregister():
     print("unregister called!")
+    print("PolyZamboni is cleaning up after herself...")
     globals.remove_all_existing_cutgraph_ids()
     drawing.hide_all_drawings()
     operators.unregister()
@@ -49,6 +50,7 @@ def unregister():
         bpy.app.handlers.depsgraph_update_post.remove(callbacks.on_object_select)
     if callbacks.save_all_edge_constraints in bpy.app.handlers.save_pre:
         bpy.app.handlers.save_pre.remove(callbacks.save_all_edge_constraints)
+    print("Done.")
 
 if __name__ == "__main__":
     register()

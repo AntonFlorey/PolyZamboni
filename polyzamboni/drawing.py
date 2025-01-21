@@ -5,7 +5,7 @@ import numpy as np
 from gpu_extras.batch import batch_for_shader
 from . import globals
 from . import cutgraph
-from .constants import PERFECT_REGION, BAD_GLUE_FLAPS_REGION, OVERLAPPING_REGION, NOT_FOLDABLE_REGION
+from .constants import PERFECT_REGION, BAD_GLUE_FLAPS_REGION, OVERLAPPING_REGION, NOT_FOLDABLE_REGION, GLUE_FLAP_NO_OVERLAPS, GLUE_FLAP_WITH_OVERLAPS, GLUE_FLAP_TO_LARGE
 
 # colors
 BLUE = (  0 / 255,  84 / 255, 159 / 255, 1.0)
@@ -27,6 +27,7 @@ _drawing_handle_user_provided_cuts = None
 _drawing_handle_locked_edges = None
 _drawing_handle_auto_completed_cuts = None
 _drawing_handle_region_quality_triangles = None
+_drawing_handle_glue_flaps = None
 
 class ColorGenerator():
     """ A simple color generator"""
@@ -147,11 +148,12 @@ def hide_auto_completed_cuts():
     deactivate_draw_callback(_drawing_handle_auto_completed_cuts)
     _drawing_handle_auto_completed_cuts = None
 
-def show_auto_completed_cuts(cuts_as_line_array):
+def show_auto_completed_cuts(cuts_as_line_array, dotted_line_length = 0.1):
     hide_auto_completed_cuts() 
     global _drawing_handle_auto_completed_cuts
     auto_cuts_color = BLUE
-    _drawing_handle_auto_completed_cuts = bpy.types.SpaceView3D.draw_handler_add(lines_draw_callback, (cuts_as_line_array, auto_cuts_color), "WINDOW", "POST_VIEW")
+    dotted_auto_cuts = make_dotted_lines(cuts_as_line_array, dotted_line_length)
+    _drawing_handle_auto_completed_cuts = bpy.types.SpaceView3D.draw_handler_add(lines_draw_callback, (dotted_auto_cuts, auto_cuts_color), "WINDOW", "POST_VIEW")
 
 #################################
 #    Region Quality Triangles   #
@@ -181,6 +183,31 @@ def show_region_quality_triangles(vertex_positions, regions_by_quality):
     global _drawing_handle_region_quality_triangles
     _drawing_handle_region_quality_triangles = bpy.types.SpaceView3D.draw_handler_add(region_quality_triangles_draw_callback, (vertex_positions, regions_by_quality), "WINDOW", "POST_VIEW")
 
+#################################
+#           Glue Flaps          #
+#################################
+
+flap_quality_color_mapping = {
+    GLUE_FLAP_NO_OVERLAPS : MAY_GREEN,
+    GLUE_FLAP_TO_LARGE : TEAL,
+    GLUE_FLAP_WITH_OVERLAPS : MAGENTA,
+}
+
+def hide_glue_flaps():
+    global _drawing_handle_glue_flaps
+    deactivate_draw_callback(_drawing_handle_glue_flaps)
+    _drawing_handle_glue_flaps = None
+
+def glue_flaps_draw_callback(flaps_by_quality):
+    for quality, glue_flap_lines in flaps_by_quality.items():
+        if quality not in flap_quality_color_mapping:
+            print("WARNING: Quality of provided glue flaps is not known!")
+        lines_draw_callback(glue_flap_lines, flap_quality_color_mapping[quality])
+
+def show_glue_flaps(flaps_by_quality):
+    hide_glue_flaps()
+    global _drawing_handle_glue_flaps
+    _drawing_handle_glue_flaps = bpy.types.SpaceView3D.draw_handler_add(glue_flaps_draw_callback, (flaps_by_quality,), "WINDOW", "POST_VIEW")
 
 #################################
 #          Update all           #
@@ -191,9 +218,9 @@ def hide_all_drawings():
     hide_locked_edges()
     hide_auto_completed_cuts()
     hide_region_quality_triangles()
+    hide_glue_flaps()
 
 def update_all_polyzamboni_drawings(self, context):
-    print("draw update called")
     try:
         draw_settings = context.scene.polyzamboni_drawing_settings
     except AttributeError:
@@ -220,6 +247,10 @@ def update_all_polyzamboni_drawings(self, context):
     if draw_settings.color_faces_by_quality:
         all_v_positions, quality_dict = cutgraph_to_draw.get_triangle_list_per_cluster_quality(draw_settings.normal_offset)
         show_region_quality_triangles(all_v_positions, quality_dict)
+
+    if draw_settings.show_glue_flaps:
+        glue_flap_quality_dict = cutgraph_to_draw.get_lines_array_per_glue_flap_quality(draw_settings.normal_offset)
+        show_glue_flaps(glue_flap_quality_dict)
 
     # Trigger a redraw of all screen areas
     for area in bpy.context.screen.areas:

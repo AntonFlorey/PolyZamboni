@@ -128,8 +128,13 @@ class ZamboniSettingsPerObject(bpy.types.PropertyGroup):
         description="If glue flaps should alternate along a patch boundary.",
         default=True
     )
+    lock_glue_flaps : BoolProperty(
+        name="Lock Flap Positions",
+        description="Determines if glue flaps are allowed to be relocated when applying new settings.",
+        default=False
+    )
     apply_auto_cuts_to_previev : BoolProperty(
-        name="Auto cuts preview",
+        name="Auto Cuts Preview",
         description="If set to True, all automatically generated cuts will be condidered when showing a preview of the mesh unfolding.",
         default=False
     )
