@@ -559,6 +559,20 @@ class CutGraph():
             new_geometry = unfolding.compute_2d_glue_flap_triangles(face.index, self.mesh.edges[edge_id], self.flap_angle, self.flap_height)
             unfolding.add_glue_flap_to_face_edge(face.index, self.mesh.edges[edge_id], new_geometry)
         
+    def swap_glue_flap(self, edge_id):
+        """ If there is a glue flap attached to this edge, attach it to the opposite halfedge. """
+        if edge_id not in self.glue_flaps.keys():
+            return
+        self.ensure_halfedge_to_face_table()
+        self.mesh.edges.ensure_lookup_table()
+        # remove current glue flap
+        curr_halfedge = self.glue_flaps[edge_id]
+        curr_face = self.halfedge_to_face[curr_halfedge]
+        curr_unfolding : Unfolding = self.unfolded_components[self.vertex_to_component_dict[curr_face.index]]
+        curr_unfolding.remove_flap_from_edge(curr_face.index, self.mesh.edges[edge_id])
+        # add glue flap on the opposide halfedge
+        self.try_to_add_glue_flap((curr_halfedge[1], curr_halfedge[0]), enforce=True)
+    
     #################################
     #  User Constraints Interface   #
     #################################
@@ -608,6 +622,3 @@ class CutGraph():
 
     def get_locked_edges_list(self):
         return [edge_index for edge_index in self.designer_constraints if self.designer_constraints[edge_index] == "glued"]
-
-
-

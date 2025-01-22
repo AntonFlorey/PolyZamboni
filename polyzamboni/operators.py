@@ -98,7 +98,7 @@ class PrintPlanarityOperator(bpy.types.Operator):
 class InitializeCuttingOperator(bpy.types.Operator):
     """Start the unfolding process for this mesh"""
     bl_label = "Unfold this mesh"
-    bl_idname  = "wm.cut_initialization_op"
+    bl_idname  = "polyzamboni.cut_initialization_op"
 
     def invoke(self, context, event):     
         return self.execute(context)
@@ -121,7 +121,7 @@ class InitializeCuttingOperator(bpy.types.Operator):
 class ResetAllCutsOperator(bpy.types.Operator):
     """Restart the unfolding process for this mesh"""
     bl_label = "Reset Unfolding"
-    bl_idname  = "wm.cut_reset_op"
+    bl_idname  = "polyzamboni.cut_reset_op"
     
     def execute(self, context):
         # get the currently selected object
@@ -147,7 +147,7 @@ class ResetAllCutsOperator(bpy.types.Operator):
 class SyncMeshOperator(bpy.types.Operator):
     """Transfer mesh changes to the cutgraph to repair it"""
     bl_label = "Sync Mesh Changes"
-    bl_idname = "wm.mesh_sync_op"
+    bl_idname = "polyzamboni.mesh_sync_op"
 
     def execute(self, context):
         ao = bpy.context.active_object
@@ -168,7 +168,7 @@ class SyncMeshOperator(bpy.types.Operator):
 class SeparateAllMaterialsOperator(bpy.types.Operator):
     """ Adds cuts to all edges between faces with a different material. """
     bl_label = "Separate Materials"
-    bl_idname = "wm.material_separation_op"
+    bl_idname = "polyzamboni.material_separation_op"
 
     def execute(self, context):
         ao = bpy.context.active_object
@@ -190,7 +190,7 @@ class SeparateAllMaterialsOperator(bpy.types.Operator):
 class RecomputeFlapsOperator(bpy.types.Operator):
     """ Applies the current flap settings and recomputes all glue flaps """
     bl_label = "Recompute Flaps"
-    bl_idname = "wm.flaps_recompute_op"
+    bl_idname = "polyzamboni.flaps_recompute_op"
 
     def execute(self, context):
         ao = bpy.context.active_object
@@ -213,11 +213,70 @@ class RecomputeFlapsOperator(bpy.types.Operator):
 
         return is_mesh and CUTGRAPH_ID_PROPERTY_NAME in active_object
 
+class FlipGlueFlapsOperator(bpy.types.Operator):
+    """ Flip all glue flaps attached to the selected edges """
+    bl_label = "Flip Glue Flaps"
+    bl_idname = "polyzamboni.flip_flap_op"
 
-class ZamboniDesignOperator(bpy.types.Operator):
-    """Add or remove cuts"""
-    bl_label = "Zamboni Design Tool"
-    bl_idname  = "wm.zamboni_design_op"
+    def execute(self, context):
+        ao = context.active_object
+        ao_mesh = ao.data
+        ao_bmesh = bmesh.from_edit_mesh(ao_mesh)
+        active_cutgraph_index = ao[CUTGRAPH_ID_PROPERTY_NAME]
+        if active_cutgraph_index < len(globals.PZ_CUTGRAPHS):
+            active_cutgraph : cutgraph.CutGraph = globals.PZ_CUTGRAPHS[active_cutgraph_index]
+        else:
+            print("huch?!")
+            print("cutgraph", active_cutgraph_index, "not in", globals.PZ_CUTGRAPHS)
+
+        selected_edges = [e.index for e in ao_bmesh.edges if e.select] 
+
+        for edge_index in selected_edges:
+            active_cutgraph.swap_glue_flap(edge_index)
+
+        update_all_polyzamboni_drawings(None, context)
+        return { 'FINISHED' }
+    
+    @classmethod
+    def poll(cls, context):
+        active_object = context.active_object
+        is_mesh = active_object is not None and active_object.type == 'MESH' 
+        return is_mesh and context.mode == 'EDIT_MESH' and CUTGRAPH_ID_PROPERTY_NAME in active_object
+
+class ZamboniGlueFlapDesignOperator(bpy.types.Operator):
+    """ Control the placement of glue flaps """
+    bl_label = "PolyZamboni Glue Flap Design Tool"
+    bl_idname = "polyzamboni.glue_flap_editing_operator"
+
+    design_actions: bpy.props.EnumProperty(
+        name="actions",
+        description="Select an action",
+        items=[
+            ("FLIP_FLAPS", "Flip Glue Flaps", "Flip all glue flaps attached to the selected edges", "AREA_SWAP", 0),
+            ("RECOMPUTE_FLAPS", "Recompute all Glue Flaps", "Automatically place glue flaps at all cut edges", "FILE_SCRIPT", 1)
+        ]
+    )
+
+    def execute(self, context):
+
+        if self.design_actions == "FLIP_FLAPS":
+            bpy.ops.polyzamboni.flip_flap_op()
+            return {"FINISHED"}
+        elif self.design_actions == "RECOMPUTE_FLAPS":
+            bpy.ops.polyzamboni.flaps_recompute_op()
+
+        return {"FINISHED"}
+
+    @classmethod
+    def poll(cls, context):
+        active_object = context.active_object
+        is_mesh = active_object is not None and active_object.type == 'MESH' 
+        return is_mesh and context.mode == 'EDIT_MESH' and CUTGRAPH_ID_PROPERTY_NAME in active_object
+
+class ZamboniCutDesignOperator(bpy.types.Operator):
+    """ Add or remove cuts """
+    bl_label = "PolyZamboni Cut Design Tool"
+    bl_idname  = "polyzamboni.cut_editing_operator"
 
     design_actions: bpy.props.EnumProperty(
         name="actions",
@@ -226,7 +285,8 @@ class ZamboniDesignOperator(bpy.types.Operator):
             ("ADD_CUT", "Add Cuts", "Cut the selected edges", "UNLINKED", 0),
             ("GLUE_EDGE", "Glue Edges", "Prevent selected edges from being cut", "LOCKED", 1),
             ("RESET_EDGE", "Clear Edges", "Remove any constraints", "BRUSH_DATA", 2),
-            ("REGION_CUTOUT", "Define Region", "Mark the selected faces as one region", "OUTLINER_DATA_SURFACE", 3)
+            ("REGION_CUTOUT", "Define Region", "Mark the selected faces as one region", "OUTLINER_DATA_SURFACE", 3),
+            #("FLIP_FLAPS", "Flip Glue Flaps", "Flip all glue flaps attached to the selected edges", "AREA_SWAP", 4)
         ],
         default="ADD_CUT"
     )
@@ -256,12 +316,16 @@ class ZamboniDesignOperator(bpy.types.Operator):
         elif self.design_actions == "REGION_CUTOUT":
             selected_faces = [f.index for f in ao_bmesh.faces if f.select]
             active_cutgraph.add_cutout_region(selected_faces)
-        
+        # elif self.design_actions == "FLIP_FLAPS":
+        #     for e_index in selected_edges:
+        #         active_cutgraph.swap_glue_flap(e_index)
+        #     update_all_polyzamboni_drawings(None, context)
+        #     return {"FINISHED"}
+
         active_cutgraph.compute_all_connected_components()
         active_cutgraph.update_unfoldings_along_edges(selected_edges)
         active_cutgraph.greedy_update_flaps_around_changed_components(selected_edges)
         update_all_polyzamboni_drawings(None, context)
-
         return {"FINISHED"}
 
     @classmethod
@@ -270,15 +334,25 @@ class ZamboniDesignOperator(bpy.types.Operator):
         is_mesh = active_object is not None and active_object.type == 'MESH' 
         return is_mesh and context.mode == 'EDIT_MESH' and CUTGRAPH_ID_PROPERTY_NAME in active_object
 
-class ZamboniDesignPieMenu(bpy.types.Menu):
-    """This is a custom pie menu for all Zamboni design operators"""
-    bl_label = "Polyzamboni Tools"
-    bl_idname = "VIEW3D_MT_PZ_DESIGN_MENU_PIE"
+class ZamboniCutEditingPieMenu(bpy.types.Menu):
+    """This is a custom pie menu for all Zamboni cut design operators"""
+    bl_label = "Polyzamboni Cut Tools"
+    bl_idname = "POLYZAMBONI_MT_CUT_EDITING_PIE_MENU"
 
     def draw(self, context): 
         layout = self.layout 
         pie = layout.menu_pie() 
-        pie.operator_enum("wm.zamboni_design_op", "design_actions")
+        pie.operator_enum("polyzamboni.cut_editing_operator", "design_actions")
+
+class ZamboniGLueFlapEditingPieMenu(bpy.types.Menu):
+    """This is a custom pie menu for all Zamboni glue flap design operators"""
+    bl_label = "Polyzamboni Glue Flap Tools"
+    bl_idname = "POLYZAMBONI_MT_GLUE_FLAP_EDITING_PIE_MENU"
+
+    def draw(self, context): 
+        layout = self.layout 
+        pie = layout.menu_pie() 
+        pie.operator_enum("polyzamboni.glue_flap_editing_operator", "design_actions")
 
 polyzamboni_keymaps = []
 
@@ -286,18 +360,26 @@ def register():
     bpy.utils.register_class(FlatteningOperator)
     bpy.utils.register_class(PrintPlanarityOperator)
     bpy.utils.register_class(InitializeCuttingOperator)
-    bpy.utils.register_class(ZamboniDesignOperator)
-    bpy.utils.register_class(ZamboniDesignPieMenu)
+    bpy.utils.register_class(ZamboniCutDesignOperator)
+    bpy.utils.register_class(ZamboniCutEditingPieMenu)
     bpy.utils.register_class(ResetAllCutsOperator)
     bpy.utils.register_class(SyncMeshOperator)
     bpy.utils.register_class(RecomputeFlapsOperator)
     bpy.utils.register_class(SeparateAllMaterialsOperator)
+    bpy.utils.register_class(FlipGlueFlapsOperator)
+    bpy.utils.register_class(ZamboniGlueFlapDesignOperator)
+    bpy.utils.register_class(ZamboniGLueFlapEditingPieMenu)
 
     windowmanager = bpy.context.window_manager
     if windowmanager.keyconfigs.addon:
         keymap = windowmanager.keyconfigs.addon.keymaps.new(name="3D View", space_type="VIEW_3D")
+        # keymap for the cut editing pie menu
         keymap_item = keymap.keymap_items.new("wm.call_menu_pie", "C", "PRESS", alt=True)
-        keymap_item.properties.name = "VIEW3D_MT_PZ_DESIGN_MENU_PIE"
+        keymap_item.properties.name = "POLYZAMBONI_MT_CUT_EDITING_PIE_MENU"
+
+        # keymap for the glue flap editing pie menu
+        keymap_item = keymap.keymap_items.new("wm.call_menu_pie", "X", "PRESS", alt=True)
+        keymap_item.properties.name = "POLYZAMBONI_MT_GLUE_FLAP_EDITING_PIE_MENU"
 
         polyzamboni_keymaps.append((keymap, keymap_item))
 
@@ -305,12 +387,15 @@ def unregister():
     bpy.utils.unregister_class(FlatteningOperator)
     bpy.utils.unregister_class(PrintPlanarityOperator)
     bpy.utils.unregister_class(InitializeCuttingOperator)
-    bpy.utils.unregister_class(ZamboniDesignOperator)
-    bpy.utils.unregister_class(ZamboniDesignPieMenu)
+    bpy.utils.unregister_class(ZamboniCutDesignOperator)
+    bpy.utils.unregister_class(ZamboniCutEditingPieMenu)
     bpy.utils.unregister_class(ResetAllCutsOperator)
     bpy.utils.unregister_class(SyncMeshOperator)
     bpy.utils.unregister_class(RecomputeFlapsOperator)
     bpy.utils.unregister_class(SeparateAllMaterialsOperator)
+    bpy.utils.unregister_class(FlipGlueFlapsOperator)
+    bpy.utils.unregister_class(ZamboniGlueFlapDesignOperator)
+    bpy.utils.unregister_class(ZamboniGLueFlapEditingPieMenu)
 
     for keymap, keymap_item in polyzamboni_keymaps:
         keymap.keymap_items.remove(keymap_item)
