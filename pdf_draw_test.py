@@ -103,6 +103,8 @@ triangle2 = [a, c, d]
 triangle1_uvs = [(0,0), (1,0), (1,1)]
 triangle2_uvs = [(0,0), (1,1), (0,1)]
 
+triangle3 = [(18,25), (25, 25), (22, 29)]
+
 img = mpimg.imread('test.png')
 
 print(np.asarray(img).shape)
@@ -117,6 +119,7 @@ print(img_rgba.shape)
 
 add_textured_triangle(ax, triangle1, triangle1_uvs, img_rgba, outlines=True)
 add_textured_triangle(ax, triangle2, triangle2_uvs, img_rgba, outlines=True)
+add_textured_triangle(ax, triangle3, triangle2_uvs, img_rgba, outlines=True)
 
 # for _ in range(1):
 #     random_triangle = [np.random.rand(2) * np.array([21, 29.7]) for _ in range(3)]
@@ -125,5 +128,8 @@ add_textured_triangle(ax, triangle2, triangle2_uvs, img_rgba, outlines=True)
 # Speicher als PDF
 with PdfPages('mehrere_dreiecke.pdf') as pdf:
     pdf.savefig(fig)
+
+# Speichere als svg
+fig.savefig("mehrere_dreiecke.svg")
 
 plt.close()

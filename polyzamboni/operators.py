@@ -102,7 +102,7 @@ class InitializeCuttingOperator(bpy.types.Operator):
 
     def invoke(self, context, event):     
         return self.execute(context)
- 
+        
     def execute(self, context):
         # get the currently selected object
         ao = bpy.context.active_object

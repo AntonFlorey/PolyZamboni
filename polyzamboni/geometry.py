@@ -29,6 +29,12 @@ class AffineTransform2D():
         else:
             raise NotImplementedError("Cant multiply affine 2D transformation with", other)
 
+    def to_numpy_array(self):
+        mat = np.eye(3)
+        mat[:2,:2] = self.A
+        mat[:2,2] = self.t
+        return mat
+
     def __str__(self):
         return "2D Affine Transformation\nLinear Part:\n" + self.A.__str__() + "\nAffine Part:\n" + self.t.__str__()
 
