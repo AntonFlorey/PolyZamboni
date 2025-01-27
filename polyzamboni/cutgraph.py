@@ -1,13 +1,14 @@
 import bpy
 import bmesh
 import numpy as np
+import os
 import networkx as nx
-import random
 import mathutils
-from .geometry import triangulate_3d_polygon, solve_for_weird_point
+from .geometry import triangulate_3d_polygon
 from .constants import LOCKED_EDGES_PROP_NAME, CUT_CONSTRAINTS_PROP_NAME, PERFECT_REGION, BAD_GLUE_FLAPS_REGION, OVERLAPPING_REGION, NOT_FOLDABLE_REGION, GLUE_FLAP_NO_OVERLAPS, GLUE_FLAP_WITH_OVERLAPS, GLUE_FLAP_TO_LARGE
-from .unfolding import Unfolding
+from .unfolding import Unfolding, pos_list_to_triangles
 from collections import deque
+from .printprepper import ColoredTriangleData, ComponentPrintData, CutEdgeData, FoldEdgeData, GlueFlapEdgeData
 
 class CutGraph():
     """ This class can be attached to any Mesh object """
@@ -37,10 +38,8 @@ class CutGraph():
 
     def construct_dual_graph_from_mesh(self, obj : bpy.types.Object):
         self.mesh : bmesh.types.BMesh = bmesh.new()
-        bpy.ops.object.mode_set(mode="EDIT")
-        self.mesh = bmesh.from_edit_mesh(obj.data).copy()
+        self.mesh.from_mesh(obj.data)
         self.world_matrix = obj.matrix_world
-        bpy.ops.object.mode_set(mode="OBJECT")
         self.dualgraph = nx.Graph()
         for face in self.mesh.faces:
             self.dualgraph.add_node(face.index)
@@ -222,6 +221,12 @@ class CutGraph():
         # assert that we got all components that changed this 
         for c_id in self.components_as_sets.keys():
             assert c_id in self.unfolded_components.keys()
+
+    def all_components_have_unfoldings(self):
+        for c_id in self.components_as_sets.keys():
+            if self.unfolded_components[c_id] is None:
+                return False
+        return True
 
     #################################
     #           Rendering           #
@@ -622,3 +627,121 @@ class CutGraph():
 
     def get_locked_edges_list(self):
         return [edge_index for edge_index in self.designer_constraints if self.designer_constraints[edge_index] == "glued"]
+
+    #################################
+    #           Exporting           #
+    #################################
+
+    def compute_scaling_factor_for_target_model_height(self, target_height):
+        mesh_top = max([v.co[2] for v in self.mesh.verts])
+        mesh_bot = min([v.co[2] for v in self.mesh.verts])
+        mesh_height = mesh_top - mesh_bot
+        if mesh_height <= 0:
+            print("POLYZAMBONI WARNING: Mesh has zero height!")
+            return 1
+        return target_height / mesh_height
+
+    def create_print_data_for_all_components(self, obj : bpy.types.Object, scaling_factor):
+        self.mesh.edges.ensure_lookup_table()
+        self.mesh.faces.ensure_lookup_table()
+
+        all_print_data = []
+        for c_id, faces_ids_in_component in self.components_as_sets.items():
+            if self.unfolded_components[c_id] is None:
+                continue
+            unfolding_of_curr_component : Unfolding = self.unfolded_components[c_id]
+
+            curr_component_print_data = ComponentPrintData()
+
+            # collect material index of first face
+            first_face_in_component : bmesh.types.BMFace = self.mesh.faces[list(faces_ids_in_component)[0]]
+            curr_component_print_data.dominating_mat_index = first_face_in_component.material_index
+
+            # collect cut edges, fold edges and triangles of all faces
+            fold_edge_index_set = set()
+            for face_index in faces_ids_in_component:
+                curr_face : bmesh.types.BMFace = self.mesh.faces[face_index]
+
+                # map edges to correct halfedges
+                self.ensure_halfedge_to_edge_table()
+                edge_to_correct_halfedge_map = {}
+                face_vertex_loop = list(curr_face.verts)
+                for v_i in range(len(face_vertex_loop)):
+                    v_j = (v_i + 1) % len(face_vertex_loop)
+                    curr_e = self.halfedge_to_edge[(face_vertex_loop[v_i].index, face_vertex_loop[v_j].index)]
+                    edge_to_correct_halfedge_map[curr_e.index] = (face_vertex_loop[v_i], face_vertex_loop[v_j])
+
+                # collect all edges
+                for curr_edge in curr_face.edges:
+                    # compute edge coords in unfolding space
+                    vertex_coords_3d = [v.co for v in edge_to_correct_halfedge_map[curr_edge.index]]    
+                    vertex_coords_unfolded = [scaling_factor * unfolding_of_curr_component.get_globally_consistend_2d_coord_in_face(co_3d, face_index) for co_3d in vertex_coords_3d]
+
+                    if curr_edge.is_boundary or not self.mesh_edge_is_not_cut(curr_edge):
+                        # this is a cut edge
+                        curr_component_print_data.add_cut_edge(CutEdgeData(tuple(vertex_coords_unfolded), curr_edge.index))
+                    elif curr_edge.index not in fold_edge_index_set:
+                        # this is a fold edge
+                        fold_edge_index_set.add(curr_edge.index)
+                        curr_component_print_data.add_fold_edge(FoldEdgeData(tuple(vertex_coords_unfolded), curr_edge.is_convex, curr_edge.calc_face_angle()))
+
+                # get face material info
+                mat_slots = obj.material_slots
+                # print("mat slots found:", len(mat_slots))
+                color = None
+                text_path = None
+                if curr_face.material_index < len(mat_slots):
+                    curr_material_slot : bpy.types.MaterialSlot = mat_slots[curr_face.material_index]
+                    curr_material : bpy.types.Material = curr_material_slot.material
+                    color = curr_material.diffuse_color
+
+                    if curr_material.use_nodes:
+                        for node in curr_material.node_tree.nodes:
+                            if not isinstance(node, bpy.types.ShaderNodeTexImage):
+                                continue
+                            if not node.image:
+                                continue                            
+                            full_path = bpy.path.abspath(node.image.filepath, library=node.image.library)
+                            norm_path = os.path.normpath(full_path)
+                            text_path = norm_path
+                            # print("Path to texture:", text_path)
+
+                # collect all faces
+                triangles_in_unfolding_space = pos_list_to_triangles([scaling_factor * tri_coord for tri_coord in unfolding_of_curr_component.triangulated_faces_2d[face_index]])
+                
+                # uvs
+                uvs_available = len(obj.data.uv_layers) > 0
+                uv_layer = self.mesh.loops.layers.uv.verify()
+                # print("found uv layer:", uv_layer)
+                v_id_to_uv_in_face = {}
+
+                for loop in curr_face.loops:
+                    # print("vertex uv:",loop[uv_layer].uv)
+                    v_id_to_uv_in_face[loop.vert.index] = loop[uv_layer].uv
+
+                triangle_uvs = [tuple([v_id_to_uv_in_face[v_id] for v_id in triangle_indices]) if uvs_available else None for triangle_indices in unfolding_of_curr_component.triangulation_indices[face_index]]
+
+                for tri_coords, tri_uv in zip(triangles_in_unfolding_space, triangle_uvs):
+                    # print("Added textured triangle:")
+                    # print("coords:", tri_coords)
+                    # print("uvs:", tri_uv)
+                    # print("texture path:", text_path)
+                    # print("flat color:", np.array(color))
+                    curr_component_print_data.add_texured_triangle(ColoredTriangleData(tri_coords, tri_uv, text_path, color))
+
+                # collect edges for glue flaps
+                for flap_triangles in unfolding_of_curr_component.glue_flaps_per_face[face_index].values():
+                    assert len(flap_triangles) > 0
+                    curr_component_print_data.add_glue_flap_edge(GlueFlapEdgeData((scaling_factor * flap_triangles[0][0],scaling_factor * flap_triangles[0][1])))
+                    curr_component_print_data.add_glue_flap_edge(GlueFlapEdgeData((scaling_factor * flap_triangles[0][1],scaling_factor * flap_triangles[0][2])))
+                    if len(flap_triangles) == 2:
+                        curr_component_print_data.add_glue_flap_edge(GlueFlapEdgeData((scaling_factor * flap_triangles[1][1],scaling_factor * flap_triangles[1][2])))
+
+            # print("Bounding Box of component to print:", curr_component_print_data.lower_left, curr_component_print_data.upper_right)
+            # print("collected cut edges of component:", len(curr_component_print_data.cut_edges))
+            # print("collected fold edges of component:", len(curr_component_print_data.fold_edges))
+            # print("collected triangles of component:", len(curr_component_print_data.colored_triangles))
+            # print("collected glue flap edges:", len(curr_component_print_data.glue_flap_edges))
+            all_print_data.append(curr_component_print_data)
+
+        return all_print_data

@@ -1,13 +1,18 @@
 import bpy
 import bmesh
 import numpy as np
+import os
 from bpy.types import Context
+from bpy.props import StringProperty, EnumProperty, FloatProperty, IntProperty, BoolProperty, FloatVectorProperty
+from bpy_extras.io_utils import ExportHelper
 from .drawing import *
 from . import globals
 from . import objective_functions
 from . import cutgraph
 import torch
 from .constants import CUTGRAPH_ID_PROPERTY_NAME, CUT_CONSTRAINTS_PROP_NAME, LOCKED_EDGES_PROP_NAME
+from . import exporters
+from .printprepper import fit_components_on_pages
 
 class FlatteningOperator(bpy.types.Operator):
     bl_label = "Flatten Polygons"
@@ -354,7 +359,216 @@ class ZamboniGLueFlapEditingPieMenu(bpy.types.Menu):
         pie = layout.menu_pie() 
         pie.operator_enum("polyzamboni.glue_flap_editing_operator", "design_actions")
 
+def ext_list_to_filter_str(ext_list):
+    res = ""
+    for ext in ext_list[:-1]:
+        res += "*." + ext + ","
+    res += "*." + ext_list[-1]
+
+class PolyZamboniExportPDFOperator(bpy.types.Operator, ExportHelper):
+    """Export Unfolding of active object"""
+    bl_label = "Export Polyzamboni Unfolding as PDF"
+    bl_idname = "polyzamboni.export_operator_pdf"
+
+    # Export Helper settings
+    filename_ext = ".pdf"
+
+    filter_glob: StringProperty(
+        default="*.pdf",
+        options={'HIDDEN'},
+        maxlen=255,  # Max internal buffer length, longer would be clamped.
+    )
+
+    # Polyzamboni export settings
+    paper_size: EnumProperty(
+        name="Page Size",
+        items=[
+            ("A0", "A0", "", "", 0),
+            ("A1", "A1", "", "", 1),
+            ("A2", "A2", "", "", 2),
+            ("A3", "A3", "", "", 3),
+            ("A4", "A4", "", "", 4),
+            ("A5", "A5", "", "", 5),
+            ("A6", "A6", "", "", 6),
+            ("A7", "A7", "", "", 7),
+            ("A8", "A8", "", "", 8)
+        ],
+        default="A4"
+    )
+    page_margin: FloatProperty(
+        name="Page margin (cm)",
+        default=0.5,
+        min=0,
+    )
+    line_width: FloatProperty(
+        name="Line width",
+        default=1,
+        min=0.1,
+    )
+    space_between_components: FloatProperty(
+        name="Space between pieces",
+        default=0.25,
+        min=0,
+    )
+    one_material_per_page: BoolProperty(
+        name="One material per page",
+        default=True,
+    )
+    target_model_height: FloatProperty(
+        name="Target model height (cm)",
+        default=5,
+        min=1
+    )
+    show_step_numbers : BoolProperty(
+        name="Show build steps",
+        default=True
+    )
+    show_edge_numbers : BoolProperty(
+        name="Show edge numbers",
+        default=True
+    )
+    edge_number_font_size : FloatProperty(
+        name="Edge number font size",
+        default=8,
+        min = 1
+    )
+    edge_number_offset : FloatProperty(
+        name="Edge number offset (cm)",
+        default=0.1,
+        min=0
+    )
+    edge_number_color : FloatVectorProperty(
+        name="Edge number color",
+        subtype="COLOR",
+        default=[0.0,0.0,0.0],
+        min=0,
+        max=1
+    )
+    lines_color : FloatVectorProperty(
+        name="Line color",
+        subtype="COLOR",
+        default=[0.0,0.0,0.0],
+        min=0,
+        max=1
+    )
+    cut_edge_ls: EnumProperty(
+        name="Cut edge linestyle",
+        items=[
+            ("-", "-", "", "", 0),
+            ("..", "..", "", "", 1),
+            ("-.", "-.", "", "", 2),
+            ("--.", "--.", "", "", 3),
+            ("-..", "-..", "", "", 4),
+        ],
+        default="-"
+    )
+    convex_fold_edge_ls: EnumProperty(
+        name="Convex fold edges linestyle",
+        items=[
+            ("-", "-", "", "", 0),
+            ("..", "..", "", "", 1),
+            ("-.", "-.", "", "", 2),
+            ("--.", "--.", "", "", 3),
+            ("-..", "-..", "", "", 4),
+        ],
+        default=".."
+    )
+    concave_fold_edge_ls: EnumProperty(
+        name="Concave fold edges linestyle",
+        items=[
+            ("-", "-", "", "", 0),
+            ("..", "..", "", "", 1),
+            ("-.", "-.", "", "", 2),
+            ("--.", "--.", "", "", 3),
+            ("-..", "-..", "", "", 4),
+        ],
+        default="--."
+    )
+    glue_flap_ls: EnumProperty(
+        name="Glue flap edges linestyle",
+        items=[
+            ("-", "-", "", "", 0),
+            ("..", "..", "", "", 1),
+            ("-.", "-.", "", "", 2),
+            ("--.", "--.", "", "", 3),
+            ("-..", "-..", "", "", 4),
+        ],
+        default="-"
+    )
+    apply_textures: BoolProperty(
+        name="Apply textures",
+        default=True
+    )
+    print_on_inside: BoolProperty(
+        name="Prints inside of mesh",
+        default=True
+    )
+    print_two_sided: BoolProperty(
+        name="Two sided texture mode",
+        default=False
+    )
+    hide_fold_edge_angle_th: FloatProperty(
+        name="Fold edge hide angle (in deg)",
+        default=1,
+        min=0,
+        max=180
+    )
+
+    def execute(self, context):
+        print("executed polyzamboni export operator")
+
+        # first, check if the selected model can be unfolded
+        ao = context.active_object
+        active_cutgraph : cutgraph.CutGraph = globals.PZ_CUTGRAPHS[ao[CUTGRAPH_ID_PROPERTY_NAME]]
+        if not active_cutgraph.all_components_have_unfoldings():
+            print("POLYZAMBONI WARNING: You exported a mesh that is not fully foldable yet!")
+
+        # prepare everything
+        component_print_info = active_cutgraph.create_print_data_for_all_components(ao, active_cutgraph.compute_scaling_factor_for_target_model_height(self.target_model_height))
+        page_arrangement = fit_components_on_pages(component_print_info, 
+                                                   exporters.paper_sizes[self.paper_size], 
+                                                   self.page_margin, 
+                                                   self.space_between_components, 
+                                                   self.one_material_per_page)
+
+        # initialize exporter
+        pdf_exporter = exporters.MatplotlibBasedExporter("pdf", 
+                                                         paper_size=self.paper_size, 
+                                                         line_width=self.line_width,
+                                                         cut_edge_ls=self.cut_edge_ls,
+                                                         convex_fold_edge_ls=self.convex_fold_edge_ls,
+                                                         concave_fold_edge_ls=self.concave_fold_edge_ls,
+                                                         glue_flap_ls=self.glue_flap_ls,
+                                                         fold_hide_threshold_angle=self.hide_fold_edge_angle_th,
+                                                         show_edge_numbers=self.show_edge_numbers,
+                                                         edge_number_font_size=self.edge_number_font_size,
+                                                         edge_number_offset=self.edge_number_offset,
+                                                         show_build_step_numbers=self.show_step_numbers,
+                                                         apply_main_texture=self.apply_textures,
+                                                         print_on_inside=self.print_on_inside,
+                                                         two_sided_w_texture=self.print_two_sided,
+                                                         color_of_lines=self.lines_color,
+                                                         color_of_edge_numbers=self.edge_number_color)
+
+        filename, extension = os.path.splitext(self.filepath)
+        
+        # export file
+        pdf_exporter.export(page_arrangement, filename)
+
+        return { 'FINISHED' }
+
+    @classmethod
+    def poll(cls, context):
+        active_object = context.active_object
+        is_mesh = active_object is not None and active_object.type == 'MESH' and (context.mode == 'EDIT_MESH' or active_object.select_get())
+
+        return is_mesh and CUTGRAPH_ID_PROPERTY_NAME in active_object
+
+
 polyzamboni_keymaps = []
+
+def menu_func_polyzamboni_export_pdf(self, context):
+    self.layout.operator(PolyZamboniExportPDFOperator.bl_idname, text="Polyzamboni Export PDF")
 
 def register():
     bpy.utils.register_class(FlatteningOperator)
@@ -369,6 +583,9 @@ def register():
     bpy.utils.register_class(FlipGlueFlapsOperator)
     bpy.utils.register_class(ZamboniGlueFlapDesignOperator)
     bpy.utils.register_class(ZamboniGLueFlapEditingPieMenu)
+    bpy.utils.register_class(PolyZamboniExportPDFOperator)
+
+    bpy.types.TOPBAR_MT_file_export.append(menu_func_polyzamboni_export_pdf)
 
     windowmanager = bpy.context.window_manager
     if windowmanager.keyconfigs.addon:
@@ -396,6 +613,10 @@ def unregister():
     bpy.utils.unregister_class(FlipGlueFlapsOperator)
     bpy.utils.unregister_class(ZamboniGlueFlapDesignOperator)
     bpy.utils.unregister_class(ZamboniGLueFlapEditingPieMenu)
+    bpy.utils.unregister_class(PolyZamboniExportPDFOperator)
+
+    #if menu_func_polyzamboni_export in bpy.types.TOPBAR_MT_file_export:
+    bpy.types.TOPBAR_MT_file_export.remove(menu_func_polyzamboni_export_pdf)
 
     for keymap, keymap_item in polyzamboni_keymaps:
         keymap.keymap_items.remove(keymap_item)

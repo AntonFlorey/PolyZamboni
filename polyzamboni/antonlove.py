@@ -25,7 +25,6 @@ def main():
     model = AntonModel(initial_vertex_positions=initial_vertex_positions)
 
     optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
-
     
     while True:
         optimizer.zero_grad()

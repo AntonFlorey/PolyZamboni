@@ -14,6 +14,9 @@ if "bpy" in locals():
     importlib.reload(locals()["ui"])
     importlib.reload(locals()["operators"])
     importlib.reload(locals()["properties"])
+    importlib.reload(locals()["drawing"])
+    importlib.reload(locals()["globals"])
+    importlib.reload(locals()["callbacks"])
 else:
     import bpy
     from .polyzamboni import globals

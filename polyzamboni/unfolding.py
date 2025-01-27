@@ -35,6 +35,7 @@ class Unfolding():
         self.flap_collides_with = {}
         self.affine_transform_to_root_coord_system_per_face = {}
         self.triangulated_faces_2d = {}
+        self.triangulation_indices = {}
         self.interior_affine_transforms = {f_id : {} for f_id in face_list}
         self.local_2d_coord_system_per_face = {}
         self.glue_flaps_per_face = {f_id : {} for f_id in face_list} # store glue flaps here
@@ -68,7 +69,9 @@ class Unfolding():
                 # root face
                 self.affine_transform_to_root_coord_system_per_face[face_index] = geometry.AffineTransform2D()
                 verts_in_local_space_curr = [geometry.to_local_coords(v.co, *self.local_2d_coord_system_per_face[face_index]) for v in face.verts]
-                self.triangulated_faces_2d[face_index] = geometry.triangulate_2d_polygon(verts_in_local_space_curr, [v.index for v in face.verts], True)[0]
+                root_face_triangles, root_face_triangle_ids = geometry.triangulate_2d_polygon(verts_in_local_space_curr, [v.index for v in face.verts], True)
+                self.triangulated_faces_2d[face_index] = root_face_triangles
+                self.triangulation_indices[face_index] = root_face_triangle_ids
                 # print("root face unfolded")
                 continue
             
@@ -92,7 +95,9 @@ class Unfolding():
 
             # compute triangles in root face coords
             verts_in_local_space_root = [self.get_globally_consistend_2d_coord_in_face(v.co, face.index) for v in face.verts]
-            self.triangulated_faces_2d[face_index] = geometry.triangulate_2d_polygon(verts_in_local_space_root, [v.index for v in face.verts], True)[0]
+            curr_face_triangles, curr_face_triangle_ids = geometry.triangulate_2d_polygon(verts_in_local_space_root, [v.index for v in face.verts], True)
+            self.triangulated_faces_2d[face_index] = curr_face_triangles
+            self.triangulation_indices[face_index] = curr_face_triangle_ids
 
             # estimate error produced by the affine transformation for debugging
             for connecting_v in connecting_edge.verts:
@@ -237,5 +242,4 @@ class Unfolding():
             self.glue_flaps_per_face[face_index] = {}
         # reset overlap info
         self.flap_collides_with = {}
-
-    
+            
