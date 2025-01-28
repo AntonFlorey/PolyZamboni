@@ -52,7 +52,9 @@ class PolyzamboniExporter(ABC):
                  print_on_inside = True, 
                  two_sided_w_texture = False,
                  color_of_lines = [0,0,0],
-                 color_of_edge_numbers = [0,0,0]):
+                 color_of_edge_numbers = [0,0,0],
+                 color_of_build_steps = [0,0,0],
+                 build_step_font_size = 10):
         self.output_format = output_format
         self.paper_size = paper_sizes[paper_size]
         self.line_width = line_width
@@ -70,6 +72,8 @@ class PolyzamboniExporter(ABC):
         self.fold_hide_threshold_angle = fold_hide_threshold_angle
         self.color_of_lines = color_of_lines
         self.color_of_edge_numbers = color_of_edge_numbers
+        self.build_step_number_font_size = build_step_font_size
+        self.builf_step_number_color = color_of_build_steps
 
         self.texture_images = {}
 
@@ -124,6 +128,12 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
     def __draw_line(self, ax : axes.Axes, line_coords, linestyle, color):
         line = lines.Line2D([line_coords[0][0], line_coords[1][0]], [line_coords[0][1], line_coords[1][1]], linewidth=self.line_width, linestyle=custom_line_styles[linestyle], c=color, solid_capstyle="round")
         ax.add_line(line)
+
+    def __write_text(self, ax : axes.Axes, text, coord, text_size, color, page_transform : AffineTransform2D):
+        page_coord_text = self.__transform_component_coord_to_page_coord(coord, page_transform, self.prints_on_model_inside)
+        if text == "6" or text == "9":
+            text += "."
+        ax.text(page_coord_text[0], page_coord_text[1], text, fontsize=text_size, ha="center", va="center", color=color)
 
     def __write_text_along_line(self, ax : axes.Axes, line_coords, text, text_size, color = "black", offset_cm=0.1, flipped=False):
         start = line_coords[0]
@@ -256,6 +266,13 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
                         component_print_data : ComponentPrintData = component_on_page["print data"]
                         component_page_transform : AffineTransform2D = component_on_page["page coord transform"]
                         
+                        if self.show_build_step_numbers:
+                            self.__write_text(ax, str(component_print_data.build_step_number), 
+                                              component_print_data.build_step_number_position,
+                                              self.build_step_number_font_size,
+                                              self.builf_step_number_color,
+                                              component_page_transform)
+
                         for cut_edge_print_data in component_print_data.cut_edges:
                             self.__draw_cut_edge(ax, cut_edge_print_data, component_page_transform)
                         

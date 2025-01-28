@@ -432,6 +432,11 @@ class PolyZamboniExportPDFOperator(bpy.types.Operator, ExportHelper):
         default=8,
         min = 1
     )
+    build_steps_font_size : FloatProperty(
+        name="Build steps font size",
+        default=16,
+        min=1
+    )
     edge_number_offset : FloatProperty(
         name="Edge number offset (cm)",
         default=0.1,
@@ -446,6 +451,13 @@ class PolyZamboniExportPDFOperator(bpy.types.Operator, ExportHelper):
     )
     lines_color : FloatVectorProperty(
         name="Line color",
+        subtype="COLOR",
+        default=[0.0,0.0,0.0],
+        min=0,
+        max=1
+    )
+    steps_color : FloatVectorProperty(
+        name="Build steps color",
         subtype="COLOR",
         default=[0.0,0.0,0.0],
         min=0,
@@ -514,6 +526,8 @@ class PolyZamboniExportPDFOperator(bpy.types.Operator, ExportHelper):
         max=180
     )
 
+
+
     def execute(self, context):
         print("executed polyzamboni export operator")
 
@@ -548,7 +562,9 @@ class PolyZamboniExportPDFOperator(bpy.types.Operator, ExportHelper):
                                                          print_on_inside=self.print_on_inside,
                                                          two_sided_w_texture=self.print_two_sided,
                                                          color_of_lines=self.lines_color,
-                                                         color_of_edge_numbers=self.edge_number_color)
+                                                         color_of_edge_numbers=self.edge_number_color,
+                                                         color_of_build_steps=self.steps_color,
+                                                         build_step_font_size=self.build_steps_font_size)
 
         filename, extension = os.path.splitext(self.filepath)
         

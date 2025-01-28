@@ -189,6 +189,12 @@ def affine_2d_transformation_between_two_2d_spaces_on_same_plane(space_a, space_
 
     return AffineTransform2D(A, orig_b_in_space_a)
 
+def signed_point_dist_to_line(point, v_a, v_b):
+    v_ab = v_b - v_a
+    n = np.array([v_ab[1], -v_ab[0]]) # rotate 90 degree
+    n = n / np.linalg.norm(n)
+    return np.dot(n,point - v_a)
+
 def determinant_2d(col_1, col_2):
     return col_1[0] * col_2[1] - col_1[1] * col_2[0]
 

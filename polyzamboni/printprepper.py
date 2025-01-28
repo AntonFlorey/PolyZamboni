@@ -35,9 +35,11 @@ class ComponentPrintData():
         self.fold_edges = []
         self.glue_flap_edges = []
         self.colored_triangles = []
-        self.dominating_mat_index = 0 # if different materials should be printed on different pages
+        self.dominating_mat_index = 0 # we need this if different materials should be printed on different pages
+        self.build_step_number = 0
+        self.build_step_number_position = np.zeros(2)
         pass
-
+    
     def __update_bb_after_adding_edge(self, edge_coords):
         self.lower_left = np.minimum(self.lower_left, edge_coords[0])
         self.lower_left = np.minimum(self.lower_left, edge_coords[1])
@@ -58,6 +60,54 @@ class ComponentPrintData():
 
     def add_texured_triangle(self, triangle_w_colordata : ColoredTriangleData):
         self.colored_triangles.append(triangle_w_colordata)
+
+    def __all_edge_data(self):
+        for cut_edge_data in self.cut_edges:
+            yield cut_edge_data
+        for fold_edge_data in self.fold_edges:
+            yield fold_edge_data
+        for glue_flap_edge_data in self.glue_flap_edges:
+            yield glue_flap_edge_data
+
+    def __pca(self):
+        # collect all coords along cut edges (not glue flaps for now)
+        boundary_coords = np.array([cut_edge_data.coords[0] for cut_edge_data in self.cut_edges])
+        mean_shifted_coords = boundary_coords - np.mean(boundary_coords, axis=0)
+        corr_mat = mean_shifted_coords.T @ mean_shifted_coords
+        eigenvalues, eigenvectors = np.linalg.eigh(corr_mat)
+        return np.mean(boundary_coords, axis=0), eigenvectors
+
+    def align_horizontally_via_pca(self):
+        boundary_cog, pca_basis = self.__pca()
+        shift_cog_to_orig = AffineTransform2D(affine_part=-boundary_cog)
+        long_axis_eigvec = pca_basis[:,1] # eigenvector of largest eigenvalue
+        rotate_x_axis_to_long_axis = AffineTransform2D(linear_part=np.hstack( [long_axis_eigvec.reshape((2,1)), np.array([long_axis_eigvec[1], -long_axis_eigvec[0]]).reshape((2,1))] ))
+        horizontal_alignment_transform = shift_cog_to_orig.inverse() @ rotate_x_axis_to_long_axis @ shift_cog_to_orig
+        self.apply_affine_transform_to_all_coords(horizontal_alignment_transform)
+
+    def align_vertically_via_pca(self):
+        boundary_cog, pca_basis = self.__pca()
+        shift_cog_to_orig = AffineTransform2D(affine_part=-boundary_cog)
+        long_axis_eigvec = pca_basis[:,1] # eigenvector of largest eigenvalue
+        rotate_y_axis_to_long_axis = AffineTransform2D(linear_part=np.hstack( [-np.array([long_axis_eigvec[1], -long_axis_eigvec[0]]).reshape((2,1)), long_axis_eigvec.reshape((2,1))] ))
+        vertical_alignment_transform = shift_cog_to_orig.inverse() @ rotate_y_axis_to_long_axis @ shift_cog_to_orig
+        self.apply_affine_transform_to_all_coords(vertical_alignment_transform)
+
+    def apply_affine_transform_to_all_coords(self, affine_transform):
+        self.lower_left = np.inf * np.ones(2)
+        self.upper_right = -np.inf * np.ones(2)
+
+        # edges
+        for edge_data in self.__all_edge_data():
+            edge_data.coords = tuple([affine_transform * coord for coord in edge_data.coords])
+            self.__update_bb_after_adding_edge(edge_data.coords)
+
+        # triangles
+        for triangle_data in self.colored_triangles:
+            triangle_data.coords = tuple([affine_transform * coord for coord in triangle_data.coords])
+
+        # build step number
+        self.build_step_number = affine_transform * self.build_step_number
 
 class PagePartitionNode():
     def __init__(self, ll, ur):
@@ -113,7 +163,7 @@ def recursive_search_for_all_free_spaces(component : ComponentPrintData, node : 
         free_spaces.append(node)
     recursive_search_for_all_free_spaces(component, node.child_one, free_spaces)
     recursive_search_for_all_free_spaces(component, node.child_two, free_spaces)
-    
+
 def recursively_collect_all_page_components(node : PagePartitionNode, component_list, target_list):
     if node is None:
         return
@@ -129,6 +179,12 @@ def fit_components_on_pages(components, page_size, page_margin, component_margin
 
     page_partitions = { 0 : [create_new_page_partition(page_size, page_margin)]}
 
+
+    #preprocess components
+    component_print_data : ComponentPrintData
+    for component_pd in components:
+        component_pd.align_vertically_via_pca()
+
     sorted_components = sorted(components, key = lambda c : (c.upper_right[0] - c.lower_left[0]) * (c.upper_right[1] - c.lower_left[1]), reverse=True)
     # go through all components ordered by their bounding box area
     for current_component_id, component_print_data in enumerate(sorted_components):
@@ -139,11 +195,20 @@ def fit_components_on_pages(components, page_size, page_margin, component_margin
         for mat_id, page_list in page_partitions.items():
             if different_materials_on_different_pages and mat_id != component_print_data.dominating_mat_index:
                 continue
-            node_candidates = []
             # recursively search for free space
             for page_root in page_list:
                 recursive_search_for_all_free_spaces(component_print_data, page_root, node_candidates)
-    
+
+        if len(node_candidates) == 0:
+            # align horizontally and try again
+            component_print_data.align_horizontally_via_pca()
+            for mat_id, page_list in page_partitions.items():
+                if different_materials_on_different_pages and mat_id != component_print_data.dominating_mat_index:
+                    continue
+                # recursively search for free space
+                for page_root in page_list:
+                    recursive_search_for_all_free_spaces(component_print_data, page_root, node_candidates)
+
         if len(node_candidates) == 0:
             print("had to begin a new page for component")
             # create a new page for this component

@@ -4,7 +4,7 @@ import numpy as np
 import os
 import networkx as nx
 import mathutils
-from .geometry import triangulate_3d_polygon
+from .geometry import triangulate_3d_polygon, signed_point_dist_to_line
 from .constants import LOCKED_EDGES_PROP_NAME, CUT_CONSTRAINTS_PROP_NAME, PERFECT_REGION, BAD_GLUE_FLAPS_REGION, OVERLAPPING_REGION, NOT_FOLDABLE_REGION, GLUE_FLAP_NO_OVERLAPS, GLUE_FLAP_WITH_OVERLAPS, GLUE_FLAP_TO_LARGE
 from .unfolding import Unfolding, pos_list_to_triangles
 from collections import deque
@@ -158,6 +158,42 @@ class CutGraph():
             self.unfolded_components[c_id] = old_unfolded_components[old_vertex_to_component_dict[list(component)[0]]]
         # do a sanity check
         self.assert_all_faces_have_components_and_unfoldings()
+
+    def adjacent_connected_components_of_component(self, component_id):
+        self.mesh.faces.ensure_lookup_table()
+        self.mesh.edges.ensure_lookup_table()
+        neighbour_ids = set()
+        for component_face_index in self.components_as_sets[component_id]:
+            for nb_face_index in self.dualgraph.neighbors(component_face_index):
+                nb_component_index = self.vertex_to_component_dict[nb_face_index]
+                if nb_component_index == component_id:
+                    continue
+                neighbour_ids.add(nb_component_index)
+        return neighbour_ids
+
+    def generate_bfs_build_oder(self, starting_face_index):
+        start_component_id = self.vertex_to_component_dict[starting_face_index]
+        
+        self.component_build_indices = {}
+        visited_components = set()
+        next_build_index = 1
+        component_queue = deque()
+        component_queue.append(start_component_id)
+
+        while component_queue:
+            curr_component_id = component_queue.popleft()
+            if curr_component_id in visited_components:
+                continue
+            visited_components.add(curr_component_id)
+            self.component_build_indices[curr_component_id] = next_build_index
+            next_build_index += 1
+            for nb_component_index in self.adjacent_connected_components_of_component(curr_component_id):
+                if nb_component_index in visited_components:
+                    continue
+                component_queue.append(nb_component_index)
+
+        # sanity check
+        assert next_build_index == len(self.components_as_sets.keys()) + 1
 
     #################################
     #           Unfolding           #
@@ -659,6 +695,7 @@ class CutGraph():
 
             # collect cut edges, fold edges and triangles of all faces
             fold_edge_index_set = set()
+            face_cog_scores = {}
             for face_index in faces_ids_in_component:
                 curr_face : bmesh.types.BMFace = self.mesh.faces[face_index]
 
@@ -671,12 +708,15 @@ class CutGraph():
                     curr_e = self.halfedge_to_edge[(face_vertex_loop[v_i].index, face_vertex_loop[v_j].index)]
                     edge_to_correct_halfedge_map[curr_e.index] = (face_vertex_loop[v_i], face_vertex_loop[v_j])
 
+                face_cog = np.mean([scaling_factor * unfolding_of_curr_component.get_globally_consistend_2d_coord_in_face(v.co, face_index) for v in face_vertex_loop], axis=0)
+
                 # collect all edges
+                dist_cog_edge_sum = 0
                 for curr_edge in curr_face.edges:
                     # compute edge coords in unfolding space
                     vertex_coords_3d = [v.co for v in edge_to_correct_halfedge_map[curr_edge.index]]    
                     vertex_coords_unfolded = [scaling_factor * unfolding_of_curr_component.get_globally_consistend_2d_coord_in_face(co_3d, face_index) for co_3d in vertex_coords_3d]
-
+                    dist_cog_edge_sum += signed_point_dist_to_line(face_cog, vertex_coords_unfolded[0], vertex_coords_unfolded[1])
                     if curr_edge.is_boundary or not self.mesh_edge_is_not_cut(curr_edge):
                         # this is a cut edge
                         curr_component_print_data.add_cut_edge(CutEdgeData(tuple(vertex_coords_unfolded), curr_edge.index))
@@ -684,6 +724,8 @@ class CutGraph():
                         # this is a fold edge
                         fold_edge_index_set.add(curr_edge.index)
                         curr_component_print_data.add_fold_edge(FoldEdgeData(tuple(vertex_coords_unfolded), curr_edge.is_convex, curr_edge.calc_face_angle()))
+                # set cog score
+                face_cog_scores[face_index] = dist_cog_edge_sum / len(curr_face.edges)
 
                 # get face material info
                 mat_slots = obj.material_slots
@@ -737,6 +779,13 @@ class CutGraph():
                     if len(flap_triangles) == 2:
                         curr_component_print_data.add_glue_flap_edge(GlueFlapEdgeData((scaling_factor * flap_triangles[1][1],scaling_factor * flap_triangles[1][2])))
 
+            face_with_step_number = list(sorted(faces_ids_in_component, key=lambda face_index : face_cog_scores[face_index], reverse=True))[0] # sorting in the end is a bit meh but whatever
+            step_number_pos = np.mean([scaling_factor * unfolding_of_curr_component.get_globally_consistend_2d_coord_in_face(v.co, face_index) for v in self.mesh.faces[face_with_step_number].verts], axis=0)
+
+            curr_component_print_data.build_step_number_position = step_number_pos
+            if hasattr(self, "component_build_indices"):
+                curr_component_print_data.build_step_number = self.component_build_indices[c_id]
+            
             # print("Bounding Box of component to print:", curr_component_print_data.lower_left, curr_component_print_data.upper_right)
             # print("collected cut edges of component:", len(curr_component_print_data.cut_edges))
             # print("collected fold edges of component:", len(curr_component_print_data.fold_edges))
@@ -745,3 +794,4 @@ class CutGraph():
             all_print_data.append(curr_component_print_data)
 
         return all_print_data
+    
