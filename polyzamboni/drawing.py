@@ -225,6 +225,7 @@ def update_all_polyzamboni_drawings(self, context):
         draw_settings = context.scene.polyzamboni_drawing_settings
     except AttributeError:
         print("Context not yet available...")
+        # Trigger a redraw of all screen areas
         return
     
     # hide everything
@@ -232,6 +233,9 @@ def update_all_polyzamboni_drawings(self, context):
 
     # draw user provided cuts
     if not draw_settings.drawing_enabled or globals.PZ_CURRENT_CUTGRAPH_ID is None:
+        for area in bpy.context.screen.areas:
+            if area.type == 'VIEW_3D':
+                area.tag_redraw()
         return
     
     # obtain current cutgraph to draw

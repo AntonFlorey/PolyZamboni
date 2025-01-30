@@ -85,57 +85,33 @@ class DrawSettings(bpy.types.PropertyGroup):
         update=update_all_polyzamboni_drawings
     )
 
-class PrintSettings(bpy.types.PropertyGroup):
-    target_model_height: FloatProperty(
-        name="Target model height (cm)",
-        default=15,
-        min=1
-    )
-    # Enum Item: (identifier, name, description, icon, number)
-    save_format: EnumProperty(
-        name="Output format",
-        items=[
-            ("pdf", "pdf", "", "", 0),
-            ("svg", "svg", "", "", 1)
-        ],
-        default="pdf"
-    )
-    show_step_numbers : BoolProperty(
-        name="Show build steps",
-        default=True
-    )
-    show_edge_numbers : BoolProperty(
-        name="Show edge numbers",
-        default=True
-    )
-
 class ZamboniSettingsPerObject(bpy.types.PropertyGroup):
     glue_flap_height : FloatProperty(
         name="Glue flap height",
-        description="Controls how far the glue flaps extend.",
+        description="Controls how far the glue flaps extend",
         default=1.0,
         min=0.01
     )
     glue_flap_angle : FloatProperty(
         name="Glue flap angle",
-        description="Determines the shape of all glue flaps.",
+        description="Determines the shape of all glue flaps",
         default=45,
         min=10,
         max=170
     )
     prefer_alternating_flaps : BoolProperty(
         name="ZigZag Flaps",
-        description="If glue flaps should alternate along a patch boundary.",
+        description="If glue flaps should alternate along a patch boundary",
         default=True
     )
     lock_glue_flaps : BoolProperty(
         name="Lock Flap Positions",
-        description="Determines if glue flaps are allowed to be relocated when applying new settings.",
+        description="Determines if glue flaps are allowed to be relocated when applying new settings",
         default=False
     )
     apply_auto_cuts_to_previev : BoolProperty(
         name="Auto Cuts Preview",
-        description="If set to True, all automatically generated cuts will be condidered when showing a preview of the mesh unfolding.",
+        description="If set to True, all automatically generated cuts will be considered when showing a preview of the mesh unfolding",
         default=False
     )
 
@@ -146,19 +122,15 @@ print("registering polyzamboni properties")
 def register():
     bpy.utils.register_class(FlatteningSettings)
     bpy.utils.register_class(DrawSettings)
-    bpy.utils.register_class(PrintSettings)
     bpy.utils.register_class(ZamboniSettingsPerObject)
     Scene.polyzamboni_flattening_settings = bpy.props.PointerProperty(type=FlatteningSettings)
     Scene.polyzamboni_drawing_settings = bpy.props.PointerProperty(type=DrawSettings)
-    Scene.polyzamboni_print_settings = bpy.props.PointerProperty(type=PrintSettings)
     bpy.types.Object.polyzamboni_object_prop = bpy.props.PointerProperty(type=ZamboniSettingsPerObject)
 
 def unregister():
     bpy.utils.unregister_class(FlatteningSettings)
     bpy.utils.unregister_class(DrawSettings)
-    bpy.utils.unregister_class(PrintSettings)
     bpy.utils.unregister_class(ZamboniSettingsPerObject)
     del Scene.polyzamboni_flattening_settings
     del Scene.polyzamboni_drawing_settings
-    del Scene.polyzamboni_print_settings
     del bpy.types.Object.polyzamboni_object_prop

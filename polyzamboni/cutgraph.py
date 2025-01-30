@@ -194,6 +194,21 @@ class CutGraph():
 
         # sanity check
         assert next_build_index == len(self.components_as_sets.keys()) + 1
+        self.build_steps_valid = True
+
+    def every_component_has_build_step(self):
+        if not hasattr(self, "component_build_indices"):
+            return False
+        for c_id in self.components_as_sets.keys():
+            if c_id not in self.component_build_indices.keys():
+                return False
+        return True
+
+    def check_if_build_steps_are_present_and_valid(self):
+        if hasattr(self, "build_steps_valid") and not self.build_steps_valid:
+            return self.build_steps_valid
+        self.build_steps_valid = self.every_component_has_build_step() and len(self.components_as_sets.keys()) == len(self.component_build_indices.keys())
+        return self.build_steps_valid
 
     #################################
     #           Unfolding           #
@@ -281,7 +296,7 @@ class CutGraph():
             cut_coordinates.append(self.world_matrix @ (vert2.co + normal_offset * vert1.normal))
         return cut_coordinates
 
-    def get_polygon_outline_for_face_drawing(self, face_index, edge_margin = 0.02):
+    def get_polygon_outline_for_face_drawing(self, face_index, edge_margin = 0.05):
         self.ensure_halfedge_to_edge_table()
         face = self.mesh.faces[face_index]
         face_normal = face.normal
@@ -729,7 +744,6 @@ class CutGraph():
 
                 # get face material info
                 mat_slots = obj.material_slots
-                # print("mat slots found:", len(mat_slots))
                 color = None
                 text_path = None
                 if curr_face.material_index < len(mat_slots):
@@ -737,8 +751,11 @@ class CutGraph():
                     curr_material : bpy.types.Material = curr_material_slot.material
                     color = curr_material.diffuse_color
 
+                    # try to get color and texture image path from node tree
                     if curr_material.use_nodes:
                         for node in curr_material.node_tree.nodes:
+                            if isinstance(node, bpy.types.ShaderNodeBsdfPrincipled):
+                                color = np.array(node.inputs['Base Color'].default_value)
                             if not isinstance(node, bpy.types.ShaderNodeTexImage):
                                 continue
                             if not node.image:
@@ -746,7 +763,6 @@ class CutGraph():
                             full_path = bpy.path.abspath(node.image.filepath, library=node.image.library)
                             norm_path = os.path.normpath(full_path)
                             text_path = norm_path
-                            # print("Path to texture:", text_path)
 
                 # collect all faces
                 triangles_in_unfolding_space = pos_list_to_triangles([scaling_factor * tri_coord for tri_coord in unfolding_of_curr_component.triangulated_faces_2d[face_index]])
@@ -754,21 +770,14 @@ class CutGraph():
                 # uvs
                 uvs_available = len(obj.data.uv_layers) > 0
                 uv_layer = self.mesh.loops.layers.uv.verify()
-                # print("found uv layer:", uv_layer)
                 v_id_to_uv_in_face = {}
 
                 for loop in curr_face.loops:
-                    # print("vertex uv:",loop[uv_layer].uv)
                     v_id_to_uv_in_face[loop.vert.index] = loop[uv_layer].uv
 
                 triangle_uvs = [tuple([v_id_to_uv_in_face[v_id] for v_id in triangle_indices]) if uvs_available else None for triangle_indices in unfolding_of_curr_component.triangulation_indices[face_index]]
 
                 for tri_coords, tri_uv in zip(triangles_in_unfolding_space, triangle_uvs):
-                    # print("Added textured triangle:")
-                    # print("coords:", tri_coords)
-                    # print("uvs:", tri_uv)
-                    # print("texture path:", text_path)
-                    # print("flat color:", np.array(color))
                     curr_component_print_data.add_texured_triangle(ColoredTriangleData(tri_coords, tri_uv, text_path, color))
 
                 # collect edges for glue flaps
@@ -780,17 +789,12 @@ class CutGraph():
                         curr_component_print_data.add_glue_flap_edge(GlueFlapEdgeData((scaling_factor * flap_triangles[1][1],scaling_factor * flap_triangles[1][2])))
 
             face_with_step_number = list(sorted(faces_ids_in_component, key=lambda face_index : face_cog_scores[face_index], reverse=True))[0] # sorting in the end is a bit meh but whatever
-            step_number_pos = np.mean([scaling_factor * unfolding_of_curr_component.get_globally_consistend_2d_coord_in_face(v.co, face_index) for v in self.mesh.faces[face_with_step_number].verts], axis=0)
+            step_number_pos = np.mean([scaling_factor * unfolding_of_curr_component.get_globally_consistend_2d_coord_in_face(v.co, face_with_step_number) for v in self.mesh.faces[face_with_step_number].verts], axis=0)
 
             curr_component_print_data.build_step_number_position = step_number_pos
-            if hasattr(self, "component_build_indices"):
+            if self.every_component_has_build_step():
                 curr_component_print_data.build_step_number = self.component_build_indices[c_id]
-            
-            # print("Bounding Box of component to print:", curr_component_print_data.lower_left, curr_component_print_data.upper_right)
-            # print("collected cut edges of component:", len(curr_component_print_data.cut_edges))
-            # print("collected fold edges of component:", len(curr_component_print_data.fold_edges))
-            # print("collected triangles of component:", len(curr_component_print_data.colored_triangles))
-            # print("collected glue flap edges:", len(curr_component_print_data.glue_flap_edges))
+
             all_print_data.append(curr_component_print_data)
 
         return all_print_data

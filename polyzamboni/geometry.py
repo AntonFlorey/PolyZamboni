@@ -191,7 +191,7 @@ def affine_2d_transformation_between_two_2d_spaces_on_same_plane(space_a, space_
 
 def signed_point_dist_to_line(point, v_a, v_b):
     v_ab = v_b - v_a
-    n = np.array([v_ab[1], -v_ab[0]]) # rotate 90 degree
+    n = np.array([-v_ab[1], v_ab[0]]) # rotate 90 degree
     n = n / np.linalg.norm(n)
     return np.dot(n,point - v_a)
 

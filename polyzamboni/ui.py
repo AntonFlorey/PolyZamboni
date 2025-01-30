@@ -14,11 +14,11 @@ class MainPanel(bpy.types.Panel):
         row = layout.row()
 
         row.label(text="thanks for using me!", icon="FUND")
-        row = layout.row()
-        col1 = row.column()
-        col2 = row.column()
-        col1.operator("wm.flattening_op")
-        col2.label(icon="AUTO")
+        # row = layout.row()
+        # col1 = row.column()
+        # col2 = row.column()
+        # col1.operator("wm.flattening_op")
+        # col2.label(icon="AUTO")
 
         if CUTGRAPH_ID_PROPERTY_NAME not in context.active_object:
             row = layout.row()
@@ -28,9 +28,11 @@ class MainPanel(bpy.types.Panel):
             col2.label(icon="SHADERFX")
         else:
             row = layout.row()
+            row.label(text="Press Alt+C in Edit-Mode :)")
+            row = layout.row()
             col1 = row.column()
             col2 = row.column()
-            col1.operator("polyzamboni.cut_reset_op")
+            col1.operator("polyzamboni.remove_all_op")
             col2.label(icon="TRASH")
             row = layout.row()
             col1 = row.column()
@@ -48,8 +50,19 @@ class MainPanel(bpy.types.Panel):
             row = layout.row()
             col1 = row.column()
             col2 = row.column()
+            col1.operator("polyzamboni.build_order_op")
+            col2.label(icon="MOD_BUILD")
+            row = layout.row()
+            col1 = row.column()
+            col2 = row.column()
             col1.prop(zamboni_object_settings, "apply_auto_cuts_to_previev", toggle=1)
             col2.label(icon="LIGHT_DATA")
+
+            row = layout.row()
+            col1 = row.column()
+            col2 = row.column()
+            col1.operator("polyzamboni.export_operator_pdf")
+            col2.label(icon="FILE_IMAGE")
             pass
 
 class GlueFlapSettingsPanel(bpy.types.Panel):
@@ -112,27 +125,6 @@ class FlatteningSettingsPanel(bpy.types.Panel):
         row.prop(flattening_settings, "det_weight")
         row = layout.row()
         row.prop(flattening_settings, "learning_rate")
-        
-class PrintSettingsPanel(bpy.types.Panel):
-    bl_label = "Print Settings"
-    bl_idname = "POLYZAMBONI_PT_PrintSettingsPanel"
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-    bl_category = "PolyZamboni"
-    bl_parent_id = "POLYZAMBONI_PT_MainPanel"
-
-    def draw(self, context : bpy.types.Context):
-        layout = self.layout
-        scene = context.scene
-        print_settings = scene.polyzamboni_print_settings
-        row = layout.row()
-        row.prop(print_settings, "save_format")
-        row = layout.row()
-        row.prop(print_settings, "target_model_height")
-        row = layout.row()
-        row.prop(print_settings, "show_step_numbers")
-        row = layout.row()
-        row.prop(print_settings, "show_edge_numbers")
 
 class DrawSettingsPanel(bpy.types.Panel):
     bl_label = "Draw Settings"
@@ -176,7 +168,6 @@ def register():
     bpy.utils.register_class(MainPanel)
     bpy.utils.register_class(GlueFlapSettingsPanel)
     bpy.utils.register_class(FlatteningSettingsPanel)
-    bpy.utils.register_class(PrintSettingsPanel)
     bpy.utils.register_class(DrawSettingsPanel)
     bpy.utils.register_class(DebugPanel)
 
@@ -184,6 +175,5 @@ def unregister():
     bpy.utils.unregister_class(MainPanel)
     bpy.utils.unregister_class(GlueFlapSettingsPanel)
     bpy.utils.unregister_class(FlatteningSettingsPanel)
-    bpy.utils.unregister_class(PrintSettingsPanel)
     bpy.utils.unregister_class(DrawSettingsPanel)
     bpy.utils.unregister_class(DebugPanel)

@@ -114,6 +114,8 @@ class InitializeCuttingOperator(bpy.types.Operator):
         ao_pz_settings = ao.polyzamboni_object_prop
         new_cutgraph = cutgraph.CutGraph(ao, np.deg2rad(ao_pz_settings.glue_flap_angle), ao_pz_settings.glue_flap_height, ao_pz_settings.prefer_alternating_flaps)
         globals.add_cutgraph(ao, new_cutgraph)
+        globals.PZ_CURRENT_CUTGRAPH_ID = ao[CUTGRAPH_ID_PROPERTY_NAME]
+        update_all_polyzamboni_drawings(None, context)
         return { 'FINISHED' }
 
     @classmethod
@@ -122,6 +124,28 @@ class InitializeCuttingOperator(bpy.types.Operator):
         is_mesh = active_object is not None and active_object.type == 'MESH' and (context.mode == 'EDIT_MESH' or active_object.select_get())
 
         return is_mesh and CUTGRAPH_ID_PROPERTY_NAME not in active_object
+
+class RemoveAllPolyzamboniDataOperator(bpy.types.Operator):
+    """Remove all attached Polyzamboni Data"""
+    bl_label = "Remove Unfolding"
+    bl_idname = "polyzamboni.remove_all_op"
+
+    def execute(self, context):
+        ao = context.active_object
+        print("deleting all cut info from object:", ao.name)
+        globals.remove_cutgraph(ao)
+        update_all_polyzamboni_drawings(None, context)
+        return { 'FINISHED' }
+    
+    def invoke(self, context, event):
+        return context.window_manager.invoke_confirm(self, event, message="Sure? This will delete all cuts.", confirm_text="Delete")
+    
+    @classmethod
+    def poll(cls, context):
+        active_object = context.active_object
+        is_mesh = active_object is not None and active_object.type == 'MESH' and (context.mode == 'EDIT_MESH' or active_object.select_get())
+
+        return is_mesh and CUTGRAPH_ID_PROPERTY_NAME in active_object
 
 class ResetAllCutsOperator(bpy.types.Operator):
     """Restart the unfolding process for this mesh"""
@@ -248,6 +272,37 @@ class FlipGlueFlapsOperator(bpy.types.Operator):
         is_mesh = active_object is not None and active_object.type == 'MESH' 
         return is_mesh and context.mode == 'EDIT_MESH' and CUTGRAPH_ID_PROPERTY_NAME in active_object
 
+class ComputeBuildStepsOperator(bpy.types.Operator):
+    """ Starting at the selected face, compute a polyzamboni build order of the current mesh """
+    bl_label = "Compute Build Order"
+    bl_idname = "polyzamboni.build_order_op"
+
+    def execute(self, context):
+        ao = context.active_object
+        ao_mesh = ao.data
+        ao_bmesh = bmesh.from_edit_mesh(ao_mesh)
+        active_cutgraph_index = ao[CUTGRAPH_ID_PROPERTY_NAME]
+        if active_cutgraph_index < len(globals.PZ_CUTGRAPHS):
+            active_cutgraph : cutgraph.CutGraph = globals.PZ_CUTGRAPHS[active_cutgraph_index]
+        else:
+            print("huch?!")
+            print("cutgraph", active_cutgraph_index, "not in", globals.PZ_CUTGRAPHS)
+
+        selected_faces = [f.index for f in ao_bmesh.faces if f.select]
+
+        start_face_index = 0
+        if len(selected_faces) > 0:
+            start_face_index = selected_faces[0]
+        active_cutgraph.generate_bfs_build_oder(start_face_index)
+
+        return { 'FINISHED' }
+
+    @classmethod
+    def poll(cls, context):
+        active_object = context.active_object
+        is_mesh = active_object is not None and active_object.type == 'MESH' 
+        return is_mesh and context.mode == 'EDIT_MESH' and CUTGRAPH_ID_PROPERTY_NAME in active_object
+
 class ZamboniGlueFlapDesignOperator(bpy.types.Operator):
     """ Control the placement of glue flaps """
     bl_label = "PolyZamboni Glue Flap Design Tool"
@@ -365,9 +420,24 @@ def ext_list_to_filter_str(ext_list):
         res += "*." + ext + ","
     res += "*." + ext_list[-1]
 
+def write_custom_split_property_row(layout : bpy.types.UILayout, text, data, prop_name, split_factor):
+    costom_row = layout.row().split(factor=split_factor, align=True)
+    col_1, col_2 = (costom_row.column(), costom_row.column())
+    col_1.label(text=text)
+    col_2.prop(data, prop_name, text="")
+
+def line_style_property_draw(layout : bpy.types.UILayout, text, data, prop_name, split_factor, linestyles):
+    ls_row = layout.row()
+    #ls_row.split(factor=split_factor, align=True)
+    ls_text_col, ls_enum_col = (ls_row.column(), ls_row.column())
+    ls_text_col.row().label(text=text)
+    ls_flow = ls_enum_col.column_flow(columns=3, align=True)#len(self.linestyles), align=True)
+    for style in linestyles:
+        ls_flow.column(align=True).prop_enum(data, prop_name, style[0])
+
 class PolyZamboniExportPDFOperator(bpy.types.Operator, ExportHelper):
     """Export Unfolding of active object"""
-    bl_label = "Export Polyzamboni Unfolding as PDF"
+    bl_label = "Export PDF"
     bl_idname = "polyzamboni.export_operator_pdf"
 
     # Export Helper settings
@@ -380,6 +450,14 @@ class PolyZamboniExportPDFOperator(bpy.types.Operator, ExportHelper):
     )
 
     # Polyzamboni export settings
+    linestyles = [
+        ("-", "-", "", "", 0),
+        ("..", "..", "", "", 1),
+        ("-.", "-.", "", "", 2),
+        ("--.", "--.", "", "", 3),
+        ("-..", "-..", "", "", 4)
+    ]
+
     paper_size: EnumProperty(
         name="Page Size",
         items=[
@@ -396,9 +474,10 @@ class PolyZamboniExportPDFOperator(bpy.types.Operator, ExportHelper):
         default="A4"
     )
     page_margin: FloatProperty(
-        name="Page margin (cm)",
+        name="Page margin",
         default=0.5,
         min=0,
+        subtype="DISTANCE"
     )
     line_width: FloatProperty(
         name="Line width",
@@ -409,15 +488,17 @@ class PolyZamboniExportPDFOperator(bpy.types.Operator, ExportHelper):
         name="Space between pieces",
         default=0.25,
         min=0,
+        subtype="DISTANCE"
     )
     one_material_per_page: BoolProperty(
         name="One material per page",
         default=True,
     )
     target_model_height: FloatProperty(
-        name="Target model height (cm)",
+        name="Target model height",
         default=5,
-        min=1
+        min=1,
+        subtype="DISTANCE"
     )
     show_step_numbers : BoolProperty(
         name="Show build steps",
@@ -427,12 +508,12 @@ class PolyZamboniExportPDFOperator(bpy.types.Operator, ExportHelper):
         name="Show edge numbers",
         default=True
     )
-    edge_number_font_size : FloatProperty(
+    edge_number_font_size : IntProperty(
         name="Edge number font size",
         default=8,
         min = 1
     )
-    build_steps_font_size : FloatProperty(
+    build_steps_font_size : IntProperty(
         name="Build steps font size",
         default=16,
         min=1
@@ -465,72 +546,127 @@ class PolyZamboniExportPDFOperator(bpy.types.Operator, ExportHelper):
     )
     cut_edge_ls: EnumProperty(
         name="Cut edge linestyle",
-        items=[
-            ("-", "-", "", "", 0),
-            ("..", "..", "", "", 1),
-            ("-.", "-.", "", "", 2),
-            ("--.", "--.", "", "", 3),
-            ("-..", "-..", "", "", 4),
-        ],
+        items=linestyles,
         default="-"
     )
     convex_fold_edge_ls: EnumProperty(
         name="Convex fold edges linestyle",
-        items=[
-            ("-", "-", "", "", 0),
-            ("..", "..", "", "", 1),
-            ("-.", "-.", "", "", 2),
-            ("--.", "--.", "", "", 3),
-            ("-..", "-..", "", "", 4),
-        ],
+        items=linestyles,
         default=".."
     )
     concave_fold_edge_ls: EnumProperty(
         name="Concave fold edges linestyle",
-        items=[
-            ("-", "-", "", "", 0),
-            ("..", "..", "", "", 1),
-            ("-.", "-.", "", "", 2),
-            ("--.", "--.", "", "", 3),
-            ("-..", "-..", "", "", 4),
-        ],
+        items=linestyles,
         default="--."
     )
     glue_flap_ls: EnumProperty(
         name="Glue flap edges linestyle",
-        items=[
-            ("-", "-", "", "", 0),
-            ("..", "..", "", "", 1),
-            ("-.", "-.", "", "", 2),
-            ("--.", "--.", "", "", 3),
-            ("-..", "-..", "", "", 4),
-        ],
+        items=linestyles,
         default="-"
     )
     apply_textures: BoolProperty(
         name="Apply textures",
+        description="Applies some texture to all faces. If no texture can be found in a materials node tree, the diffuse color is used",
         default=True
     )
     print_on_inside: BoolProperty(
         name="Prints inside of mesh",
+        description="After glueing the pieces together, prints will be on the meshes inside if set to True",
         default=True
     )
     print_two_sided: BoolProperty(
         name="Two sided texture mode",
+        description="When selected, build instructions and textures are printed on separate pages for two-sided printing",
         default=False
     )
     hide_fold_edge_angle_th: FloatProperty(
-        name="Fold edge hide angle (in deg)",
-        default=1,
+        name="Min fold angle to print a fold edge.",
+        default=np.deg2rad(1),
         min=0,
-        max=180
+        max=np.pi,
+        subtype="ANGLE"
     )
 
+    def invoke(self, context, event):
 
+        # do stuff
+        ao = context.active_object
+        self.active_cutgraph : cutgraph.CutGraph = globals.PZ_CUTGRAPHS[ao[CUTGRAPH_ID_PROPERTY_NAME]]
+        self.build_steps_valid = self.active_cutgraph.check_if_build_steps_are_present_and_valid()
+        return super().invoke(context, event)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.ui_units_x = 10
+
+        # General settings
+        layout.label(text="General print settings", icon="TOOL_SETTINGS")
+        general_settings = layout.box()
+        # paper size
+        write_custom_split_property_row(general_settings, "Paper size", self.properties, "paper_size", 0.6)
+        # target model height
+        write_custom_split_property_row(general_settings, "Target height", self.properties, "target_model_height", 0.6)
+        # margin
+        write_custom_split_property_row(general_settings, "Page margin", self.properties, "page_margin", 0.6)
+        # island spacing
+        write_custom_split_property_row(general_settings, "Island spacing", self.properties, "space_between_components", 0.6)
+        # side of prints
+        write_custom_split_property_row(general_settings, "Prints inside", self.properties, "print_on_inside", 0.6)
+        # font settings
+        general_settings.separator(factor=0.2)
+        text_settings_row = general_settings.row().split(factor=0.55)
+        text_settings_left_col, text_settings_size_col, text_settings_color_col = (text_settings_row.column(), text_settings_row.column(), text_settings_row.column())
+        text_settings_left_col.row().label(text="Print?")
+        text_settings_size_col.row().label(text="Size")
+        text_settings_color_col.row().label(text="Color")
+        # edge numbers
+        text_settings_left_col.row().prop(self.properties, "show_edge_numbers", toggle=1, text="Edge numbers")
+        edge_number_size_row = text_settings_size_col.row()
+        edge_number_size_row.active = self.properties.show_edge_numbers
+        edge_number_size_row.prop(self.properties, "edge_number_font_size", text="")
+        edge_number_color_row = text_settings_color_col.row()
+        edge_number_color_row.active = self.properties.show_edge_numbers
+        edge_number_color_row.prop(self.properties, "edge_number_color", text="")
+        # step numbers
+        text_settings_left_col.row().prop(self.properties, "show_step_numbers", toggle=1, text="Step numbers")
+        step_number_size_row = text_settings_size_col.row()
+        step_number_size_row.active = self.properties.show_step_numbers
+        step_number_size_row.prop(self.properties, "build_steps_font_size", text="")
+        step_number_color_row = text_settings_color_col.row()
+        step_number_color_row.active = self.properties.show_step_numbers
+        step_number_color_row.prop(self.properties, "steps_color", text="")
+        if self.properties.show_step_numbers and not self.build_steps_valid:
+            step_num_warning_row = general_settings.row()
+            step_num_warning_row.label(icon="ERROR", text="Invalid build step numbers!")
+
+        # Line settings
+        layout.label(text="Detailed line settings", icon="LINE_DATA")
+        line_settings = layout.box()
+        # line width
+        write_custom_split_property_row(line_settings, "Line width (pt)", self.properties, "line_width", 0.6)
+        # lines color
+        write_custom_split_property_row(line_settings, "Line color", self.properties, "lines_color", 0.6)
+        # hide fold edge threshold
+        write_custom_split_property_row(line_settings, "Fold edge threshold", self.properties, "hide_fold_edge_angle_th", 0.6)
+        # linestyles
+        line_settings.separator(factor=0.2)
+        line_settings.row().label(text="Choose linestyles of:")
+        write_custom_split_property_row(line_settings, "Cut edges", self.properties, "cut_edge_ls", 0.6)
+        write_custom_split_property_row(line_settings, "Convex fold edges", self.properties, "convex_fold_edge_ls", 0.6)
+        write_custom_split_property_row(line_settings, "Concave fold edges", self.properties, "concave_fold_edge_ls", 0.6)
+        write_custom_split_property_row(line_settings, "Glue flap edges", self.properties, "glue_flap_ls", 0.6)
+
+        # Coloring / Texturing
+        layout.label(text="Texture settings", icon="TEXTURE")
+        texture_settings = layout.box()
+        texture_row = texture_settings.row().column_flow(columns=2, align=True)
+        show_textures_col, double_sided_col = (texture_row.column(align=True), texture_row.column(align=True))
+        show_textures_col.prop(self.properties, "apply_textures", toggle=1)
+        double_sided_col.prop(self.properties, "print_two_sided", toggle=1)
+        double_sided_col.active = self.properties.apply_textures
 
     def execute(self, context):
         print("executed polyzamboni export operator")
-
         # first, check if the selected model can be unfolded
         ao = context.active_object
         active_cutgraph : cutgraph.CutGraph = globals.PZ_CUTGRAPHS[ao[CUTGRAPH_ID_PROPERTY_NAME]]
@@ -600,6 +736,8 @@ def register():
     bpy.utils.register_class(ZamboniGlueFlapDesignOperator)
     bpy.utils.register_class(ZamboniGLueFlapEditingPieMenu)
     bpy.utils.register_class(PolyZamboniExportPDFOperator)
+    bpy.utils.register_class(RemoveAllPolyzamboniDataOperator)
+    bpy.utils.register_class(ComputeBuildStepsOperator)
 
     bpy.types.TOPBAR_MT_file_export.append(menu_func_polyzamboni_export_pdf)
 
@@ -630,6 +768,8 @@ def unregister():
     bpy.utils.unregister_class(ZamboniGlueFlapDesignOperator)
     bpy.utils.unregister_class(ZamboniGLueFlapEditingPieMenu)
     bpy.utils.unregister_class(PolyZamboniExportPDFOperator)
+    bpy.utils.unregister_class(RemoveAllPolyzamboniDataOperator)
+    bpy.utils.unregister_class(ComputeBuildStepsOperator)
 
     #if menu_func_polyzamboni_export in bpy.types.TOPBAR_MT_file_export:
     bpy.types.TOPBAR_MT_file_export.remove(menu_func_polyzamboni_export_pdf)

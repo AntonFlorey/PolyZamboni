@@ -81,7 +81,9 @@ class ComponentPrintData():
         boundary_cog, pca_basis = self.__pca()
         shift_cog_to_orig = AffineTransform2D(affine_part=-boundary_cog)
         long_axis_eigvec = pca_basis[:,1] # eigenvector of largest eigenvalue
-        rotate_x_axis_to_long_axis = AffineTransform2D(linear_part=np.hstack( [long_axis_eigvec.reshape((2,1)), np.array([long_axis_eigvec[1], -long_axis_eigvec[0]]).reshape((2,1))] ))
+        short_axis_eigvec = np.array([-long_axis_eigvec[1], long_axis_eigvec[0]])
+        PCA_B = np.column_stack([long_axis_eigvec, short_axis_eigvec])
+        rotate_x_axis_to_long_axis = AffineTransform2D(linear_part=np.linalg.inv(PCA_B))
         horizontal_alignment_transform = shift_cog_to_orig.inverse() @ rotate_x_axis_to_long_axis @ shift_cog_to_orig
         self.apply_affine_transform_to_all_coords(horizontal_alignment_transform)
 
@@ -89,7 +91,8 @@ class ComponentPrintData():
         boundary_cog, pca_basis = self.__pca()
         shift_cog_to_orig = AffineTransform2D(affine_part=-boundary_cog)
         long_axis_eigvec = pca_basis[:,1] # eigenvector of largest eigenvalue
-        rotate_y_axis_to_long_axis = AffineTransform2D(linear_part=np.hstack( [-np.array([long_axis_eigvec[1], -long_axis_eigvec[0]]).reshape((2,1)), long_axis_eigvec.reshape((2,1))] ))
+        short_axis_eigvec = np.array([-long_axis_eigvec[1], long_axis_eigvec[0]])
+        rotate_y_axis_to_long_axis = AffineTransform2D(linear_part=np.linalg.inv(np.column_stack([-short_axis_eigvec, long_axis_eigvec])))
         vertical_alignment_transform = shift_cog_to_orig.inverse() @ rotate_y_axis_to_long_axis @ shift_cog_to_orig
         self.apply_affine_transform_to_all_coords(vertical_alignment_transform)
 
@@ -107,7 +110,7 @@ class ComponentPrintData():
             triangle_data.coords = tuple([affine_transform * coord for coord in triangle_data.coords])
 
         # build step number
-        self.build_step_number = affine_transform * self.build_step_number
+        self.build_step_number_position = affine_transform * self.build_step_number_position
 
 class PagePartitionNode():
     def __init__(self, ll, ur):
@@ -179,11 +182,10 @@ def fit_components_on_pages(components, page_size, page_margin, component_margin
 
     page_partitions = { 0 : [create_new_page_partition(page_size, page_margin)]}
 
-
     #preprocess components
     component_print_data : ComponentPrintData
-    for component_pd in components:
-        component_pd.align_vertically_via_pca()
+    for component_print_data in components:
+        component_print_data.align_vertically_via_pca()
 
     sorted_components = sorted(components, key = lambda c : (c.upper_right[0] - c.lower_left[0]) * (c.upper_right[1] - c.lower_left[1]), reverse=True)
     # go through all components ordered by their bounding box area
@@ -210,6 +212,7 @@ def fit_components_on_pages(components, page_size, page_margin, component_margin
                     recursive_search_for_all_free_spaces(component_print_data, page_root, node_candidates)
 
         if len(node_candidates) == 0:
+            component_print_data.align_vertically_via_pca() # back to vertical alignment...
             print("had to begin a new page for component")
             # create a new page for this component
             new_page = create_new_page_partition(page_size, page_margin)

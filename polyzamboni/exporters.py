@@ -164,7 +164,7 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
         self.__write_text_along_line(ax, page_coords, str(cut_edge_data.edge_index), self.edge_number_font_size, color=self.color_of_edge_numbers, offset_cm=self.edge_number_offset, flipped=self.prints_on_model_inside)
 
     def __draw_fold_edge(self, ax : axes.Axes, fold_edge_data : FoldEdgeData, page_transform : AffineTransform2D):
-        if np.rad2deg(fold_edge_data.fold_angle) <= self.fold_hide_threshold_angle:
+        if fold_edge_data.fold_angle <= self.fold_hide_threshold_angle:
             return # dont draw almost flat folds
         # transform line coords
         page_coords = self.__transform_component_line_coords_to_page_coord(fold_edge_data.coords, page_transform, self.prints_on_model_inside)
@@ -244,7 +244,7 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
             return # nothing to draw here
         
         triangle_page_coords = self.__transform_component_triangle_coords_to_page_coords(colored_tri_data.coords, page_transform, self.prints_on_model_inside)
-        thickened_triangle_coords = self.__create_thickened_triangle_coords(triangle_page_coords, 0.05) # make triangles one millimeter thicker
+        thickened_triangle_coords = self.__create_thickened_triangle_coords(triangle_page_coords, 0.08) # make triangles one millimeter thicker
 
         if colored_tri_data.absolute_texture_path is not None:
             # draw texture
