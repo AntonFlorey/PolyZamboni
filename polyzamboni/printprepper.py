@@ -1,6 +1,5 @@
 import numpy as np
 from .geometry import AffineTransform2D
-import bmesh
 
 class CutEdgeData():
     def __init__(self, coords, edge_index):

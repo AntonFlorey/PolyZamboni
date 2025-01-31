@@ -1,6 +1,5 @@
 import bpy
 import gpu
-import bgl
 import numpy as np
 from gpu_extras.batch import batch_for_shader
 from . import globals

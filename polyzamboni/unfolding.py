@@ -5,7 +5,6 @@ import math
 import mathutils
 from mathutils import Vector, Matrix, Quaternion
 from itertools import product
-import matplotlib.pyplot as plt
 from . import geometry
 
 

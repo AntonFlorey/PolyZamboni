@@ -14,11 +14,6 @@ class MainPanel(bpy.types.Panel):
         row = layout.row()
 
         row.label(text="thanks for using me!", icon="FUND")
-        # row = layout.row()
-        # col1 = row.column()
-        # col2 = row.column()
-        # col1.operator("wm.flattening_op")
-        # col2.label(icon="AUTO")
 
         if CUTGRAPH_ID_PROPERTY_NAME not in context.active_object:
             row = layout.row()
@@ -107,29 +102,6 @@ class GlueFlapSettingsPanel(bpy.types.Panel):
             col2.label(icon="RIGID_BODY")
             pass
 
-class FlatteningSettingsPanel(bpy.types.Panel):
-    bl_label = "Flattening Settings"
-    bl_idname  = "POLYZAMBONI_PT_PanelB"
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-    bl_category = "PolyZamboni"
-    bl_parent_id = "POLYZAMBONI_PT_MainPanel"
-
-    def draw(self, context: bpy.types.Context):
-        layout = self.layout
-        scene = context.scene
-        flattening_settings = scene.polyzamboni_flattening_settings
-        row = layout.row()
-        row.prop(flattening_settings, "optimization_iterations")
-        row = layout.row()
-        row.prop(flattening_settings, "shape_preservation_weight")
-        row = layout.row()
-        row.prop(flattening_settings, "angle_weight")
-        row = layout.row()
-        row.prop(flattening_settings, "det_weight")
-        row = layout.row()
-        row.prop(flattening_settings, "learning_rate")
-
 class DrawSettingsPanel(bpy.types.Panel):
     bl_label = "Draw Settings"
     bl_idname = "POLYZAMBONI_PT_DrawSettingsPanel"
@@ -155,29 +127,13 @@ class DrawSettingsPanel(bpy.types.Panel):
         row = layout.row()
         row.prop(drawing_settings, "normal_offset")
 
-class DebugPanel(bpy.types.Panel):
-    bl_label = "Debug Info"
-    bl_idname = "POLYZAMBONI_PT_PanelDebug"
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-    bl_category = "PolyZamboni"
-    bl_parent_id = "POLYZAMBONI_PT_MainPanel"
-
-    def draw(self, context: bpy.types.Context):
-        layout = self.layout
-        scene = context.scene
-        layout.operator("wm.planarity_printer")
 
 def register():
     bpy.utils.register_class(MainPanel)
     bpy.utils.register_class(GlueFlapSettingsPanel)
-    bpy.utils.register_class(FlatteningSettingsPanel)
     bpy.utils.register_class(DrawSettingsPanel)
-    bpy.utils.register_class(DebugPanel)
 
 def unregister():
     bpy.utils.unregister_class(MainPanel)
     bpy.utils.unregister_class(GlueFlapSettingsPanel)
-    bpy.utils.unregister_class(FlatteningSettingsPanel)
     bpy.utils.unregister_class(DrawSettingsPanel)
-    bpy.utils.unregister_class(DebugPanel)

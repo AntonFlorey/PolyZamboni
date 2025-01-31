@@ -2,5 +2,7 @@ all = [
     "operators",
     "ui",
     "properties",
-    "drawing"
+    "drawing",
+    "globals",
+    "callbacks"
 ]

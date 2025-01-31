@@ -19,15 +19,14 @@ if "bpy" in locals():
     importlib.reload(locals()["callbacks"])
 else:
     import bpy
+    from .polyzamboni import properties
     from .polyzamboni import globals
     from .polyzamboni import drawing
-    from .polyzamboni import ui
     from .polyzamboni import operators
-    from .polyzamboni import properties
+    from .polyzamboni import ui
     from .polyzamboni import callbacks
 
 def register():
-    print("register called!")
     # Init globals
     globals.init()
     # Properties first!
@@ -42,8 +41,7 @@ def register():
     bpy.app.handlers.save_pre.append(callbacks.save_glue_flaps)
 
 def unregister():
-    print("unregister called!")
-    print("PolyZamboni is cleaning up after herself...")
+    print("PolyZamboni is cleaning up after itself...")
     globals.remove_all_existing_cutgraph_ids()
     drawing.hide_all_drawings()
     operators.unregister()

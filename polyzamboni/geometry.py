@@ -1,9 +1,5 @@
 import numpy as np
-import bpy
 import bmesh
-import math
-import mathutils
-from mathutils import Vector, Matrix, Quaternion
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 

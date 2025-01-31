@@ -1,53 +1,16 @@
 import bpy
 from bpy.types import Scene
+import numpy as np
 from .drawing import update_all_polyzamboni_drawings
 
 # For more information about Blender Properties, visit:
 # <https://blender.org/api/blender_python_api_2_78a_release/bpy.types.Property.html>
 from bpy.props import BoolProperty
-# from bpy.props import CollectionProperty
 from bpy.props import EnumProperty
 from bpy.props import FloatProperty
 from bpy.props import IntProperty
-# from bpy.props import PointerProperty
 from bpy.props import StringProperty
-# from bpy.props import PropertyGroup
-
-#
-# Add additional functions or classes here
-#
-
-class FlatteningSettings(bpy.types.PropertyGroup):
-    optimization_iterations: IntProperty(
-        name="Optimization Rounds",
-        default=250,
-        min=0,
-        max=1000
-    )
-    shape_preservation_weight: FloatProperty(
-        name="Shape Preservation Weight",
-        default=1,
-        min=0,
-        max=1000000
-    )
-    angle_weight: FloatProperty(
-        name="Angle Weight",
-        default=0,
-        min=0,
-        max=1
-    )
-    det_weight: FloatProperty(
-        name="Determinant Weight",
-        default=1,
-        min=0,
-        max=1
-    )
-    learning_rate: FloatProperty(
-        name="Optimizer Step Size",
-        default=0.001,
-        min=1e-8,
-        max=10
-    )
+from bpy.props import FloatVectorProperty
 
 class DrawSettings(bpy.types.PropertyGroup):
     drawing_enabled: BoolProperty(
@@ -115,22 +78,178 @@ class ZamboniSettingsPerObject(bpy.types.PropertyGroup):
         default=False
     )
 
-print("registering polyzamboni properties")
+linestyles = [
+        ("-", "-", "", "", 0),
+        ("..", "..", "", "", 1),
+        ("-.", "-.", "", "", 2),
+        ("--.", "--.", "", "", 3),
+        ("-..", "-..", "", "", 4)
+    ]
+
+class GeneralExportSettings(bpy.types.PropertyGroup):
+    paper_size: EnumProperty(
+        name="Page Size",
+        items=[
+            ("A0", "A0", "", "", 0),
+            ("A1", "A1", "", "", 1),
+            ("A2", "A2", "", "", 2),
+            ("A3", "A3", "", "", 3),
+            ("A4", "A4", "", "", 4),
+            ("A5", "A5", "", "", 5),
+            ("A6", "A6", "", "", 6),
+            ("A7", "A7", "", "", 7),
+            ("A8", "A8", "", "", 8)
+        ],
+        default="A4"
+    )
+    page_margin: FloatProperty(
+        name="Page margin",
+        default=0.5,
+        min=0,
+        subtype="DISTANCE"
+    )
+    space_between_components: FloatProperty(
+        name="Space between pieces",
+        default=0.25,
+        min=0,
+        subtype="DISTANCE"
+    )
+    one_material_per_page: BoolProperty(
+        name="One material per page",
+        default=True,
+    )
+    target_model_height: FloatProperty(
+        name="Target model height",
+        default=5,
+        min=0.1,
+        subtype="DISTANCE"
+    )
+    show_step_numbers : BoolProperty(
+        name="Show build steps",
+        default=True
+    )
+    show_edge_numbers : BoolProperty(
+        name="Show edge numbers",
+        default=True
+    )
+    edge_number_font_size : IntProperty(
+        name="Edge number font size",
+        default=8,
+        min = 1
+    )
+    build_steps_font_size : IntProperty(
+        name="Build steps font size",
+        default=16,
+        min=1
+    )
+    edge_number_color : FloatVectorProperty(
+        name="Edge number color",
+        subtype="COLOR",
+        default=[0.0,0.0,0.0],
+        min=0,
+        max=1
+    )
+    steps_color : FloatVectorProperty(
+        name="Build steps color",
+        subtype="COLOR",
+        default=[0.0,0.0,0.0],
+        min=0,
+        max=1
+    )
+    print_on_inside: BoolProperty(
+        name="Prints inside of mesh",
+        description="After glueing the pieces together, prints will be on the meshes inside if set to True",
+        default=True
+    )
+    scaling_mode: EnumProperty(
+        name="Scaling mode",
+        items=[
+            ("HEIGHT", "Target height", "Scales all pieces to achieve the desired model height", "DRIVER_DISTANCE", 0),
+            ("SCALE", "Set scale", "Directly define the scaling factor from blender units to the unit active in the scene (m per default)", "FULLSCREEN_ENTER", 1),
+        ],
+        default="SCALE"
+    )
+    sizing_scale: FloatProperty(
+        name="Custom scaling factor",
+        default=1,
+        min=0
+    )
+
+class LineExportSettings(bpy.types.PropertyGroup):
+    line_width: FloatProperty(
+        name="Line width",
+        default=1,
+        min=0.1,
+    )
+    hide_fold_edge_angle_th: FloatProperty(
+        name="Min fold angle to print a fold edge.",
+        default=np.deg2rad(1),
+        min=0,
+        max=np.pi,
+        subtype="ANGLE"
+    )
+    cut_edge_ls: EnumProperty(
+        name="Cut edge linestyle",
+        items=linestyles,
+        default="-"
+    )
+    convex_fold_edge_ls: EnumProperty(
+        name="Convex fold edges linestyle",
+        items=linestyles,
+        default=".."
+    )
+    concave_fold_edge_ls: EnumProperty(
+        name="Concave fold edges linestyle",
+        items=linestyles,
+        default="--."
+    )
+    glue_flap_ls: EnumProperty(
+        name="Glue flap edges linestyle",
+        items=linestyles,
+        default="-"
+    )
+    lines_color : FloatVectorProperty(
+        name="Line color",
+        subtype="COLOR",
+        default=[0.0,0.0,0.0],
+        min=0,
+        max=1
+    )
+    edge_number_offset : FloatProperty(
+        name="Edge number offset (cm)",
+        default=0.1,
+        min=0,
+        subtype="DISTANCE"
+    )
+
+class TextureExportSettings(bpy.types.PropertyGroup):
+    apply_textures: BoolProperty(
+        name="Apply textures",
+        description="Applies some texture to all faces. If no texture can be found in a materials node tree, the diffuse color is used",
+        default=True
+    )
+    print_two_sided: BoolProperty(
+        name="Two sided texture mode",
+        description="When selected, build instructions and textures are printed on separate pages for two-sided printing",
+        default=False
+    )
 
 # This is where you assign any variables you need in your script. Note that they
 # won't always be assigned to the Scene object but it's a good place to start.
 def register():
-    bpy.utils.register_class(FlatteningSettings)
     bpy.utils.register_class(DrawSettings)
     bpy.utils.register_class(ZamboniSettingsPerObject)
-    Scene.polyzamboni_flattening_settings = bpy.props.PointerProperty(type=FlatteningSettings)
+    bpy.utils.register_class(GeneralExportSettings)
+    bpy.utils.register_class(LineExportSettings)
+    bpy.utils.register_class(TextureExportSettings)
     Scene.polyzamboni_drawing_settings = bpy.props.PointerProperty(type=DrawSettings)
     bpy.types.Object.polyzamboni_object_prop = bpy.props.PointerProperty(type=ZamboniSettingsPerObject)
 
 def unregister():
-    bpy.utils.unregister_class(FlatteningSettings)
     bpy.utils.unregister_class(DrawSettings)
     bpy.utils.unregister_class(ZamboniSettingsPerObject)
-    del Scene.polyzamboni_flattening_settings
+    bpy.utils.unregister_class(GeneralExportSettings)
+    bpy.utils.unregister_class(LineExportSettings)
+    bpy.utils.unregister_class(TextureExportSettings)
     del Scene.polyzamboni_drawing_settings
     del bpy.types.Object.polyzamboni_object_prop

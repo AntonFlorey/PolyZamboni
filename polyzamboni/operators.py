@@ -2,103 +2,16 @@ import bpy
 import bmesh
 import numpy as np
 import os
-from bpy.types import Context
-from bpy.props import StringProperty, EnumProperty, FloatProperty, IntProperty, BoolProperty, FloatVectorProperty
+from bpy.props import StringProperty, EnumProperty, FloatProperty, IntProperty, BoolProperty, FloatVectorProperty, PointerProperty
 from bpy_extras.io_utils import ExportHelper
+from .properties import GeneralExportSettings, LineExportSettings, TextureExportSettings
 from .drawing import *
 from . import globals
-from . import objective_functions
 from . import cutgraph
-import torch
+from . import units
 from .constants import CUTGRAPH_ID_PROPERTY_NAME, CUT_CONSTRAINTS_PROP_NAME, LOCKED_EDGES_PROP_NAME
 from . import exporters
 from .printprepper import fit_components_on_pages
-
-class FlatteningOperator(bpy.types.Operator):
-    bl_label = "Flatten Polygons"
-    bl_idname  = "wm.flattening_op"
-    _handle = None
-
-    def execute(self, context):
-        return {'FINISHED'}
-    
-    def invoke(self, context, event):
-        wm = context.window_manager
-        # get the currently selected object
-        ao = bpy.context.active_object
-        flattening_settings = context.scene.polyzamboni_flattening_settings
-        print("Attempting to create objective")
-        objective_func = objective_functions.ObjectiveFunction(ao, flattening_settings.shape_preservation_weight, 
-                                                                   flattening_settings.angle_weight, 
-                                                                   flattening_settings.det_weight)
-        print("Attempting to create optimizer")
-        # print("parameters", list(objective_func.parameters()))
-        optimizer = torch.optim.Adam(objective_func.parameters(), lr=flattening_settings.learning_rate)
-
-        print("Starting the best optimizer in the world.")
-    
-        max_steps = flattening_settings.optimization_iterations
-        for step in range(max_steps):
-            print("step", step)
-
-            optimizer.zero_grad()
-
-            # Make predictions for this batch
-            loss = objective_func()
-            print("loss", loss.item())
-
-            # Compute gradient
-            loss.backward()
-            print("grad-norm", np.linalg.norm(list(objective_func.parameters())[0].grad))
-
-            optimizer.step()
-            # print("new variable", list(objective_func.parameters())[0])
-
-            g = list(objective_func.parameters())[0].grad
-
-            if np.linalg.norm(g) <= 1e-8:
-                break
-
-            if loss <= 1e-12:
-                break
-        
-        objective_func.apply_back_to_mesh(ao)
-            
-        return wm.invoke_props_dialog(self)
-
-    @classmethod
-    def poll(cls, context):
-        active_object = context.active_object
-        return active_object is not None and active_object.type == 'MESH' and (context.mode == 'EDIT_MESH' or active_object.select_get())
-
-    def draw(self, context: Context):
-        pass
-
-    def cancel(self, context: Context):
-        pass
-
-class PrintPlanarityOperator(bpy.types.Operator):
-    bl_label = "Check planarity"
-    bl_idname = "wm.planarity_printer"
-
-    def execute(self, context):
-        return {'FINISHED'}
-    
-    def invoke(self, context, event):
-        wm = context.window_manager
-
-        ao = bpy.context.active_object
-        
-        flattening_settings = context.scene.polyzamboni_flattening_settings
-
-        objective_func = objective_functions.ObjectiveFunction(ao, 0, 
-                                                               flattening_settings.angle_weight, 
-                                                               flattening_settings.det_weight)
-        value = objective_func()
-
-        print("AVG Angle-based flatness measure:", value.item())
-
-        return wm.invoke_props_dialog(self, title="AVG Angle-based flatness measure: " + str(value.item()))    
 
 class InitializeCuttingOperator(bpy.types.Operator):
     """Start the unfolding process for this mesh"""
@@ -438,41 +351,44 @@ def line_style_property_draw(layout : bpy.types.UILayout, text, data, prop_name,
 
 def export_draw_func(operator):
     layout = operator.layout
-    # layout.ui_units_x = 10
+    
+    general_settings_props : GeneralExportSettings = operator.properties.general_settings
+    line_settings_props : LineExportSettings = operator.properties.line_settings
+    texture_settings_props : TextureExportSettings = operator.properties.texture_settings
 
     # General settings
     layout.label(text="General print settings", icon="TOOL_SETTINGS")
     general_settings = layout.box()
     # paper size
-    write_custom_split_property_row(general_settings, "Paper size", operator.properties, "paper_size", 0.6)
+    write_custom_split_property_row(general_settings, "Paper size", general_settings_props, "paper_size", 0.6)
 
     # scaling mode
     scaling_mode_row = general_settings.row().column_flow(columns=2, align=True)
-    scaling_mode_row.column(align=True).prop_enum(operator.properties, "scaling_mode", "HEIGHT")
-    scaling_mode_row.column(align=True).prop_enum(operator.properties, "scaling_mode", "SCALE")
+    scaling_mode_row.column(align=True).prop_enum(general_settings_props, "scaling_mode", "HEIGHT")
+    scaling_mode_row.column(align=True).prop_enum(general_settings_props, "scaling_mode", "SCALE")
 
-    if operator.properties.scaling_mode == "HEIGHT":
+    if general_settings_props.scaling_mode == "HEIGHT":
         # target model height
-        write_custom_split_property_row(general_settings, "Target height", operator.properties, "target_model_height", 0.6)
-        curr_scale_factor = operator.properties.target_model_height / operator.mesh_height
+        write_custom_split_property_row(general_settings, "Target height", general_settings_props, "target_model_height", 0.6)
+        curr_scale_factor = general_settings_props.target_model_height / operator.mesh_height
         # set correct scaling
-        operator.properties.sizing_scale = curr_scale_factor / operator.unit_to_cm_conversion_table.get(operator.curr_len_unit, 1)
-    elif operator.properties.scaling_mode == "SCALE":
-        write_custom_split_property_row(general_settings, "Blender units to " + operator.length_units_to_str.get(operator.curr_len_unit, "?"), operator.properties, "sizing_scale", 0.6)
-        curr_scale_factor = operator.properties.sizing_scale * operator.unit_to_cm_conversion_table.get(operator.curr_len_unit, 1)
+        general_settings_props.sizing_scale = curr_scale_factor / units.unit_to_cm_conversion_table.get(operator.curr_len_unit, 1)
+    elif general_settings_props.scaling_mode == "SCALE":
+        write_custom_split_property_row(general_settings, "Blender units to " + units.length_units_to_str.get(operator.curr_len_unit, "?"), general_settings_props, "sizing_scale", 0.6)
+        curr_scale_factor = general_settings_props.sizing_scale * units.unit_to_cm_conversion_table.get(operator.curr_len_unit, 1)
         # set target model height
-        operator.properties.target_model_height = curr_scale_factor * operator.mesh_height
-    curr_page_size = exporters.paper_sizes[operator.properties.paper_size]
-    if operator.max_comp_with * curr_scale_factor > curr_page_size[0] - 2 * operator.properties.page_margin or operator.max_comp_height * curr_scale_factor > curr_page_size[1] - 2 * operator.properties.page_margin:
+        general_settings_props.target_model_height = curr_scale_factor * operator.mesh_height
+    curr_page_size = exporters.paper_sizes[general_settings_props.paper_size]
+    if operator.max_comp_with * curr_scale_factor > curr_page_size[0] - 2 * general_settings_props.page_margin or operator.max_comp_height * curr_scale_factor > curr_page_size[1] - 2 * general_settings_props.page_margin:
         general_settings.row().label(icon="ERROR", text="A piece does not fit on one page!")
     # margin
-    write_custom_split_property_row(general_settings, "Page margin", operator.properties, "page_margin", 0.6)
+    write_custom_split_property_row(general_settings, "Page margin", general_settings_props, "page_margin", 0.6)
     # island spacing
-    write_custom_split_property_row(general_settings, "Island spacing", operator.properties, "space_between_components", 0.6)
+    write_custom_split_property_row(general_settings, "Island spacing", general_settings_props, "space_between_components", 0.6)
     # side of prints
-    write_custom_split_property_row(general_settings, "Prints inside", operator.properties, "print_on_inside", 0.6)
+    write_custom_split_property_row(general_settings, "Prints inside", general_settings_props, "print_on_inside", 0.6)
     # one mat per page
-    write_custom_split_property_row(general_settings, "One material per page", operator.properties, "one_material_per_page", 0.6)
+    write_custom_split_property_row(general_settings, "One material per page", general_settings_props, "one_material_per_page", 0.6)
     # font settings
     general_settings.separator(factor=0.2)
     text_settings_row = general_settings.row().split(factor=0.55)
@@ -481,22 +397,22 @@ def export_draw_func(operator):
     text_settings_size_col.row().label(text="Size")
     text_settings_color_col.row().label(text="Color")
     # edge numbers
-    text_settings_left_col.row().prop(operator.properties, "show_edge_numbers", toggle=1, text="Edge numbers")
+    text_settings_left_col.row().prop(general_settings_props, "show_edge_numbers", toggle=1, text="Edge numbers")
     edge_number_size_row = text_settings_size_col.row()
-    edge_number_size_row.active = operator.properties.show_edge_numbers
-    edge_number_size_row.prop(operator.properties, "edge_number_font_size", text="")
+    edge_number_size_row.active = general_settings_props.show_edge_numbers
+    edge_number_size_row.prop(general_settings_props, "edge_number_font_size", text="")
     edge_number_color_row = text_settings_color_col.row()
-    edge_number_color_row.active = operator.properties.show_edge_numbers
-    edge_number_color_row.prop(operator.properties, "edge_number_color", text="")
+    edge_number_color_row.active = general_settings_props.show_edge_numbers
+    edge_number_color_row.prop(general_settings_props, "edge_number_color", text="")
     # step numbers
-    text_settings_left_col.row().prop(operator.properties, "show_step_numbers", toggle=1, text="Step numbers")
+    text_settings_left_col.row().prop(general_settings_props, "show_step_numbers", toggle=1, text="Step numbers")
     step_number_size_row = text_settings_size_col.row()
-    step_number_size_row.active = operator.properties.show_step_numbers
-    step_number_size_row.prop(operator.properties, "build_steps_font_size", text="")
+    step_number_size_row.active = general_settings_props.show_step_numbers
+    step_number_size_row.prop(general_settings_props, "build_steps_font_size", text="")
     step_number_color_row = text_settings_color_col.row()
-    step_number_color_row.active = operator.properties.show_step_numbers
-    step_number_color_row.prop(operator.properties, "steps_color", text="")
-    if operator.properties.show_step_numbers and not operator.build_steps_valid:
+    step_number_color_row.active = general_settings_props.show_step_numbers
+    step_number_color_row.prop(general_settings_props, "steps_color", text="")
+    if general_settings_props.show_step_numbers and not operator.build_steps_valid:
         step_num_warning_row = general_settings.row()
         step_num_warning_row.label(icon="ERROR", text="Invalid build step numbers!")
 
@@ -504,29 +420,54 @@ def export_draw_func(operator):
     layout.label(text="Detailed line settings", icon="LINE_DATA")
     line_settings = layout.box()
     # line width
-    write_custom_split_property_row(line_settings, "Line width (pt)", operator.properties, "line_width", 0.6)
+    write_custom_split_property_row(line_settings, "Line width (pt)", line_settings_props, "line_width", 0.6)
     # lines color
-    write_custom_split_property_row(line_settings, "Line color", operator.properties, "lines_color", 0.6)
+    write_custom_split_property_row(line_settings, "Line color", line_settings_props, "lines_color", 0.6)
     # hide fold edge threshold
-    write_custom_split_property_row(line_settings, "Fold edge threshold", operator.properties, "hide_fold_edge_angle_th", 0.6)
+    write_custom_split_property_row(line_settings, "Fold edge threshold", line_settings_props, "hide_fold_edge_angle_th", 0.6)
     # edge number offset
-    write_custom_split_property_row(line_settings, "Edge number offset", operator.properties, "edge_number_offset", 0.6, operator.properties.show_edge_numbers)
+    write_custom_split_property_row(line_settings, "Edge number offset", line_settings_props, "edge_number_offset", 0.6, general_settings_props.show_edge_numbers)
     # linestyles
     line_settings.separator(factor=0.2)
     line_settings.row().label(text="Choose linestyles of:")
-    write_custom_split_property_row(line_settings, "Cut edges", operator.properties, "cut_edge_ls", 0.6)
-    write_custom_split_property_row(line_settings, "Convex fold edges", operator.properties, "convex_fold_edge_ls", 0.6)
-    write_custom_split_property_row(line_settings, "Concave fold edges", operator.properties, "concave_fold_edge_ls", 0.6)
-    write_custom_split_property_row(line_settings, "Glue flap edges", operator.properties, "glue_flap_ls", 0.6)
+    write_custom_split_property_row(line_settings, "Cut edges", line_settings_props, "cut_edge_ls", 0.6)
+    write_custom_split_property_row(line_settings, "Convex fold edges", line_settings_props, "convex_fold_edge_ls", 0.6)
+    write_custom_split_property_row(line_settings, "Concave fold edges", line_settings_props, "concave_fold_edge_ls", 0.6)
+    write_custom_split_property_row(line_settings, "Glue flap edges", line_settings_props, "glue_flap_ls", 0.6)
 
     # Coloring / Texturing
     layout.label(text="Texture settings", icon="TEXTURE")
     texture_settings = layout.box()
     texture_row = texture_settings.row().column_flow(columns=2, align=True)
     show_textures_col, double_sided_col = (texture_row.column(align=True), texture_row.column(align=True))
-    show_textures_col.prop(operator.properties, "apply_textures", toggle=1)
-    double_sided_col.prop(operator.properties, "print_two_sided", toggle=1)
-    double_sided_col.active = operator.properties.apply_textures
+    show_textures_col.prop(texture_settings_props, "apply_textures", toggle=1)
+    double_sided_col.prop(texture_settings_props, "print_two_sided", toggle=1)
+    double_sided_col.active = texture_settings_props.apply_textures
+
+def create_exporter_for_operator(operator, output_format="pdf"):
+    general_settings = operator.properties.general_settings
+    line_settings = operator.properties.line_settings
+    texture_settings = operator.properties.texture_settings
+    exporter = exporters.MatplotlibBasedExporter(output_format=output_format, 
+                                                 paper_size=general_settings.paper_size, 
+                                                 line_width=line_settings.line_width,
+                                                 cut_edge_ls=line_settings.cut_edge_ls,
+                                                 convex_fold_edge_ls=line_settings.convex_fold_edge_ls,
+                                                 concave_fold_edge_ls=line_settings.concave_fold_edge_ls,
+                                                 glue_flap_ls=line_settings.glue_flap_ls,
+                                                 fold_hide_threshold_angle=line_settings.hide_fold_edge_angle_th,
+                                                 show_edge_numbers=general_settings.show_edge_numbers,
+                                                 edge_number_font_size=general_settings.edge_number_font_size,
+                                                 edge_number_offset=line_settings.edge_number_offset,
+                                                 show_build_step_numbers=general_settings.show_step_numbers,
+                                                 apply_main_texture=texture_settings.apply_textures,
+                                                 print_on_inside=general_settings.print_on_inside,
+                                                 two_sided_w_texture=texture_settings.print_two_sided,
+                                                 color_of_lines=line_settings.lines_color,
+                                                 color_of_edge_numbers=general_settings.edge_number_color,
+                                                 color_of_build_steps=general_settings.steps_color,
+                                                 build_step_font_size=general_settings.build_steps_font_size)
+    return exporter
 
 class PolyZamboniExportPDFOperator(bpy.types.Operator, ExportHelper):
     """Export Unfolding of active object as pdf"""
@@ -543,180 +484,9 @@ class PolyZamboniExportPDFOperator(bpy.types.Operator, ExportHelper):
     )
 
     # Polyzamboni export settings
-    linestyles = [
-        ("-", "-", "", "", 0),
-        ("..", "..", "", "", 1),
-        ("-.", "-.", "", "", 2),
-        ("--.", "--.", "", "", 3),
-        ("-..", "-..", "", "", 4)
-    ]
-
-    length_units_to_str = {
-        "MICROMETERS" : "um",
-        "MILLIMETERS" : "mm",
-        "CENTIMETERS" : "cm",
-        "METERS" : "m",
-        "KILOMETERS" : "km",
-        "THOU" : "thou",
-        "INCHES" : "in",
-        "FEET" : "ft",
-        "MILES" : "mi"
-    }
-
-    unit_to_cm_conversion_table = { # bpy.utils.units is rubbish 
-        "MICROMETERS" : 0.0001,
-        "MILLIMETERS" : 0.1,
-        "CENTIMETERS" : 1,
-        "METERS" : 100,
-        "KILOMETERS" : 100000,
-        "THOU" : 0.00254,
-        "INCHES" : 2.54,
-        "FEET" : 30.48,
-        "MILES" : 160934.4,
-    }
-
-    paper_size: EnumProperty(
-        name="Page Size",
-        items=[
-            ("A0", "A0", "", "", 0),
-            ("A1", "A1", "", "", 1),
-            ("A2", "A2", "", "", 2),
-            ("A3", "A3", "", "", 3),
-            ("A4", "A4", "", "", 4),
-            ("A5", "A5", "", "", 5),
-            ("A6", "A6", "", "", 6),
-            ("A7", "A7", "", "", 7),
-            ("A8", "A8", "", "", 8)
-        ],
-        default="A4"
-    )
-    page_margin: FloatProperty(
-        name="Page margin",
-        default=0.5,
-        min=0,
-        subtype="DISTANCE"
-    )
-    line_width: FloatProperty(
-        name="Line width",
-        default=1,
-        min=0.1,
-    )
-    space_between_components: FloatProperty(
-        name="Space between pieces",
-        default=0.25,
-        min=0,
-        subtype="DISTANCE"
-    )
-    one_material_per_page: BoolProperty(
-        name="One material per page",
-        default=True,
-    )
-    target_model_height: FloatProperty(
-        name="Target model height",
-        default=5,
-        min=0.1,
-        subtype="DISTANCE"
-    )
-    show_step_numbers : BoolProperty(
-        name="Show build steps",
-        default=True
-    )
-    show_edge_numbers : BoolProperty(
-        name="Show edge numbers",
-        default=True
-    )
-    edge_number_font_size : IntProperty(
-        name="Edge number font size",
-        default=8,
-        min = 1
-    )
-    build_steps_font_size : IntProperty(
-        name="Build steps font size",
-        default=16,
-        min=1
-    )
-    edge_number_offset : FloatProperty(
-        name="Edge number offset (cm)",
-        default=0.1,
-        min=0,
-        subtype="DISTANCE"
-    )
-    edge_number_color : FloatVectorProperty(
-        name="Edge number color",
-        subtype="COLOR",
-        default=[0.0,0.0,0.0],
-        min=0,
-        max=1
-    )
-    lines_color : FloatVectorProperty(
-        name="Line color",
-        subtype="COLOR",
-        default=[0.0,0.0,0.0],
-        min=0,
-        max=1
-    )
-    steps_color : FloatVectorProperty(
-        name="Build steps color",
-        subtype="COLOR",
-        default=[0.0,0.0,0.0],
-        min=0,
-        max=1
-    )
-    cut_edge_ls: EnumProperty(
-        name="Cut edge linestyle",
-        items=linestyles,
-        default="-"
-    )
-    convex_fold_edge_ls: EnumProperty(
-        name="Convex fold edges linestyle",
-        items=linestyles,
-        default=".."
-    )
-    concave_fold_edge_ls: EnumProperty(
-        name="Concave fold edges linestyle",
-        items=linestyles,
-        default="--."
-    )
-    glue_flap_ls: EnumProperty(
-        name="Glue flap edges linestyle",
-        items=linestyles,
-        default="-"
-    )
-    apply_textures: BoolProperty(
-        name="Apply textures",
-        description="Applies some texture to all faces. If no texture can be found in a materials node tree, the diffuse color is used",
-        default=True
-    )
-    print_on_inside: BoolProperty(
-        name="Prints inside of mesh",
-        description="After glueing the pieces together, prints will be on the meshes inside if set to True",
-        default=True
-    )
-    print_two_sided: BoolProperty(
-        name="Two sided texture mode",
-        description="When selected, build instructions and textures are printed on separate pages for two-sided printing",
-        default=False
-    )
-    hide_fold_edge_angle_th: FloatProperty(
-        name="Min fold angle to print a fold edge.",
-        default=np.deg2rad(1),
-        min=0,
-        max=np.pi,
-        subtype="ANGLE"
-    )
-    scaling_mode: EnumProperty(
-        name="Scaling mode",
-        items=[
-            ("HEIGHT", "Target height", "Scales all pieces to achieve the desired model height", "DRIVER_DISTANCE", 0),
-            ("SCALE", "Set scale", "Directly define the scaling factor from blender units to the unit active in the scene (m per default)", "FULLSCREEN_ENTER", 1),
-        ],
-        default="SCALE"
-    )
-    sizing_scale: FloatProperty(
-        name="Custom scaling factor",
-        default=1,
-        min=0
-    )
+    general_settings : PointerProperty(type=GeneralExportSettings)
+    line_settings : PointerProperty(type=LineExportSettings)
+    texture_settings : PointerProperty(type=TextureExportSettings)
 
     def invoke(self, context, event):
         # do stuff
@@ -746,33 +516,15 @@ class PolyZamboniExportPDFOperator(bpy.types.Operator, ExportHelper):
             print("POLYZAMBONI WARNING: You exported a mesh that is not fully foldable yet!")
 
         # prepare everything
-        component_print_info = active_cutgraph.create_print_data_for_all_components(ao, active_cutgraph.compute_scaling_factor_for_target_model_height(self.target_model_height))
+        component_print_info = active_cutgraph.create_print_data_for_all_components(ao, active_cutgraph.compute_scaling_factor_for_target_model_height(self.general_settings.target_model_height))
         page_arrangement = fit_components_on_pages(component_print_info, 
-                                                   exporters.paper_sizes[self.paper_size], 
-                                                   self.page_margin, 
-                                                   self.space_between_components, 
-                                                   self.one_material_per_page)
+                                                   exporters.paper_sizes[self.general_settings.paper_size], 
+                                                   self.general_settings.page_margin, 
+                                                   self.general_settings.space_between_components, 
+                                                   self.general_settings.one_material_per_page)
 
         # initialize exporter
-        pdf_exporter = exporters.MatplotlibBasedExporter("pdf", 
-                                                         paper_size=self.paper_size, 
-                                                         line_width=self.line_width,
-                                                         cut_edge_ls=self.cut_edge_ls,
-                                                         convex_fold_edge_ls=self.convex_fold_edge_ls,
-                                                         concave_fold_edge_ls=self.concave_fold_edge_ls,
-                                                         glue_flap_ls=self.glue_flap_ls,
-                                                         fold_hide_threshold_angle=self.hide_fold_edge_angle_th,
-                                                         show_edge_numbers=self.show_edge_numbers,
-                                                         edge_number_font_size=self.edge_number_font_size,
-                                                         edge_number_offset=self.edge_number_offset,
-                                                         show_build_step_numbers=self.show_step_numbers,
-                                                         apply_main_texture=self.apply_textures,
-                                                         print_on_inside=self.print_on_inside,
-                                                         two_sided_w_texture=self.print_two_sided,
-                                                         color_of_lines=self.lines_color,
-                                                         color_of_edge_numbers=self.edge_number_color,
-                                                         color_of_build_steps=self.steps_color,
-                                                         build_step_font_size=self.build_steps_font_size)
+        pdf_exporter = create_exporter_for_operator(self, "pdf")
 
         filename, extension = os.path.splitext(self.filepath)
         
@@ -803,180 +555,9 @@ class PolyZamboniExportSVGOperator(bpy.types.Operator, ExportHelper):
     )
 
     # Polyzamboni export settings
-    linestyles = [
-        ("-", "-", "", "", 0),
-        ("..", "..", "", "", 1),
-        ("-.", "-.", "", "", 2),
-        ("--.", "--.", "", "", 3),
-        ("-..", "-..", "", "", 4)
-    ]
-
-    length_units_to_str = {
-        "MICROMETERS" : "um",
-        "MILLIMETERS" : "mm",
-        "CENTIMETERS" : "cm",
-        "METERS" : "m",
-        "KILOMETERS" : "km",
-        "THOU" : "thou",
-        "INCHES" : "in",
-        "FEET" : "ft",
-        "MILES" : "mi"
-    }
-
-    unit_to_cm_conversion_table = { # bpy.utils.units is rubbish 
-        "MICROMETERS" : 0.0001,
-        "MILLIMETERS" : 0.1,
-        "CENTIMETERS" : 1,
-        "METERS" : 100,
-        "KILOMETERS" : 100000,
-        "THOU" : 0.00254,
-        "INCHES" : 2.54,
-        "FEET" : 30.48,
-        "MILES" : 160934.4,
-    }
-
-    paper_size: EnumProperty(
-        name="Page Size",
-        items=[
-            ("A0", "A0", "", "", 0),
-            ("A1", "A1", "", "", 1),
-            ("A2", "A2", "", "", 2),
-            ("A3", "A3", "", "", 3),
-            ("A4", "A4", "", "", 4),
-            ("A5", "A5", "", "", 5),
-            ("A6", "A6", "", "", 6),
-            ("A7", "A7", "", "", 7),
-            ("A8", "A8", "", "", 8)
-        ],
-        default="A4"
-    )
-    page_margin: FloatProperty(
-        name="Page margin",
-        default=0.5,
-        min=0,
-        subtype="DISTANCE"
-    )
-    line_width: FloatProperty(
-        name="Line width",
-        default=1,
-        min=0.1,
-    )
-    space_between_components: FloatProperty(
-        name="Space between pieces",
-        default=0.25,
-        min=0,
-        subtype="DISTANCE"
-    )
-    one_material_per_page: BoolProperty(
-        name="One material per page",
-        default=True,
-    )
-    target_model_height: FloatProperty(
-        name="Target model height",
-        default=5,
-        min=0.1,
-        subtype="DISTANCE"
-    )
-    show_step_numbers : BoolProperty(
-        name="Show build steps",
-        default=True
-    )
-    show_edge_numbers : BoolProperty(
-        name="Show edge numbers",
-        default=True
-    )
-    edge_number_font_size : IntProperty(
-        name="Edge number font size",
-        default=8,
-        min = 1
-    )
-    build_steps_font_size : IntProperty(
-        name="Build steps font size",
-        default=16,
-        min=1
-    )
-    edge_number_offset : FloatProperty(
-        name="Edge number offset (cm)",
-        default=0.1,
-        min=0,
-        subtype="DISTANCE"
-    )
-    edge_number_color : FloatVectorProperty(
-        name="Edge number color",
-        subtype="COLOR",
-        default=[0.0,0.0,0.0],
-        min=0,
-        max=1
-    )
-    lines_color : FloatVectorProperty(
-        name="Line color",
-        subtype="COLOR",
-        default=[0.0,0.0,0.0],
-        min=0,
-        max=1
-    )
-    steps_color : FloatVectorProperty(
-        name="Build steps color",
-        subtype="COLOR",
-        default=[0.0,0.0,0.0],
-        min=0,
-        max=1
-    )
-    cut_edge_ls: EnumProperty(
-        name="Cut edge linestyle",
-        items=linestyles,
-        default="-"
-    )
-    convex_fold_edge_ls: EnumProperty(
-        name="Convex fold edges linestyle",
-        items=linestyles,
-        default=".."
-    )
-    concave_fold_edge_ls: EnumProperty(
-        name="Concave fold edges linestyle",
-        items=linestyles,
-        default="--."
-    )
-    glue_flap_ls: EnumProperty(
-        name="Glue flap edges linestyle",
-        items=linestyles,
-        default="-"
-    )
-    apply_textures: BoolProperty(
-        name="Apply textures",
-        description="Applies some texture to all faces. If no texture can be found in a materials node tree, the diffuse color is used",
-        default=True
-    )
-    print_on_inside: BoolProperty(
-        name="Prints inside of mesh",
-        description="After glueing the pieces together, prints will be on the meshes inside if set to True",
-        default=True
-    )
-    print_two_sided: BoolProperty(
-        name="Two sided texture mode",
-        description="When selected, build instructions and textures are printed on separate pages for two-sided printing",
-        default=False
-    )
-    hide_fold_edge_angle_th: FloatProperty(
-        name="Min fold angle to print a fold edge.",
-        default=np.deg2rad(1),
-        min=0,
-        max=np.pi,
-        subtype="ANGLE"
-    )
-    scaling_mode: EnumProperty(
-        name="Scaling mode",
-        items=[
-            ("HEIGHT", "Target height", "Scales all pieces to achieve the desired model height", "DRIVER_DISTANCE", 0),
-            ("SCALE", "Set scale", "Directly define the scaling factor from blender units to the unit active in the scene (m per default)", "FULLSCREEN_ENTER", 1),
-        ],
-        default="SCALE"
-    )
-    sizing_scale: FloatProperty(
-        name="Custom scaling factor",
-        default=1,
-        min=0
-    )
+    general_settings : PointerProperty(type=GeneralExportSettings)
+    line_settings : PointerProperty(type=LineExportSettings)
+    texture_settings : PointerProperty(type=TextureExportSettings)
 
     def invoke(self, context, event):
         # do stuff
@@ -990,7 +571,6 @@ class PolyZamboniExportSVGOperator(bpy.types.Operator, ExportHelper):
             self.mesh_height = 1 # to prevent crashes
         self.curr_len_unit = context.scene.unit_settings.length_unit
         self.curr_unit_system = context.scene.unit_settings.system
-        print("current len unit:", self.curr_len_unit)
 
         return super().invoke(context, event)
 
@@ -1006,38 +586,20 @@ class PolyZamboniExportSVGOperator(bpy.types.Operator, ExportHelper):
             print("POLYZAMBONI WARNING: You exported a mesh that is not fully foldable yet!")
 
         # prepare everything
-        component_print_info = active_cutgraph.create_print_data_for_all_components(ao, active_cutgraph.compute_scaling_factor_for_target_model_height(self.target_model_height))
+        component_print_info = active_cutgraph.create_print_data_for_all_components(ao, active_cutgraph.compute_scaling_factor_for_target_model_height(self.general_settings.target_model_height))
         page_arrangement = fit_components_on_pages(component_print_info, 
-                                                   exporters.paper_sizes[self.paper_size], 
-                                                   self.page_margin, 
-                                                   self.space_between_components, 
-                                                   self.one_material_per_page)
+                                                   exporters.paper_sizes[self.general_settings.paper_size], 
+                                                   self.general_settings.page_margin, 
+                                                   self.general_settings.space_between_components, 
+                                                   self.general_settings.one_material_per_page)
 
         # initialize exporter
-        pdf_exporter = exporters.MatplotlibBasedExporter("svg", 
-                                                         paper_size=self.paper_size, 
-                                                         line_width=self.line_width,
-                                                         cut_edge_ls=self.cut_edge_ls,
-                                                         convex_fold_edge_ls=self.convex_fold_edge_ls,
-                                                         concave_fold_edge_ls=self.concave_fold_edge_ls,
-                                                         glue_flap_ls=self.glue_flap_ls,
-                                                         fold_hide_threshold_angle=self.hide_fold_edge_angle_th,
-                                                         show_edge_numbers=self.show_edge_numbers,
-                                                         edge_number_font_size=self.edge_number_font_size,
-                                                         edge_number_offset=self.edge_number_offset,
-                                                         show_build_step_numbers=self.show_step_numbers,
-                                                         apply_main_texture=self.apply_textures,
-                                                         print_on_inside=self.print_on_inside,
-                                                         two_sided_w_texture=self.print_two_sided,
-                                                         color_of_lines=self.lines_color,
-                                                         color_of_edge_numbers=self.edge_number_color,
-                                                         color_of_build_steps=self.steps_color,
-                                                         build_step_font_size=self.build_steps_font_size)
+        svg_exporter = create_exporter_for_operator(self, "svg")
 
         filename, extension = os.path.splitext(self.filepath)
         
         # export file
-        pdf_exporter.export(page_arrangement, filename)
+        svg_exporter.export(page_arrangement, filename)
 
         return { 'FINISHED' }
 
@@ -1057,8 +619,6 @@ def menu_func_polyzamboni_export_svg(self, context):
     self.layout.operator(PolyZamboniExportSVGOperator.bl_idname, text="Polyzamboni Export SVG")
 
 def register():
-    bpy.utils.register_class(FlatteningOperator)
-    bpy.utils.register_class(PrintPlanarityOperator)
     bpy.utils.register_class(InitializeCuttingOperator)
     bpy.utils.register_class(ZamboniCutDesignOperator)
     bpy.utils.register_class(ZamboniCutEditingPieMenu)
@@ -1091,8 +651,6 @@ def register():
         polyzamboni_keymaps.append((keymap, keymap_item))
 
 def unregister():
-    bpy.utils.unregister_class(FlatteningOperator)
-    bpy.utils.unregister_class(PrintPlanarityOperator)
     bpy.utils.unregister_class(InitializeCuttingOperator)
     bpy.utils.unregister_class(ZamboniCutDesignOperator)
     bpy.utils.unregister_class(ZamboniCutEditingPieMenu)

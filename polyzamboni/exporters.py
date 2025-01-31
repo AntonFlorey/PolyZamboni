@@ -9,7 +9,6 @@ import matplotlib.transforms as mtransforms
 import numpy as np
 from .geometry import AffineTransform2D
 from .printprepper import ComponentPrintData, ColoredTriangleData, CutEdgeData, FoldEdgeData, GlueFlapEdgeData
-import datetime
 
 # feel free to add more paper sizes (in cm)
 paper_sizes = {
