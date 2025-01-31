@@ -58,11 +58,15 @@ class MainPanel(bpy.types.Panel):
             col1.prop(zamboni_object_settings, "apply_auto_cuts_to_previev", toggle=1)
             col2.label(icon="LIGHT_DATA")
 
+            # layout.row().label(text="Export")
             row = layout.row()
-            col1 = row.column()
-            col2 = row.column()
-            col1.operator("polyzamboni.export_operator_pdf")
-            col2.label(icon="FILE_IMAGE")
+            col1 = row.column(align=True).column_flow(columns=2, align=True)
+            col11 = col1.column(align=True)
+            col12 = col1.column(align=True)
+            col3 = row.column()
+            col11.operator("polyzamboni.export_operator_pdf")
+            col12.operator("polyzamboni.export_operator_svg")
+            col3.label(icon="FILE_IMAGE")
             pass
 
 class GlueFlapSettingsPanel(bpy.types.Panel):

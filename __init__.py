@@ -38,6 +38,8 @@ def register():
     bpy.app.handlers.load_post.append(callbacks.on_file_load)
     bpy.app.handlers.depsgraph_update_post.append(callbacks.on_object_select)
     bpy.app.handlers.save_pre.append(callbacks.save_all_edge_constraints)
+    bpy.app.handlers.save_pre.append(callbacks.save_build_order)
+    bpy.app.handlers.save_pre.append(callbacks.save_glue_flaps)
 
 def unregister():
     print("unregister called!")
@@ -53,6 +55,10 @@ def unregister():
         bpy.app.handlers.depsgraph_update_post.remove(callbacks.on_object_select)
     if callbacks.save_all_edge_constraints in bpy.app.handlers.save_pre:
         bpy.app.handlers.save_pre.remove(callbacks.save_all_edge_constraints)
+    if callbacks.save_build_order in bpy.app.handlers.save_pre:
+        bpy.app.handlers.save_pre.remove(callbacks.save_build_order)
+    if callbacks.save_glue_flaps in bpy.app.handlers.save_pre:
+        bpy.app.handlers.save_pre.remove(callbacks.save_glue_flaps)
     print("Done.")
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@ from . import globals
 from . import cutgraph
 from .constants import PERFECT_REGION, BAD_GLUE_FLAPS_REGION, OVERLAPPING_REGION, NOT_FOLDABLE_REGION, GLUE_FLAP_NO_OVERLAPS, GLUE_FLAP_WITH_OVERLAPS, GLUE_FLAP_TO_LARGE
 
-# colors
+# colors 
 BLUE = (  0 / 255,  84 / 255, 159 / 255, 1.0)
 MAGENTA = (227 / 255,   0 / 255, 102 / 255, 1.0)
 YELLOW = (255 / 255, 237 / 255,   0 / 255, 1.0)
@@ -21,8 +21,18 @@ BORDEAUX = (161 / 255,  16 / 255,  53 / 255, 1.0)
 PURPLE = ( 97 / 255,  33 / 255,  88 / 255, 1.0)
 LILAC = (122 / 255, 111 / 255, 172 / 255, 1.0)
 
-# Keep track of active draw callbacks 
-_drawing_handle_errors = None
+# colors (POLYZAMBONI)
+POLYZAMBONI_RED = (  191 / 255,  77 / 255, 77 / 255, 1.0)
+POLYZAMBONI_ORANGE = (  191 / 255,  124 / 255, 77 / 255, 1.0)
+POLYZAMBONI_YELLOW = (  191 / 255,  191 / 255, 77 / 255, 1.0)
+POLYZAMBONI_GREEN = (  124 / 255,  191 / 255, 77 / 255, 1.0)
+POLYZAMBONI_TEAL = (  74 / 255,  161 / 255, 129 / 255, 1.0)
+POLYZAMBONI_BLUE = (  71 / 255,  141 / 255, 179 / 255, 1.0)
+POLYZAMBONI_LILA = (  134 / 255,  71 / 255, 179 / 255, 1.0)
+POLYZAMBONI_ROSE = (  179 / 255,  71 / 255, 116 / 255, 1.0)
+
+
+# Keep track of active draw callbacks
 _drawing_handle_user_provided_cuts = None
 _drawing_handle_locked_edges = None
 _drawing_handle_auto_completed_cuts = None
@@ -83,7 +93,7 @@ def deactivate_draw_callback(callback_handle, region_type='WINDOW'):
     if callback_handle is not None:
         bpy.types.SpaceView3D.draw_handler_remove(callback_handle, region_type)
 
-def lines_draw_callback(line_array, color, width=3.0):
+def lines_draw_callback(line_array, color, width=3.5):
     shader = gpu.shader.from_builtin('UNIFORM_COLOR')
     gpu.state.line_width_set(width)
     batch = batch_for_shader(shader, 'LINES', {"pos": line_array})
@@ -160,10 +170,10 @@ def show_auto_completed_cuts(cuts_as_line_array, dotted_line_length = 0.1):
 #################################
 
 quality_color_mapping = {
-    PERFECT_REGION : GREEN,
-    BAD_GLUE_FLAPS_REGION : YELLOW,
-    OVERLAPPING_REGION : ORANGE,
-    NOT_FOLDABLE_REGION : RED
+    PERFECT_REGION : POLYZAMBONI_GREEN,
+    BAD_GLUE_FLAPS_REGION : POLYZAMBONI_YELLOW,
+    OVERLAPPING_REGION : POLYZAMBONI_ORANGE,
+    NOT_FOLDABLE_REGION : POLYZAMBONI_RED
 }
 
 def hide_region_quality_triangles():
@@ -188,9 +198,9 @@ def show_region_quality_triangles(vertex_positions, regions_by_quality):
 #################################
 
 flap_quality_color_mapping = {
-    GLUE_FLAP_NO_OVERLAPS : MAY_GREEN,
-    GLUE_FLAP_TO_LARGE : TEAL,
-    GLUE_FLAP_WITH_OVERLAPS : MAGENTA,
+    GLUE_FLAP_NO_OVERLAPS : PETROL,
+    GLUE_FLAP_TO_LARGE : POLYZAMBONI_LILA,
+    GLUE_FLAP_WITH_OVERLAPS : BORDEAUX,
 }
 
 def hide_glue_flaps():
@@ -202,7 +212,7 @@ def glue_flaps_draw_callback(flaps_by_quality):
     for quality, glue_flap_lines in flaps_by_quality.items():
         if quality not in flap_quality_color_mapping:
             print("WARNING: Quality of provided glue flaps is not known!")
-        lines_draw_callback(glue_flap_lines, flap_quality_color_mapping[quality])
+        lines_draw_callback(glue_flap_lines, flap_quality_color_mapping[quality], width=2.5)
 
 def show_glue_flaps(flaps_by_quality):
     hide_glue_flaps()

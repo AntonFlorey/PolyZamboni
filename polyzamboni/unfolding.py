@@ -83,30 +83,12 @@ class Unfolding():
             transform_at_edge = geometry.AffineTransform2D(-np.eye(2), np.array([connecting_edge.calc_length(), 0]))
             combined_transform = pred_to_root @ (pred_connecting_edge_to_local_2d @ (transform_at_edge @ curr_local_2d_to_connecting_edge))
             self.affine_transform_to_root_coord_system_per_face[face_index] = combined_transform
-            
-            # save a figure of the unfolded polygons so far
-            if False:
-                unfolded_polygons_so_far = []
-                for f_id_i in range(processed_face_i + 1):
-                    _f_id = face_list[f_id_i]
-                    curr_poly = [self.get_globally_consistend_2d_coord_in_face(v.co, _f_id) for v in mesh.faces[_f_id].verts]
-                    unfolded_polygons_so_far.append(curr_poly)
-                geometry.debug_draw_polygons_2d(unfolded_polygons_so_far, "debug-unfolding.png")
 
             # compute triangles in root face coords
             verts_in_local_space_root = [self.get_globally_consistend_2d_coord_in_face(v.co, face.index) for v in face.verts]
             curr_face_triangles, curr_face_triangle_ids = geometry.triangulate_2d_polygon(verts_in_local_space_root, [v.index for v in face.verts], True)
             self.triangulated_faces_2d[face_index] = curr_face_triangles
             self.triangulation_indices[face_index] = curr_face_triangle_ids
-
-            # estimate error produced by the affine transformation for debugging
-            for connecting_v in connecting_edge.verts:
-                coords_in_prev_face = self.get_globally_consistend_2d_coord_in_face(connecting_v.co, pred)
-                coords_in_curr_face = self.get_globally_consistend_2d_coord_in_face(connecting_v.co, face_index)
-                hopefully_small_dist = np.linalg.norm(coords_in_curr_face - coords_in_prev_face)
-                #print("This distance should be small:", hopefully_small_dist)
-
-            # print("Face", processed_face_i, "unfolded. Checking for intersections...")
 
             # check for any intersections 
             if self.has_overlaps:
@@ -120,7 +102,7 @@ class Unfolding():
                 current_face_triangles = pos_list_to_triangles(self.triangulated_faces_2d[face_index])
                 for triangle_a, triangle_b in product(other_face_triangles, current_face_triangles):
                     if geometry.triangle_intersection_test_2d(*triangle_a, *triangle_b):
-                        self.has_flap_overlaps = True
+                        self.has_overlaps = True
                         break
 
 
@@ -130,7 +112,7 @@ class Unfolding():
         in_local_coords = geometry.to_local_coords(point_on_face_3d, *self.local_2d_coord_system_per_face[face_index])
         return self.affine_transform_to_root_coord_system_per_face[face_index] * in_local_coords
     
-    def __compute_2d_glue_flap_triangles_edge_local(self, face_index, edge : bmesh.types.BMEdge, flap_angle, flap_height):
+    def __compute_2d_glue_flap_triangles_edge_local(self, edge : bmesh.types.BMEdge, flap_angle, flap_height):
         x = flap_height / np.tan(flap_angle)
         h = flap_height
         l = edge.calc_length()
@@ -151,12 +133,12 @@ class Unfolding():
         return [(p_1_local_edge, p_2_local_edge, p_3_local_edge), (p_1_local_edge, p_3_local_edge, p_4_local_edge)]
 
     def compute_2d_glue_flap_triangles(self, face_index, edge : bmesh.types.BMEdge, flap_angle, flap_height):
-        triangles_in_local_edge_coords = self.__compute_2d_glue_flap_triangles_edge_local(face_index, edge, flap_angle, flap_height)
+        triangles_in_local_edge_coords = self.__compute_2d_glue_flap_triangles_edge_local(edge, flap_angle, flap_height)
         edge_to_root = self.affine_transform_to_root_coord_system_per_face[face_index] @ self.interior_affine_transforms[face_index][edge_to_key_e(edge)]
         return [tuple([edge_to_root * local_coord for local_coord in triangle]) for triangle in triangles_in_local_edge_coords]
 
     def compute_3d_glue_flap_triangles_inside_face(self, face_index, edge : bmesh.types.BMEdge, flap_angle, flap_height):
-        triangles_in_local_edge_coords = self.__compute_2d_glue_flap_triangles_edge_local(face_index, edge, flap_angle, flap_height)
+        triangles_in_local_edge_coords = self.__compute_2d_glue_flap_triangles_edge_local(edge, flap_angle, flap_height)
         triangles_flipped = [tuple([np.array([local_coord[0], -local_coord[1]]) for local_coord in triangle]) for triangle in triangles_in_local_edge_coords]
         edge_to_local_coords = self.interior_affine_transforms[face_index][edge_to_key_e(edge)]
         triangles_in_3d = [tuple(reversed([geometry.to_world_coords(edge_to_local_coords * local_coord, *self.local_2d_coord_system_per_face[face_index]) for local_coord in triangle])) for triangle in triangles_flipped]
@@ -196,20 +178,6 @@ class Unfolding():
         """ Write flap triangles (in 2d root space) to a dict for later intersection tests and printing"""
         self.check_for_flap_collisions(flap_triangles, store_collisions=True, edge=input_edge)
         self.glue_flaps_per_face[face_index][edge_to_key_e(input_edge)] = flap_triangles
-
-        # draw with glue flaps
-        if False:
-            unfolded_polygons = []
-            for tri_batch in self.triangulated_faces_2d.values():
-                for tri in pos_list_to_triangles(tri_batch):
-                    unfolded_polygons.append(tri)
-
-            for e_to_flap_dict in self.glue_flaps_per_face.values():
-                for flap_triangles in e_to_flap_dict.values():
-                    for flap_triangle in flap_triangles:
-                        unfolded_polygons.append(flap_triangle)
-
-            geometry.debug_draw_polygons_2d(unfolded_polygons, "debug-unfolding-with-flaps.png")
 
     def flap_is_overlapping(self, edge : bmesh.types.BMEdge):
         return edge_to_key_e(edge) in self.flap_collides_with.keys() and len(self.flap_collides_with[edge_to_key_e(edge)]) > 0

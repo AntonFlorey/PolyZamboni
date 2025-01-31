@@ -253,55 +253,61 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
             # fill with solid color
             self.__draw_solid_color_triangle(ax, thickened_triangle_coords, colored_tri_data.color)
 
+    def __create_page_figure(self, components_on_page, draw_textures = True, only_textures=False):
+        # create a new figure for this page
+        fig, ax = self.__create_new_page()
+        
+        if only_textures:
+            for component_on_page in components_on_page:
+                component_print_data : ComponentPrintData = component_on_page["print data"]
+                component_page_transform : AffineTransform2D = component_on_page["page coord transform"]
+                for colored_triangle_data in component_print_data.colored_triangles:
+                    self.__draw_colored_triangle(ax, colored_triangle_data, component_page_transform)
+            return fig, ax
+
+        # draw all lines and text and maybe colored triangles
+        for component_on_page in components_on_page:
+            component_print_data : ComponentPrintData = component_on_page["print data"]
+            component_page_transform : AffineTransform2D = component_on_page["page coord transform"]
+            
+            if self.show_build_step_numbers:
+                self.__write_text(ax, str(component_print_data.build_step_number), 
+                                component_print_data.build_step_number_position,
+                                self.build_step_number_font_size,
+                                self.builf_step_number_color,
+                                component_page_transform)
+
+            for cut_edge_print_data in component_print_data.cut_edges:
+                self.__draw_cut_edge(ax, cut_edge_print_data, component_page_transform)
+            
+            for fold_edge_print_data in component_print_data.fold_edges:
+                self.__draw_fold_edge(ax, fold_edge_print_data, component_page_transform)
+
+            for glue_flap_edge_data in component_print_data.glue_flap_edges:
+                self.__draw_glue_flap_edge(ax, glue_flap_edge_data, component_page_transform)
+
+            if draw_textures:
+                for colored_triangle_data in component_print_data.colored_triangles:
+                    self.__draw_colored_triangle(ax, colored_triangle_data, component_page_transform)
+        return fig, ax
+
     def export(self, print_ready_pages, output_file_name_prefix):
         
+        if self.output_format not in self.supported_formats:
+            print("POLYZAMBONI ERROR: Output format not supported!")
+            return
+
         if self.output_format == "pdf":
             with PdfPages(output_file_name_prefix + ".pdf") as pdf:
                 for components_on_page in print_ready_pages:
                     # create a new figure for this page
-                    fig, ax = self.__create_new_page()
-                    
-                    # draw all lines and text and maybe colored triangles
-                    for component_on_page in components_on_page:
-                        component_print_data : ComponentPrintData = component_on_page["print data"]
-                        component_page_transform : AffineTransform2D = component_on_page["page coord transform"]
-                        
-                        if self.show_build_step_numbers:
-                            self.__write_text(ax, str(component_print_data.build_step_number), 
-                                              component_print_data.build_step_number_position,
-                                              self.build_step_number_font_size,
-                                              self.builf_step_number_color,
-                                              component_page_transform)
-
-                        for cut_edge_print_data in component_print_data.cut_edges:
-                            self.__draw_cut_edge(ax, cut_edge_print_data, component_page_transform)
-                        
-                        for fold_edge_print_data in component_print_data.fold_edges:
-                            self.__draw_fold_edge(ax, fold_edge_print_data, component_page_transform)
-
-                        for glue_flap_edge_data in component_print_data.glue_flap_edges:
-                            self.__draw_glue_flap_edge(ax, glue_flap_edge_data, component_page_transform)
-
-                        if self.apply_textures and not self.two_sided_with_texture:
-                            for colored_triangle_data in component_print_data.colored_triangles:
-                                self.__draw_colored_triangle(ax, colored_triangle_data, component_page_transform)
-
+                    fig, ax = self.__create_page_figure(components_on_page, self.apply_textures and not self.two_sided_with_texture, False)
                     # save everything and close current figure
                     pdf.savefig(fig)
                     plt.close(fig)
-
-                    # new page if we want two-sided printing
+                    # two sided printing
                     if self.apply_textures and self.two_sided_with_texture:
-                        # create a new figure for this page
-                        fig, ax = self.__create_new_page()
-
-                        for component_on_page in components_on_page:
-                            component_print_data : ComponentPrintData = component_on_page["print data"]
-                            component_page_transform : AffineTransform2D = component_on_page["page coord transform"]
-
-                            for colored_triangle_data in component_print_data.colored_triangles:
-                                self.__draw_colored_triangle(ax, colored_triangle_data, component_page_transform)
-
+                        fig, ax = self.__create_page_figure(components_on_page, True, True)
                         # save everything and close current figure
                         pdf.savefig(fig)
                         plt.close(fig)
@@ -312,4 +318,22 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
                 d['Author'] = 'PolyZamboni'
                 d['Subject'] = 'Have fun crafting!'
 
+        if self.output_format == "svg":
+            # create a svg file for each page
+            page_number = 1
+            for components_on_page in print_ready_pages:
+                # create a new figure for this page
+                    fig, ax = self.__create_page_figure(components_on_page, self.apply_textures and not self.two_sided_with_texture, False)
+                    # save everything and close current figure
+                    fig.savefig(output_file_name_prefix + "_page" + str(page_number) + ".svg")
+                    plt.close(fig)
+                    page_number += 1
+                    # two sided printing
+                    if self.apply_textures and self.two_sided_with_texture:
+                        fig, ax = self.__create_page_figure(components_on_page, True, True)
+                        # save everything and close current figure
+                        fig.savefig(output_file_name_prefix + "_page" + str(page_number) + ".svg")
+                        plt.close(fig)
+                        page_number += 1
+        
         print("Called matplotlib based exporter with output filepath:", output_file_name_prefix)

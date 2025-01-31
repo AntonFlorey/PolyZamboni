@@ -3,7 +3,7 @@ from . import globals
 from .drawing import update_all_polyzamboni_drawings, hide_all_drawings
 from . import cutgraph
 from bpy.app.handlers import persistent
-from .constants import LOCKED_EDGES_PROP_NAME, CUT_CONSTRAINTS_PROP_NAME, CUTGRAPH_ID_PROPERTY_NAME
+from .constants import LOCKED_EDGES_PROP_NAME, CUT_CONSTRAINTS_PROP_NAME, CUTGRAPH_ID_PROPERTY_NAME, BUILD_ORDER_PROPERTY_NAME, GLUE_FLAP_PROPERTY_NAME
 import numpy as np
 
 @persistent
@@ -62,3 +62,18 @@ def save_all_edge_constraints(dummy):
         if CUTGRAPH_ID_PROPERTY_NAME in obj:
             obj[CUT_CONSTRAINTS_PROP_NAME] = globals.PZ_CUTGRAPHS[obj[CUTGRAPH_ID_PROPERTY_NAME]].get_manual_cuts_list()
             obj[LOCKED_EDGES_PROP_NAME] = globals.PZ_CUTGRAPHS[obj[CUTGRAPH_ID_PROPERTY_NAME]].get_locked_edges_list()
+
+@persistent
+def save_build_order(dummy):
+    for obj in bpy.data.objects:
+        if CUTGRAPH_ID_PROPERTY_NAME in obj:
+            sparse_build_order_dict = globals.PZ_CUTGRAPHS[obj[CUTGRAPH_ID_PROPERTY_NAME]].create_sparse_build_steps_dict()
+            obj[BUILD_ORDER_PROPERTY_NAME] = sparse_build_order_dict
+
+
+@persistent
+def save_glue_flaps(dummy):
+    for obj in bpy.data.objects:
+        if CUTGRAPH_ID_PROPERTY_NAME in obj:
+            glue_flaps_dict = globals.PZ_CUTGRAPHS[obj[CUTGRAPH_ID_PROPERTY_NAME]].create_glue_flaps_dict()
+            obj[GLUE_FLAP_PROPERTY_NAME] = glue_flaps_dict

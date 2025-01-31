@@ -5,7 +5,7 @@ import os
 import networkx as nx
 import mathutils
 from .geometry import triangulate_3d_polygon, signed_point_dist_to_line
-from .constants import LOCKED_EDGES_PROP_NAME, CUT_CONSTRAINTS_PROP_NAME, PERFECT_REGION, BAD_GLUE_FLAPS_REGION, OVERLAPPING_REGION, NOT_FOLDABLE_REGION, GLUE_FLAP_NO_OVERLAPS, GLUE_FLAP_WITH_OVERLAPS, GLUE_FLAP_TO_LARGE
+from .constants import LOCKED_EDGES_PROP_NAME, CUT_CONSTRAINTS_PROP_NAME, PERFECT_REGION, BAD_GLUE_FLAPS_REGION, OVERLAPPING_REGION, NOT_FOLDABLE_REGION, GLUE_FLAP_NO_OVERLAPS, GLUE_FLAP_WITH_OVERLAPS, GLUE_FLAP_TO_LARGE, BUILD_ORDER_PROPERTY_NAME, GLUE_FLAP_PROPERTY_NAME
 from .unfolding import Unfolding, pos_list_to_triangles
 from collections import deque
 from .printprepper import ColoredTriangleData, ComponentPrintData, CutEdgeData, FoldEdgeData, GlueFlapEdgeData
@@ -26,9 +26,20 @@ class CutGraph():
             for edge_index in ao[LOCKED_EDGES_PROP_NAME]:
                 self.designer_constraints[edge_index] = "glued"
         
+        # compute connected components
         self.compute_all_connected_components()
+        # try to read build steps
+        if BUILD_ORDER_PROPERTY_NAME in ao:
+            self.read_sparse_build_steps_dict(ao[BUILD_ORDER_PROPERTY_NAME].to_dict())
+        # compute undoldings
         self.unfold_all_connected_components()
-        self.greedy_place_all_flaps()
+        # try to read glue flaps or recompute them
+        if GLUE_FLAP_PROPERTY_NAME in ao:
+            self.read_glue_flaps_dict(ao[GLUE_FLAP_PROPERTY_NAME].to_dict())
+        if self.check_if_glue_flaps_exist_and_are_valid():
+            self.update_all_flap_geometry() # create flap geometry
+        else:
+            self.greedy_place_all_flaps()
 
         print("Generated a dual graph with", self.dualgraph.number_of_nodes(), "nodes and", self.dualgraph.number_of_edges(), "edges.")
 
@@ -210,6 +221,23 @@ class CutGraph():
         self.build_steps_valid = self.every_component_has_build_step() and len(self.components_as_sets.keys()) == len(self.component_build_indices.keys())
         return self.build_steps_valid
 
+    def create_sparse_build_steps_dict(self):
+        if not self.check_if_build_steps_are_present_and_valid():
+            return {}
+        sparse_face_dict = {}
+        for c_id, face_set in self.components_as_sets.items():
+            if len(face_set) == 0:
+                continue # wtf case
+            sparse_face_dict[str(list(face_set)[0])] = self.component_build_indices[c_id]
+        return sparse_face_dict
+
+    def read_sparse_build_steps_dict(self, sparse_build_steps):
+        self.component_build_indices = {}
+        for c_id, face_set in self.components_as_sets.items():
+            for face_index in face_set:
+                if str(face_index) in sparse_build_steps.keys():
+                    self.component_build_indices[c_id] = sparse_build_steps[str(face_index)]
+
     #################################
     #           Unfolding           #
     #################################
@@ -376,6 +404,8 @@ class CutGraph():
     def get_lines_array_per_glue_flap_quality(self, face_offset):
         if not self.check_validity():
             return {} # draw nothing but at least no crash
+        if not hasattr(self, "glue_flaps"):
+            return {} 
         self.assert_all_faces_have_components_and_unfoldings()
         self.ensure_halfedge_to_edge_table()
         self.ensure_halfedge_to_face_table()
@@ -401,7 +431,7 @@ class CutGraph():
                 tri_1 = flap_triangles_3d[1]
                 flap_line_array = [tri_0[0], tri_0[1], tri_0[1], tri_0[2], tri_1[0], tri_1[1]]
             # apply offset
-            flap_line_array = [self.world_matrix @ (mathutils.Vector(v) + face_offset * opp_face.normal) for v in flap_line_array]
+            flap_line_array = [self.world_matrix @ (mathutils.Vector(v) + 1.2 * face_offset * opp_face.normal) for v in flap_line_array]
             if opp_unfolding.flap_is_overlapping(self.mesh.edges[edge_index]):
                 quality_dict[GLUE_FLAP_WITH_OVERLAPS] += flap_line_array
                 continue
@@ -629,6 +659,27 @@ class CutGraph():
         # add glue flap on the opposide halfedge
         self.try_to_add_glue_flap((curr_halfedge[1], curr_halfedge[0]), enforce=True)
     
+    def create_glue_flaps_dict(self):
+        if not hasattr(self, "glue_flaps"):
+            return {}
+        return {str(edge_id) : halfedge for edge_id, halfedge in self.glue_flaps.items()}
+
+    def read_glue_flaps_dict(self, glue_flap_dict):
+        self.glue_flaps = {}
+        for edge_id_str, halfedge in glue_flap_dict.items():
+            self.glue_flaps[int(edge_id_str)] = tuple(halfedge)
+
+    def check_if_glue_flaps_exist_and_are_valid(self):
+        if not hasattr(self, "glue_flaps"):
+            return False
+        for dual_graph_edge in self.dualgraph.edges:
+            c_1 = self.vertex_to_component_dict[dual_graph_edge[0]]
+            c_2 = self.vertex_to_component_dict[dual_graph_edge[1]]
+            if c_1 is not None and c_2 is not None and not self.edge_is_not_cut(*dual_graph_edge):
+                if self.dualgraph.edges[dual_graph_edge]["edge_index"] not in self.glue_flaps.keys():
+                    return False
+        return True
+        
     #################################
     #  User Constraints Interface   #
     #################################
@@ -683,10 +734,54 @@ class CutGraph():
     #           Exporting           #
     #################################
 
-    def compute_scaling_factor_for_target_model_height(self, target_height):
+    def compute_max_print_component_dimensions(self):
+        # compute all geometric print information and get max dimensions
+        self.mesh.edges.ensure_lookup_table()
+        self.mesh.faces.ensure_lookup_table()
+        max_height = -np.inf
+        max_width = -np.inf
+        for c_id, faces_ids_in_component in self.components_as_sets.items():
+            if self.unfolded_components[c_id] is None:
+                continue
+            unfolding_of_curr_component : Unfolding = self.unfolded_components[c_id]
+            curr_component_print_data = ComponentPrintData()
+
+            # collect cut edges and fold edges
+            for face_index in faces_ids_in_component:
+                curr_face : bmesh.types.BMFace = self.mesh.faces[face_index]
+
+                # collect all edges
+                for curr_edge in curr_face.edges:
+                    # compute edge coords in unfolding space
+                    vertex_coords_3d = [v.co for v in curr_edge.verts]    
+                    vertex_coords_unfolded = [unfolding_of_curr_component.get_globally_consistend_2d_coord_in_face(co_3d, face_index) for co_3d in vertex_coords_3d]
+                    if curr_edge.is_boundary or not self.mesh_edge_is_not_cut(curr_edge):
+                        # this is a cut edge
+                        curr_component_print_data.add_cut_edge(CutEdgeData(tuple(vertex_coords_unfolded), curr_edge.index))
+
+                # collect edges for glue flaps
+                for flap_triangles in unfolding_of_curr_component.glue_flaps_per_face[face_index].values():
+                    assert len(flap_triangles) > 0
+                    curr_component_print_data.add_glue_flap_edge(GlueFlapEdgeData((flap_triangles[0][0],flap_triangles[0][1])))
+                    curr_component_print_data.add_glue_flap_edge(GlueFlapEdgeData((flap_triangles[0][1],flap_triangles[0][2])))
+                    if len(flap_triangles) == 2:
+                        curr_component_print_data.add_glue_flap_edge(GlueFlapEdgeData((flap_triangles[1][1],flap_triangles[1][2])))
+            
+            # align vertically 
+            curr_component_print_data.align_vertically_via_pca()
+            # get width and height
+            max_width = max(curr_component_print_data.upper_right[0] - curr_component_print_data.lower_left[0], max_width)
+            max_height = max(curr_component_print_data.upper_right[1] - curr_component_print_data.lower_left[1], max_height)
+        return max_width, max_height
+
+    def compute_mesh_height(self):
         mesh_top = max([v.co[2] for v in self.mesh.verts])
         mesh_bot = min([v.co[2] for v in self.mesh.verts])
         mesh_height = mesh_top - mesh_bot
+        return mesh_height
+
+    def compute_scaling_factor_for_target_model_height(self, target_height):
+        mesh_height = self.compute_mesh_height()
         if mesh_height <= 0:
             print("POLYZAMBONI WARNING: Mesh has zero height!")
             return 1
