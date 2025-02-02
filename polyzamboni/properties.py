@@ -37,7 +37,7 @@ class DrawSettings(bpy.types.PropertyGroup):
     )
     normal_offset: FloatProperty(
         name="Normal offset",
-        default=0.1,
+        default=0.01,
         min=0.01,
         max=0.5,
         update=update_all_polyzamboni_drawings
@@ -104,13 +104,13 @@ class GeneralExportSettings(bpy.types.PropertyGroup):
     )
     page_margin: FloatProperty(
         name="Page margin",
-        default=0.5,
+        default=0.005,
         min=0,
         subtype="DISTANCE"
     )
     space_between_components: FloatProperty(
         name="Space between pieces",
-        default=0.25,
+        default=0.0025,
         min=0,
         subtype="DISTANCE"
     )
@@ -120,8 +120,8 @@ class GeneralExportSettings(bpy.types.PropertyGroup):
     )
     target_model_height: FloatProperty(
         name="Target model height",
-        default=5,
-        min=0.1,
+        default=0.1,
+        min=0.0001,
         subtype="DISTANCE"
     )
     show_step_numbers : BoolProperty(
@@ -216,8 +216,8 @@ class LineExportSettings(bpy.types.PropertyGroup):
         max=1
     )
     edge_number_offset : FloatProperty(
-        name="Edge number offset (cm)",
-        default=0.1,
+        name="Edge number offset",
+        default=0.001,
         min=0,
         subtype="DISTANCE"
     )

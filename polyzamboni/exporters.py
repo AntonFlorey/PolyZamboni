@@ -89,6 +89,11 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
 
     supported_formats = ["pdf", "svg"]
 
+    def __linear_to_srgb(self, linear_color):
+        linear_color = np.array(linear_color)
+        srgb_color = np.where(linear_color <= 0.0031308, 12.92 * linear_color, 1.055 * np.power(linear_color, 1/2.4) - 0.055)
+        return srgb_color
+
     def __create_new_page(self):
         fig, ax = plt.subplots()
 
@@ -155,24 +160,24 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
     def __draw_cut_edge(self, ax : axes.Axes, cut_edge_data : CutEdgeData, page_transform : AffineTransform2D):
         # transform line coords and draw
         page_coords = self.__transform_component_line_coords_to_page_coord(cut_edge_data.coords, page_transform, self.prints_on_model_inside)
-        self.__draw_line(ax, page_coords, self.cut_edge_linestyle, color=self.color_of_lines)
+        self.__draw_line(ax, page_coords, self.cut_edge_linestyle, color=self.__linear_to_srgb(self.color_of_lines))
 
         # add edge number
         if not self.show_edge_numbers:
             return
-        self.__write_text_along_line(ax, page_coords, str(cut_edge_data.edge_index), self.edge_number_font_size, color=self.color_of_edge_numbers, offset_cm=self.edge_number_offset, flipped=self.prints_on_model_inside)
+        self.__write_text_along_line(ax, page_coords, str(cut_edge_data.edge_index), self.edge_number_font_size, color=self.__linear_to_srgb(self.color_of_edge_numbers), offset_cm=self.edge_number_offset, flipped=self.prints_on_model_inside)
 
     def __draw_fold_edge(self, ax : axes.Axes, fold_edge_data : FoldEdgeData, page_transform : AffineTransform2D):
         if fold_edge_data.fold_angle <= self.fold_hide_threshold_angle:
             return # dont draw almost flat folds
         # transform line coords
         page_coords = self.__transform_component_line_coords_to_page_coord(fold_edge_data.coords, page_transform, self.prints_on_model_inside)
-        self.__draw_line(ax, page_coords, self.convex_fold_edge_linestyle if fold_edge_data.is_convex else self.concave_fold_edge_linestyle, color=self.color_of_lines)
+        self.__draw_line(ax, page_coords, self.convex_fold_edge_linestyle if fold_edge_data.is_convex else self.concave_fold_edge_linestyle, color=self.__linear_to_srgb(self.color_of_lines))
 
     def __draw_glue_flap_edge(self, ax : axes.Axes, glue_flap_edge_data : GlueFlapEdgeData, page_transform : AffineTransform2D):
         # transform line coords and draw
         page_coords = self.__transform_component_line_coords_to_page_coord(glue_flap_edge_data.coords, page_transform, self.prints_on_model_inside)
-        self.__draw_line(ax, page_coords, self.glue_flap_linestyle, color=self.color_of_lines)
+        self.__draw_line(ax, page_coords, self.glue_flap_linestyle, color=self.__linear_to_srgb(self.color_of_lines))
 
     def __create_thickened_triangle_coords(self, triangle_coords, eps):
         a_t, b_t, c_t = tuple(np.asarray(v) for v in triangle_coords)
@@ -250,7 +255,8 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
             self.__draw_textured_triangle(ax, thickened_triangle_coords, colored_tri_data.uvs, colored_tri_data.absolute_texture_path)
         elif colored_tri_data.color is not None:
             # fill with solid color
-            self.__draw_solid_color_triangle(ax, thickened_triangle_coords, colored_tri_data.color)
+            srgb_color = self.__linear_to_srgb(np.array(colored_tri_data.color))
+            self.__draw_solid_color_triangle(ax, thickened_triangle_coords, srgb_color)
 
     def __create_page_figure(self, components_on_page, draw_textures = True, only_textures=False):
         # create a new figure for this page
@@ -273,7 +279,7 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
                 self.__write_text(ax, str(component_print_data.build_step_number), 
                                 component_print_data.build_step_number_position,
                                 self.build_step_number_font_size,
-                                self.builf_step_number_color,
+                                self.__linear_to_srgb(self.builf_step_number_color),
                                 component_page_transform)
 
             for cut_edge_print_data in component_print_data.cut_edges:

@@ -1,5 +1,5 @@
 import bpy
-from .constants import CUT_CONSTRAINTS_PROP_NAME, LOCKED_EDGES_PROP_NAME, CUTGRAPH_ID_PROPERTY_NAME
+from .constants import CUT_CONSTRAINTS_PROP_NAME, LOCKED_EDGES_PROP_NAME, CUTGRAPH_ID_PROPERTY_NAME, GLUE_FLAP_PROPERTY_NAME, BUILD_ORDER_PROPERTY_NAME
 
 PZ_CUTGRAPHS = None
 PZ_LOCK_SELECT_CALLBACK = False
@@ -36,6 +36,10 @@ def remove_cutgraph(obj):
         del obj[CUT_CONSTRAINTS_PROP_NAME]
     if LOCKED_EDGES_PROP_NAME in obj:
         del obj[LOCKED_EDGES_PROP_NAME]
+    if GLUE_FLAP_PROPERTY_NAME in obj:
+        del obj[GLUE_FLAP_PROPERTY_NAME]
+    if BUILD_ORDER_PROPERTY_NAME in obj:
+        del obj[BUILD_ORDER_PROPERTY_NAME]
 
 def reset_file_dependent_globals():
     global PZ_CUTGRAPHS

@@ -6,7 +6,7 @@ bl_info = {
     "location": "View3D",
     "warning": "",
     "wiki_url": "",
-    "category": "Add Mesh"
+    "category": "Import-Export"
 }
 
 if "bpy" in locals():

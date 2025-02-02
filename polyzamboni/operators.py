@@ -18,10 +18,30 @@ class InitializeCuttingOperator(bpy.types.Operator):
     bl_label = "Unfold this mesh"
     bl_idname  = "polyzamboni.cut_initialization_op"
 
-    def invoke(self, context, event):     
+    def invoke(self, context, event):
+        ao = bpy.context.active_object
+        mesh : bmesh.types.BMesh = bmesh.new()
+        mesh.from_mesh(ao.data)
+        self.selected_mesh_is_manifold = np.all([edge.is_manifold for edge in mesh.edges] + [v.is_manifold for v in mesh.verts])
+
+        if not self.selected_mesh_is_manifold:
+            wm = context.window_manager
+            return wm.invoke_props_dialog(self, title="Something went wrong D:", confirm_text="Okay")
+
+        # TODO check for face pairs that meet at multiple edges
+
+        # TODO check for mesh planarity and warn the user when max nonplanarity is to bad
+
         return self.execute(context)
-        
+    
+    def draw(self, context):
+        layout = self.layout
+        if not self.selected_mesh_is_manifold:
+            layout.row().label(text="The selected mesh is not manifold!")
+
     def execute(self, context):
+        if not self.selected_mesh_is_manifold:
+            return { 'FINISHED' }
         # get the currently selected object
         ao = bpy.context.active_object
         ao_pz_settings = ao.polyzamboni_object_prop
@@ -372,14 +392,22 @@ def export_draw_func(operator):
         write_custom_split_property_row(general_settings, "Target height", general_settings_props, "target_model_height", 0.6)
         curr_scale_factor = general_settings_props.target_model_height / operator.mesh_height
         # set correct scaling
-        general_settings_props.sizing_scale = curr_scale_factor / units.unit_to_cm_conversion_table.get(operator.curr_len_unit, 1)
+        general_settings_props.sizing_scale = curr_scale_factor 
     elif general_settings_props.scaling_mode == "SCALE":
-        write_custom_split_property_row(general_settings, "Blender units to " + units.length_units_to_str.get(operator.curr_len_unit, "?"), general_settings_props, "sizing_scale", 0.6)
-        curr_scale_factor = general_settings_props.sizing_scale * units.unit_to_cm_conversion_table.get(operator.curr_len_unit, 1)
+        write_custom_split_property_row(general_settings, "Model scale", general_settings_props, "sizing_scale", 0.6)
+        curr_scale_factor = general_settings_props.sizing_scale
         # set target model height
         general_settings_props.target_model_height = curr_scale_factor * operator.mesh_height
     curr_page_size = exporters.paper_sizes[general_settings_props.paper_size]
-    if operator.max_comp_with * curr_scale_factor > curr_page_size[0] - 2 * general_settings_props.page_margin or operator.max_comp_height * curr_scale_factor > curr_page_size[1] - 2 * general_settings_props.page_margin:
+
+    bu_to_cm_scale_factor =  100 * general_settings_props.target_model_height * operator.curr_len_scale / operator.mesh_height
+    page_margin_in_cm = 100 * operator.curr_len_scale * general_settings_props.page_margin
+    # print("page margin in cm:", page_margin_in_cm)
+    # print("max comp width:", operator.max_comp_with * bu_to_cm_scale_factor)
+    # print("max comp height:", operator.max_comp_height * bu_to_cm_scale_factor)
+    # print("paper width:", curr_page_size[0] - 2 * page_margin_in_cm)
+    # print("paper height:", curr_page_size[1] - 2 * page_margin_in_cm)
+    if operator.max_comp_with * bu_to_cm_scale_factor > curr_page_size[0] - 2 * page_margin_in_cm or operator.max_comp_height * bu_to_cm_scale_factor > curr_page_size[1] - 2 * page_margin_in_cm:
         general_settings.row().label(icon="ERROR", text="A piece does not fit on one page!")
     # margin
     write_custom_split_property_row(general_settings, "Page margin", general_settings_props, "page_margin", 0.6)
@@ -458,7 +486,7 @@ def create_exporter_for_operator(operator, output_format="pdf"):
                                                  fold_hide_threshold_angle=line_settings.hide_fold_edge_angle_th,
                                                  show_edge_numbers=general_settings.show_edge_numbers,
                                                  edge_number_font_size=general_settings.edge_number_font_size,
-                                                 edge_number_offset=line_settings.edge_number_offset,
+                                                 edge_number_offset=100 * operator.curr_len_scale * line_settings.edge_number_offset,
                                                  show_build_step_numbers=general_settings.show_step_numbers,
                                                  apply_main_texture=texture_settings.apply_textures,
                                                  print_on_inside=general_settings.print_on_inside,
@@ -500,6 +528,7 @@ class PolyZamboniExportPDFOperator(bpy.types.Operator, ExportHelper):
             self.mesh_height = 1 # to prevent crashes
         self.curr_len_unit = context.scene.unit_settings.length_unit
         self.curr_unit_system = context.scene.unit_settings.system
+        self.curr_len_scale = context.scene.unit_settings.scale_length
         print("current len unit:", self.curr_len_unit)
 
         return super().invoke(context, event)
@@ -516,11 +545,11 @@ class PolyZamboniExportPDFOperator(bpy.types.Operator, ExportHelper):
             print("POLYZAMBONI WARNING: You exported a mesh that is not fully foldable yet!")
 
         # prepare everything
-        component_print_info = active_cutgraph.create_print_data_for_all_components(ao, active_cutgraph.compute_scaling_factor_for_target_model_height(self.general_settings.target_model_height))
+        component_print_info = active_cutgraph.create_print_data_for_all_components(ao, active_cutgraph.compute_scaling_factor_for_target_model_height(100 * self.curr_len_scale * self.general_settings.target_model_height))
         page_arrangement = fit_components_on_pages(component_print_info, 
                                                    exporters.paper_sizes[self.general_settings.paper_size], 
-                                                   self.general_settings.page_margin, 
-                                                   self.general_settings.space_between_components, 
+                                                   100 * self.curr_len_scale * self.general_settings.page_margin, 
+                                                   100 * self.curr_len_scale * self.general_settings.space_between_components, 
                                                    self.general_settings.one_material_per_page)
 
         # initialize exporter
@@ -571,7 +600,7 @@ class PolyZamboniExportSVGOperator(bpy.types.Operator, ExportHelper):
             self.mesh_height = 1 # to prevent crashes
         self.curr_len_unit = context.scene.unit_settings.length_unit
         self.curr_unit_system = context.scene.unit_settings.system
-
+        self.curr_len_scale = context.scene.unit_settings.scale_length
         return super().invoke(context, event)
 
     def draw(self, context):
@@ -586,11 +615,11 @@ class PolyZamboniExportSVGOperator(bpy.types.Operator, ExportHelper):
             print("POLYZAMBONI WARNING: You exported a mesh that is not fully foldable yet!")
 
         # prepare everything
-        component_print_info = active_cutgraph.create_print_data_for_all_components(ao, active_cutgraph.compute_scaling_factor_for_target_model_height(self.general_settings.target_model_height))
+        component_print_info = active_cutgraph.create_print_data_for_all_components(ao, active_cutgraph.compute_scaling_factor_for_target_model_height(100 * self.curr_len_scale * self.general_settings.target_model_height))
         page_arrangement = fit_components_on_pages(component_print_info, 
                                                    exporters.paper_sizes[self.general_settings.paper_size], 
-                                                   self.general_settings.page_margin, 
-                                                   self.general_settings.space_between_components, 
+                                                   100 * self.curr_len_scale * self.general_settings.page_margin, 
+                                                   100 * self.curr_len_scale * self.general_settings.space_between_components, 
                                                    self.general_settings.one_material_per_page)
 
         # initialize exporter
