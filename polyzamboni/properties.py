@@ -52,7 +52,7 @@ class ZamboniSettingsPerObject(bpy.types.PropertyGroup):
     glue_flap_height : FloatProperty(
         name="Glue flap height",
         description="Controls how far the glue flaps extend",
-        default=1.0,
+        default=0.15,
         min=0.01
     )
     glue_flap_angle : FloatProperty(

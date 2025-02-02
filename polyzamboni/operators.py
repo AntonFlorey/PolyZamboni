@@ -12,40 +12,88 @@ from . import units
 from .constants import CUTGRAPH_ID_PROPERTY_NAME, CUT_CONSTRAINTS_PROP_NAME, LOCKED_EDGES_PROP_NAME
 from . import exporters
 from .printprepper import fit_components_on_pages
+from .geometry import compute_planarity_score
 
 class InitializeCuttingOperator(bpy.types.Operator):
     """Start the unfolding process for this mesh"""
     bl_label = "Unfold this mesh"
     bl_idname  = "polyzamboni.cut_initialization_op"
 
+    weird_mode_table = {
+        "PAINT_VERTEX" : "VERTEX_PAINT",
+        "EDIT_MESH" : "EDIT",
+        "PAINT_WEIGHT" : "WEIGHT_PAINT",
+        "PAINT_TEXTURE" : "TEXTURE_PAINT"
+    }   
+
     def invoke(self, context, event):
+        returnto=False
+        if(context.mode != 'OBJECT'):
+            returnto=context.mode
+            bpy.ops.object.mode_set(mode="OBJECT")
         ao = bpy.context.active_object
         mesh : bmesh.types.BMesh = bmesh.new()
         mesh.from_mesh(ao.data)
-        self.selected_mesh_is_manifold = np.all([edge.is_manifold for edge in mesh.edges] + [v.is_manifold for v in mesh.verts])
+        if returnto:
+            bpy.ops.object.mode_set(mode=self.weird_mode_table[returnto] if returnto in self.weird_mode_table else returnto)
+        self.selected_mesh_is_manifold = np.all([edge.is_manifold or edge.is_boundary for edge in mesh.edges] + [v.is_manifold for v in mesh.verts])
+        self.normals_are_okay = np.all([edge.is_contiguous or edge.is_boundary for edge in mesh.edges])
+        self.double_connected_face_pair_present = False
+        self.max_planarity_score = max([compute_planarity_score([np.array(v.co) for v in face.verts]) for face in mesh.faces])
 
         if not self.selected_mesh_is_manifold:
             wm = context.window_manager
             return wm.invoke_props_dialog(self, title="Something went wrong D:", confirm_text="Okay")
+        
+        if not self.normals_are_okay:
+            wm = context.window_manager
+            return wm.invoke_props_dialog(self, title="Something went wrong D:", confirm_text="Okay")
 
-        # TODO check for face pairs that meet at multiple edges
+        face_pair_set = set()
+        for edge in mesh.edges:
+            if edge.is_boundary:
+                continue
+            assert len(edge.link_faces) == 2
+            if tuple(sorted([f.index for f in edge.link_faces])) in face_pair_set:
+                self.double_connected_face_pair_present = True
+                break
+            face_pair_set.add(tuple(sorted([f.index for f in edge.link_faces])))
+        if self.double_connected_face_pair_present:
+            wm = context.window_manager
+            return wm.invoke_props_dialog(self, title="Something went wrong D:", confirm_text="Okay")
 
-        # TODO check for mesh planarity and warn the user when max nonplanarity is to bad
+        if self.max_planarity_score > 0.1:
+            wm = context.window_manager
+            return wm.invoke_props_dialog(self, title="Warning!", confirm_text="Okay")
 
         return self.execute(context)
     
     def draw(self, context):
         layout = self.layout
         if not self.selected_mesh_is_manifold:
-            layout.row().label(text="The selected mesh is not manifold!")
+            layout.row().label(text="The selected mesh is not manifold!", icon="ERROR")
+        if not self.normals_are_okay:
+            layout.row().label(text="Bad normals! Try \"Recalculate Outside\" (Shift-N)", icon="ERROR")
+        if self.double_connected_face_pair_present:
+            layout.row().label(text="Some faces touch at more than one edge!", icon="ERROR")
+        if self.max_planarity_score > 0.1:
+            layout.row().label(text="Some faces are highly non-planar! (err: {:.2f})".format(self.max_planarity_score))
+            layout.row().label(text="This might crash the addon later...")
+
 
     def execute(self, context):
-        if not self.selected_mesh_is_manifold:
+        if not self.selected_mesh_is_manifold or self.double_connected_face_pair_present or not self.normals_are_okay:
             return { 'FINISHED' }
         # get the currently selected object
+        returnto=False
+        if(context.mode != 'OBJECT'):
+            returnto=context.mode
+            bpy.ops.object.mode_set(mode="OBJECT")
         ao = bpy.context.active_object
         ao_pz_settings = ao.polyzamboni_object_prop
         new_cutgraph = cutgraph.CutGraph(ao, np.deg2rad(ao_pz_settings.glue_flap_angle), ao_pz_settings.glue_flap_height, ao_pz_settings.prefer_alternating_flaps)
+        if returnto:
+            bpy.ops.object.mode_set(mode=self.weird_mode_table[returnto] if returnto in self.weird_mode_table else returnto)
         globals.add_cutgraph(ao, new_cutgraph)
         globals.PZ_CURRENT_CUTGRAPH_ID = ao[CUTGRAPH_ID_PROPERTY_NAME]
         update_all_polyzamboni_drawings(None, context)
@@ -111,12 +159,25 @@ class SyncMeshOperator(bpy.types.Operator):
     bl_label = "Sync Mesh Changes"
     bl_idname = "polyzamboni.mesh_sync_op"
 
+    weird_mode_table = {
+        "PAINT_VERTEX" : "VERTEX_PAINT",
+        "EDIT_MESH" : "EDIT",
+        "PAINT_WEIGHT" : "WEIGHT_PAINT",
+        "PAINT_TEXTURE" : "TEXTURE_PAINT"
+    }
+
     def execute(self, context):
+        returnto=False
+        if(context.mode != 'OBJECT'):
+            returnto=context.mode
+            bpy.ops.object.mode_set(mode="OBJECT")
         ao = bpy.context.active_object
         curr_cutgraph : cutgraph.CutGraph = globals.PZ_CUTGRAPHS[ao[CUTGRAPH_ID_PROPERTY_NAME]]
         curr_cutgraph.construct_dual_graph_from_mesh(ao)
         curr_cutgraph.unfold_all_connected_components()
         curr_cutgraph.update_all_flap_geometry()
+        if returnto:
+            bpy.ops.object.mode_set(mode=self.weird_mode_table[returnto] if returnto in self.weird_mode_table else returnto)
         update_all_polyzamboni_drawings(None, context)
         return { 'FINISHED' }
     
@@ -529,7 +590,6 @@ class PolyZamboniExportPDFOperator(bpy.types.Operator, ExportHelper):
         self.curr_len_unit = context.scene.unit_settings.length_unit
         self.curr_unit_system = context.scene.unit_settings.system
         self.curr_len_scale = context.scene.unit_settings.scale_length
-        print("current len unit:", self.curr_len_unit)
 
         return super().invoke(context, event)
 

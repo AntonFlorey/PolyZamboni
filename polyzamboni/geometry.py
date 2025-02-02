@@ -2,6 +2,7 @@ import numpy as np
 import bmesh
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+from itertools import combinations
 
 class AffineTransform2D():
     """ Affine Transformation in 2D Space """
@@ -34,106 +35,6 @@ class AffineTransform2D():
     def __str__(self):
         return "2D Affine Transformation\nLinear Part:\n" + self.A.__str__() + "\nAffine Part:\n" + self.t.__str__()
 
-def generate_random_point_on_unit_circle():
-    # Angle in radians
-    angle = np.random.uniform(0, 2 * np.pi)
-    # x and y coordinates on the unit circle
-    x = np.cos(angle)
-    y = np.sin(angle)
-    return np.array([x, y])
-
-def generate_random_triangle():
-    triangle = [generate_random_point_on_unit_circle() for _ in range(3)]
-
-    # ensure ccw order
-    if determinant_2d(triangle[1] - triangle[0], triangle[2] - triangle[0]) < 0:
-        triangle = [triangle[0], triangle[2], triangle[1]]
-
-    return triangle
-
-def draw_triangle(triangle, ax, color):
-    triangle.append(triangle[0])  # to close the triangle
-    x_coords, y_coords = zip(*triangle)
-    ax.plot(x_coords, y_coords, marker='o', color=color)
-    
-def two_random_triangle_test():
-    fig, ax = plt.subplots()
-    ax.set_aspect('equal', 'box')
-    ax.set_xlim(-1.1, 1.1)
-    ax.set_ylim(-1.1, 1.1)
-    ax.grid(True)
-    
-    colors = ['b', 'g']  # Colors for the triangles
-    t1 = generate_random_triangle()
-    t2 = generate_random_triangle()
-    color = "g"
-    if triangle_intersection_test_2d(*t1, *t2):
-        color = "r"
-    draw_triangle(t1, ax, color)
-    draw_triangle(t2, ax, color)
-    
-    plt.xlabel("X-axis")
-    plt.ylabel("Y-axis")
-    plt.title("Random 2D Triangles on the Unit Circle")
-    plt.show()
-    plt.close(fig)
-
-def debug_draw_polygon_2d(polygon_2d, vertex_indices):
-
-    # Polygon zeichnen
-    polygon = plt.Polygon(polygon_2d, closed=True, edgecolor='r', facecolor='orange')
-
-    fig, ax = plt.subplots()
-    ax.add_patch(polygon)
-    ax.set_xlim(min(polygon_2d[:,0])-0.1, max(polygon_2d[:,0])+0.1)
-    ax.set_ylim(min(polygon_2d[:,1])-0.1, max(polygon_2d[:,1])+0.1)
-    ax.set_aspect('equal')  # Gleiche Skala für x und y
-
-    for i, (x, y) in zip(vertex_indices, polygon_2d): 
-        ax.text(x, y, str(i), fontsize=6, ha='center', va='center', color='black')#, bbox=dict(facecolor='black', edgecolor='none', boxstyle='round,pad=0.3'))
-
-    plt.xlabel('X-Achse')
-    plt.ylabel('Y-Achse')
-    plt.title('Gezeichnetes Polygon')
-    plt.grid(True)
-    plt.savefig("test.png")
-    plt.close(fig)
-
-def draw_polygon(ax, vertices, number):
-    polygon = patches.Polygon(vertices, closed=True, edgecolor='black', facecolor='none')
-    ax.add_patch(polygon)
-
-    # Calculate the centroid of the polygon
-    center_x = np.mean([v[0] for v in vertices])
-    center_y = np.mean([v[1] for v in vertices])
-    
-    ax.text(center_x, center_y, str(number), color='black', ha='center', va='center', fontsize=8)
-
-def debug_draw_polygons_2d(polygons_2d, filename):
-    fig, ax = plt.subplots()
-
-    min_x = min([min([p[0] for p in polygon]) for polygon in polygons_2d])
-    min_y = min([min([p[1] for p in polygon]) for polygon in polygons_2d])
-    max_x = max([max([p[0] for p in polygon]) for polygon in polygons_2d])
-    max_y = max([max([p[1] for p in polygon]) for polygon in polygons_2d])
-
-    _max = max(max_x, max_y)
-    _min = min(min_x, min_y)
-
-    ax.set_xlim(_min-0.5, _max+0.5)
-    ax.set_ylim(_min-0.5, _max+0.5)
-
-    for i, polygon in enumerate(polygons_2d):
-        draw_polygon(ax, polygon, i)
-
-    plt.axis('equal')
-    plt.xlabel('X-Achse')
-    plt.ylabel('Y-Achse')
-    plt.title('Unfolded Polygons')
-    plt.grid(False)
-    plt.savefig(filename)
-    plt.close(fig)
-
 def compute_bb_diameter(mesh : bmesh.types.BMesh):
     positions = np.asarray([np.asarray(v.co) for v in mesh.verts])
     mincorner = np.min(positions, axis=0)
@@ -156,6 +57,18 @@ def compute_voronoi_areas(mesh : bmesh.types.BMesh):
     assert np.allclose(sum(face_areas.values()), sum(voronoi_areas.values()))
 
     return voronoi_areas
+
+def compute_planarity_score(face_coords):
+    n = len(face_coords)
+    normalized_edges = []
+    planarity_score = 0
+    for i in range(n):
+        v_a = face_coords[i]
+        v_b = face_coords[(i + 1) % n]
+        normalized_edges.append((v_b - v_a) / np.linalg.norm(v_b - v_a))
+    for a, b, c in combinations(normalized_edges, 3):
+        planarity_score += np.linalg.det(np.stack((a,b,c))) ** 2
+    return planarity_score * 6 / (n * (n - 1) * (n - 2))
 
 def to_local_coords(point_in_3d, frame_orig, base_x, base_y):
     relative_coord = np.asarray(point_in_3d) - frame_orig
@@ -313,7 +226,6 @@ def triangulate_2d_polygon(ccw_vertex_list, external_vertex_id = None, crash_on_
             print(determinants)
             print(triangles_via_ids)
             print(processed_verts)
-            debug_draw_polygon_2d(np.asarray(ccw_vertex_list), external_vertex_id)
             break
 
     if crash_on_fail:
@@ -359,29 +271,3 @@ def triangle_intersection_test_2d(t1_a, t1_b, t1_c, t2_a, t2_b, t2_c):
             return False
         
     return True
-
-if __name__ == "__main__":
-    print("tests...")
-    import time
-
-    # some amount of tests
-    num_tests = 10000000
-    print("Testing", num_tests, "random triangles...")
-    time_for_instersection_tests = 0
-    intersecting_cases = 0
-
-    for _ in range(num_tests):
-        t1 = generate_random_triangle()
-        t2 = generate_random_triangle()
-
-        start_t = time.time()
-        intersecting = triangle_intersection_test_2d(*t1, *t2)
-        end_t = time.time()
-        time_for_instersection_tests += end_t - start_t
-
-        if intersecting:
-            intersecting_cases += 1
-    
-    print("Intersection computation took", time_for_instersection_tests, "seconds.")
-    print("Avg time per test:", time_for_instersection_tests / num_tests)
-    print("Percentage of intersecting triangles:", intersecting_cases / num_tests)

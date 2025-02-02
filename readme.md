@@ -8,7 +8,8 @@ This addon uses some external packages not included in the Python installation t
 Here is one way of installing these packages via pip:
 
 ### Step 1
-Find the Python binary path of your Blender installation. The path should look like this: `'some_path_prefix\Blender Foundation\Blender 4.3\4.3\python\bin'`  
+Find the Python binary path of your Blender installation. The path should look like this:  
+`'some_path_prefix\Blender Foundation\Blender 4.3\4.3\python\bin'`  
 In case of my windows machine, I get the following path:  
 `'C:\Program Files\Blender Foundation\Blender 4.3\4.3\python\bin'`
 
