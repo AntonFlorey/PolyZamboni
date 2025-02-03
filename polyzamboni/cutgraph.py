@@ -71,7 +71,7 @@ class CutGraph():
 
     def check_validity(self):
         if not self.valid:
-            return False
+            return False # invalid once, invalid until something external changes
         mesh_face_indices = set([f.index for f in self.mesh.faces])
         mesh_edge_indices = set([e.index for e in self.mesh.edges])
 

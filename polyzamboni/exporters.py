@@ -21,6 +21,9 @@ paper_sizes = {
     "A6" : (10.5, 14.8),
     "A7" : (7.4, 10.5),
     "A8" : (5.2, 7.4),
+    "Letter" : (21.6, 27.9),
+    "Legal" : (21.6, 35.6),
+    "Tabloid" : (27.9, 43.2)
 }
 
 # feel free to add more linestyles (see https://matplotlib.org/stable/gallery/lines_bars_and_markers/linestyles.html)

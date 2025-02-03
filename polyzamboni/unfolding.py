@@ -7,7 +7,6 @@ from mathutils import Vector, Matrix, Quaternion
 from itertools import product
 from . import geometry
 
-
 def edge_to_key_e(e : bmesh.types.BMEdge):
     return tuple(sorted([v.index for v in e.verts]))
 

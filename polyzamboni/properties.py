@@ -98,7 +98,10 @@ class GeneralExportSettings(bpy.types.PropertyGroup):
             ("A5", "A5", "", "", 5),
             ("A6", "A6", "", "", 6),
             ("A7", "A7", "", "", 7),
-            ("A8", "A8", "", "", 8)
+            ("A8", "A8", "", "", 8),
+            ("Letter", "Letter", ", ", 9),
+            ("Legal", "Legal", "", "", 10),
+            ("Tabloid", "Tabloid", "", "", 11)
         ],
         default="A4"
     )

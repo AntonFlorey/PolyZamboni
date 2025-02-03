@@ -8,7 +8,6 @@ from .properties import GeneralExportSettings, LineExportSettings, TextureExport
 from .drawing import *
 from . import globals
 from . import cutgraph
-from . import units
 from .constants import CUTGRAPH_ID_PROPERTY_NAME, CUT_CONSTRAINTS_PROP_NAME, LOCKED_EDGES_PROP_NAME
 from . import exporters
 from .printprepper import fit_components_on_pages
@@ -79,7 +78,6 @@ class InitializeCuttingOperator(bpy.types.Operator):
         if self.max_planarity_score > 0.1:
             layout.row().label(text="Some faces are highly non-planar! (err: {:.2f})".format(self.max_planarity_score))
             layout.row().label(text="This might crash the addon later...")
-
 
     def execute(self, context):
         if not self.selected_mesh_is_manifold or self.double_connected_face_pair_present or not self.normals_are_okay:
@@ -463,11 +461,6 @@ def export_draw_func(operator):
 
     bu_to_cm_scale_factor =  100 * general_settings_props.target_model_height * operator.curr_len_scale / operator.mesh_height
     page_margin_in_cm = 100 * operator.curr_len_scale * general_settings_props.page_margin
-    # print("page margin in cm:", page_margin_in_cm)
-    # print("max comp width:", operator.max_comp_with * bu_to_cm_scale_factor)
-    # print("max comp height:", operator.max_comp_height * bu_to_cm_scale_factor)
-    # print("paper width:", curr_page_size[0] - 2 * page_margin_in_cm)
-    # print("paper height:", curr_page_size[1] - 2 * page_margin_in_cm)
     if operator.max_comp_with * bu_to_cm_scale_factor > curr_page_size[0] - 2 * page_margin_in_cm or operator.max_comp_height * bu_to_cm_scale_factor > curr_page_size[1] - 2 * page_margin_in_cm:
         general_settings.row().label(icon="ERROR", text="A piece does not fit on one page!")
     # margin

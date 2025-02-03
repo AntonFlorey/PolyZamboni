@@ -32,9 +32,11 @@ Then install the missing packages using pip.
 ./python -m pip install -r "some_path_prefix\PolyZamboni\requirements.txt" --target="..\lib\site-packages" --upgrade
 ```
 
-### Some notes:
+[!NOTE]
 - Make sure that you have permission to write and modify files in the python folder. The easiest way would be to open your shell as admin.
-- This installation guide uses Windows path formats and commands, but the same steps should also do the trick on Linux and macOS systems (not tested yet).
+- This installation guide uses Windows path formats, but the same steps should also do the trick on Linux and macOS systems (not tested yet).
 
 ## Addon installation
-Now the addon can be added to blender
+Now the addon can be added to blender. For this, zip the `PolyZamboni` folder containing this readme file and the `__init__.py` file. Then go into Blender and go to 
+
+![screenshot](images/addon_install_from_disc.png)
