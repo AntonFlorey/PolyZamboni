@@ -26,7 +26,7 @@ def pos_list_to_triangles(pos_list):
 class Unfolding():
     """ Part of a 2d mesh cut open and unfolded into the euclidean plane """
 
-    def __init__(self, mesh : bmesh.types.BMesh, face_list, pred_dict):
+    def __init__(self, mesh : bmesh.types.BMesh, face_list, pred_dict, skip_intersection_test=False):
 
         # object attributes
         self.has_overlaps = False
@@ -89,8 +89,8 @@ class Unfolding():
             self.triangulation_indices[face_index] = curr_face_triangle_ids
 
             # check for any intersections 
-            if self.has_overlaps:
-                continue # already lost :(
+            if skip_intersection_test or self.has_overlaps:
+                continue # skip the test
 
             for other_face_i in range(processed_face_i):
                 if self.has_overlaps:
@@ -209,3 +209,36 @@ class Unfolding():
         # reset overlap info
         self.flap_collides_with = {}
             
+def test_if_two_touching_unfolded_components_overlap(unfolding_1 : Unfolding, 
+                                                     unfolding_2 : Unfolding, 
+                                                     join_face_index_1, 
+                                                     join_face_index_2, 
+                                                     join_verts_1,
+                                                     join_verts_2):
+    """ Test if two components undoldings would overlap if they were merged at the given faces. """
+
+    # compute affine transformation from unfolding 1 to unfolding 2
+
+    # translations
+    join_point_1 = unfolding_1.get_globally_consistend_2d_coord_in_face(join_verts_1[1].co, join_face_index_1)
+    join_point_2 = unfolding_2.get_globally_consistend_2d_coord_in_face(join_verts_2[0].co, join_face_index_2)
+    join_point_1_to_orig = geometry.AffineTransform2D(affine_part=-join_point_1)
+    orig_to_join_point_2 = geometry.AffineTransform2D(affine_part=join_point_2)
+    # rotation
+    x_ax_1, y_ax_1 = geometry.construct_orthogonal_basis_at_2d_edge(join_point_1, unfolding_1.get_globally_consistend_2d_coord_in_face(join_verts_1[0].co, join_face_index_1))
+    x_ax_2, y_ax_2 = geometry.construct_orthogonal_basis_at_2d_edge(join_point_2, unfolding_2.get_globally_consistend_2d_coord_in_face(join_verts_2[1].co, join_face_index_2))
+    basis_mat_1 = np.array([x_ax_1, y_ax_1]).T
+    basis_mat_2 = np.array([x_ax_2, y_ax_2]).T
+    rotate_edges_together = geometry.AffineTransform2D(linear_part=basis_mat_2 @ np.linalg.inv(basis_mat_1))
+    # full transformation
+    transform_first_unfolding = orig_to_join_point_2 @ rotate_edges_together @ join_point_1_to_orig
+
+    for triangle_list_1 in unfolding_1.triangulated_faces_2d.values():
+        unfolding_1_triangles = [tuple([transform_first_unfolding * tri_coord for tri_coord in triangle]) for triangle in pos_list_to_triangles(triangle_list_1)]
+        for triangle_list_2 in unfolding_2.triangulated_faces_2d.values():
+            unfolding_2_triangles = pos_list_to_triangles(triangle_list_2)
+
+            for triangle_a, triangle_b in product(unfolding_1_triangles, unfolding_2_triangles):
+                if geometry.triangle_intersection_test_2d(*triangle_a, *triangle_b):
+                    return True # they do overlap    
+    return False

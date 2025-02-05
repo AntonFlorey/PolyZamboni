@@ -36,9 +36,7 @@ def register():
     ui.register()
     bpy.app.handlers.load_post.append(callbacks.on_file_load)
     bpy.app.handlers.depsgraph_update_post.append(callbacks.on_object_select)
-    bpy.app.handlers.save_pre.append(callbacks.save_all_edge_constraints)
-    bpy.app.handlers.save_pre.append(callbacks.save_build_order)
-    bpy.app.handlers.save_pre.append(callbacks.save_glue_flaps)
+    bpy.app.handlers.save_pre.append(callbacks.save_cutgraph_data)
 
 def unregister():
     print("PolyZamboni is cleaning up after itself...")
@@ -51,12 +49,8 @@ def unregister():
         bpy.app.handlers.load_post.remove(callbacks.on_file_load)
     if callbacks.on_object_select in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.remove(callbacks.on_object_select)
-    if callbacks.save_all_edge_constraints in bpy.app.handlers.save_pre:
-        bpy.app.handlers.save_pre.remove(callbacks.save_all_edge_constraints)
-    if callbacks.save_build_order in bpy.app.handlers.save_pre:
-        bpy.app.handlers.save_pre.remove(callbacks.save_build_order)
-    if callbacks.save_glue_flaps in bpy.app.handlers.save_pre:
-        bpy.app.handlers.save_pre.remove(callbacks.save_glue_flaps)
+    if callbacks.save_cutgraph_data in bpy.app.handlers.save_pre:
+        bpy.app.handlers.save_pre.remove(callbacks.save_cutgraph_data)
     print("Done.")
 
 if __name__ == "__main__":

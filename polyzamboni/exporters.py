@@ -251,7 +251,7 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
             return # nothing to draw here
         
         triangle_page_coords = self.__transform_component_triangle_coords_to_page_coords(colored_tri_data.coords, page_transform, self.prints_on_model_inside)
-        thickened_triangle_coords = self.__create_thickened_triangle_coords(triangle_page_coords, 0.08) # make triangles one millimeter thicker
+        thickened_triangle_coords = self.__create_thickened_triangle_coords(triangle_page_coords, 0.05)
 
         if colored_tri_data.absolute_texture_path is not None:
             # draw texture

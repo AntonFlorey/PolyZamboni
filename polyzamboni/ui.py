@@ -50,7 +50,20 @@ class MainPanel(bpy.types.Panel):
             row = layout.row()
             col1 = row.column()
             col2 = row.column()
-            col1.prop(zamboni_object_settings, "apply_auto_cuts_to_previev", toggle=1)
+            if context.window_manager.polyzamboni_auto_cuts_running:
+                col1.progress(text="running...", factor=context.window_manager.polyzamboni_auto_cuts_progress)
+                col2.label(icon="SETTINGS")
+            else:
+                col1.operator("polyzamboni.auto_cuts_op")
+                col2.label(icon="FILE_SCRIPT")
+            #print("ui wm:", context.window_manager)
+            # col1.operator("polyzamboni.auto_cuts_op")
+            
+            # layout.row().progress(text="running...", factor=auto_cut_progress)
+            row = layout.row()
+            col1 = row.column()
+            col2 = row.column()
+            col1.prop(zamboni_object_settings, "apply_auto_cuts_to_previev")
             col2.label(icon="LIGHT_DATA")
 
             # layout.row().label(text="Export")
@@ -62,7 +75,6 @@ class MainPanel(bpy.types.Panel):
             col11.operator("polyzamboni.export_operator_pdf")
             col12.operator("polyzamboni.export_operator_svg")
             col3.label(icon="FILE_IMAGE")
-            pass
 
 class GlueFlapSettingsPanel(bpy.types.Panel):
     bl_label = "Glue Flap Settings"
@@ -71,20 +83,22 @@ class GlueFlapSettingsPanel(bpy.types.Panel):
     bl_region_type = "UI"
     bl_category = "PolyZamboni"
     bl_parent_id = "POLYZAMBONI_PT_MainPanel"
+    bl_options = {"DEFAULT_CLOSED"}
 
     def draw(self, context : bpy.types.Context):
         layout = self.layout
         if CUTGRAPH_ID_PROPERTY_NAME not in context.active_object:
             layout.label(text="No Cutgraph selected", icon="GHOST_DISABLED")
         else:
+            row = layout.row()
+            row.label(text="Press Alt+X in Edit-Mode :)")
             ao = context.active_object
             zamboni_object_settings = ao.polyzamboni_object_prop
             row = layout.row()
             col1 = row.column()
             col2 = row.column()
             col1.operator("polyzamboni.flaps_recompute_op")
-            flaps_locked = zamboni_object_settings.lock_glue_flaps
-            col2.prop(zamboni_object_settings, "lock_glue_flaps", icon="LOCKED" if flaps_locked else "UNLOCKED", icon_only=True)
+            col2.prop(zamboni_object_settings, "prefer_alternating_flaps", icon="RIGID_BODY", icon_only=True)
             row = layout.row()
             col1 = row.column()
             col2 = row.column()
@@ -95,20 +109,16 @@ class GlueFlapSettingsPanel(bpy.types.Panel):
             col2 = row.column()
             col1.prop(zamboni_object_settings, "glue_flap_angle", icon="DRIVER_ROTATIONAL_DIFFERENCE")
             col2.label(icon="DRIVER_ROTATIONAL_DIFFERENCE")
-            row = layout.row()
-            col1 = row.column()
-            col2 = row.column()
-            col1.prop(zamboni_object_settings, "prefer_alternating_flaps", toggle=1)
-            col2.label(icon="RIGID_BODY")
             pass
 
 class DrawSettingsPanel(bpy.types.Panel):
-    bl_label = "Draw Settings"
+    bl_label = "Render Settings"
     bl_idname = "POLYZAMBONI_PT_DrawSettingsPanel"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_category = "PolyZamboni"
     bl_parent_id = "POLYZAMBONI_PT_MainPanel"
+    bl_options = {"DEFAULT_CLOSED"}
 
     def draw(self, context : bpy.types.Context):
         layout = self.layout
@@ -116,8 +126,6 @@ class DrawSettingsPanel(bpy.types.Panel):
         drawing_settings = scene.polyzamboni_drawing_settings
         row = layout.row()
         row.prop(drawing_settings, "drawing_enabled")
-        row = layout.row()
-        row.prop(drawing_settings, "show_auto_completed_cuts")
         row = layout.row()
         row.prop(drawing_settings, "show_glue_flaps")
         row = layout.row()

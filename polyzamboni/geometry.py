@@ -78,6 +78,12 @@ def to_local_coords(point_in_3d, frame_orig, base_x, base_y):
 def to_world_coords(point_in_2d, frame_orig, base_x, base_y):
     return frame_orig + point_in_2d[0] * base_x + point_in_2d[1] * base_y
 
+def construct_orthogonal_basis_at_2d_edge(v_2d_from, v_2d_to):
+    x_ax = np.array(v_2d_to - v_2d_from)
+    x_ax = x_ax / np.linalg.norm(x_ax)
+    y_ax = np.array([-x_ax[1], x_ax[0]]) # rotate by 90 degrees
+    return x_ax, y_ax
+
 def construct_2d_space_along_face_edge(v_3d_from, v_3d_to, n_3d):
     x_ax = np.array(v_3d_to - v_3d_from)
     x_ax = x_ax / np.linalg.norm(x_ax)

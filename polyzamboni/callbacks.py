@@ -3,7 +3,7 @@ from . import globals
 from .drawing import update_all_polyzamboni_drawings, hide_all_drawings
 from . import cutgraph
 from bpy.app.handlers import persistent
-from .constants import LOCKED_EDGES_PROP_NAME, CUT_CONSTRAINTS_PROP_NAME, CUTGRAPH_ID_PROPERTY_NAME, BUILD_ORDER_PROPERTY_NAME, GLUE_FLAP_PROPERTY_NAME
+from .constants import LOCKED_EDGES_PROP_NAME, CUT_CONSTRAINTS_PROP_NAME, CUTGRAPH_ID_PROPERTY_NAME, BUILD_ORDER_PROPERTY_NAME, GLUE_FLAP_PROPERTY_NAME, AUTO_CUT_EDGES_PROP_NAME
 import numpy as np
 
 @persistent
@@ -42,9 +42,10 @@ def on_object_select(scene):
     if CUTGRAPH_ID_PROPERTY_NAME not in active_object:
         # print("initializing cutgraph from existing cuts")
         loaded_cutgraph = cutgraph.CutGraph(active_object, 
-                                            np.deg2rad(active_object.polyzamboni_object_prop.glue_flap_angle),
+                                            active_object.polyzamboni_object_prop.glue_flap_angle,
                                             active_object.polyzamboni_object_prop.glue_flap_height,
-                                            active_object.polyzamboni_object_prop.prefer_alternating_flaps)
+                                            active_object.polyzamboni_object_prop.prefer_alternating_flaps,
+                                            active_object.polyzamboni_object_prop.apply_auto_cuts_to_previev)
         globals.add_cutgraph(active_object, loaded_cutgraph)
         # print("We now have", len(pz_globals.PZ_CUTGRAPHS), "cutgraphs")
     
@@ -56,24 +57,48 @@ def on_object_select(scene):
     #     update_all_polyzamboni_drawings(None, bpy.context)
     globals.PZ_LOCK_SELECT_CALLBACK = False
 
-@persistent
-def save_all_edge_constraints(dummy):
-    for obj in bpy.data.objects:
-        if CUTGRAPH_ID_PROPERTY_NAME in obj:
-            obj[CUT_CONSTRAINTS_PROP_NAME] = globals.PZ_CUTGRAPHS[obj[CUTGRAPH_ID_PROPERTY_NAME]].get_manual_cuts_list()
-            obj[LOCKED_EDGES_PROP_NAME] = globals.PZ_CUTGRAPHS[obj[CUTGRAPH_ID_PROPERTY_NAME]].get_locked_edges_list()
+def get_active_cutgraph_and_pz_settings(context):
+    ao = context.active_object
+    if CUTGRAPH_ID_PROPERTY_NAME not in ao:
+        return None, None
+    return globals.PZ_CUTGRAPHS[ao[CUTGRAPH_ID_PROPERTY_NAME]], ao.polyzamboni_object_prop
+
+def update_flap_angle_callback(self, context : bpy.types.Context):
+    ao_cutgraph, ao_pz_prop = get_active_cutgraph_and_pz_settings(context)
+    if ao_cutgraph is None:
+        return
+    ao_cutgraph.flap_angle = ao_pz_prop.glue_flap_angle
+    ao_cutgraph.update_all_flap_geometry()
+    update_all_polyzamboni_drawings(self, context)
+
+def update_flap_height_callback(self, context : bpy.types.Context):
+    ao_cutgraph, ao_pz_prop = get_active_cutgraph_and_pz_settings(context)
+    if ao_cutgraph is None:
+        return
+    ao_cutgraph.flap_height = ao_pz_prop.glue_flap_height
+    ao_cutgraph.update_all_flap_geometry()
+    update_all_polyzamboni_drawings(self, context)
+
+def update_auto_cuts_usage_callback(self, context : bpy.types.Context):
+    ao_cutgraph : cutgraph.CutGraph
+    ao_cutgraph, ao_pz_prop = get_active_cutgraph_and_pz_settings(context)
+    if ao_cutgraph is None:
+        return
+    ao_cutgraph.use_auto_cuts = ao_pz_prop.apply_auto_cuts_to_previev
+    ao_cutgraph.compute_all_connected_components()
+    ao_cutgraph.unfold_all_connected_components()
+    ao_cutgraph.greedy_place_all_flaps()
+    update_all_polyzamboni_drawings(self, context)
 
 @persistent
-def save_build_order(dummy):
+def save_cutgraph_data(dummy):
     for obj in bpy.data.objects:
         if CUTGRAPH_ID_PROPERTY_NAME in obj:
-            sparse_build_order_dict = globals.PZ_CUTGRAPHS[obj[CUTGRAPH_ID_PROPERTY_NAME]].create_sparse_build_steps_dict()
+            curr_cutgraph : cutgraph.CutGraph = globals.PZ_CUTGRAPHS[obj[CUTGRAPH_ID_PROPERTY_NAME]] 
+            obj[CUT_CONSTRAINTS_PROP_NAME] = curr_cutgraph.get_manual_cuts_list()
+            obj[LOCKED_EDGES_PROP_NAME] = curr_cutgraph.get_locked_edges_list()
+            obj[AUTO_CUT_EDGES_PROP_NAME] = curr_cutgraph.get_auto_cuts_list()
+            sparse_build_order_dict = curr_cutgraph.create_sparse_build_steps_dict()
             obj[BUILD_ORDER_PROPERTY_NAME] = sparse_build_order_dict
-
-
-@persistent
-def save_glue_flaps(dummy):
-    for obj in bpy.data.objects:
-        if CUTGRAPH_ID_PROPERTY_NAME in obj:
-            glue_flaps_dict = globals.PZ_CUTGRAPHS[obj[CUTGRAPH_ID_PROPERTY_NAME]].create_glue_flaps_dict()
+            glue_flaps_dict = curr_cutgraph.create_glue_flaps_dict()
             obj[GLUE_FLAP_PROPERTY_NAME] = glue_flaps_dict

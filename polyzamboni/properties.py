@@ -2,6 +2,7 @@ import bpy
 from bpy.types import Scene
 import numpy as np
 from .drawing import update_all_polyzamboni_drawings
+from .callbacks import update_flap_angle_callback, update_flap_height_callback, update_auto_cuts_usage_callback
 
 # For more information about Blender Properties, visit:
 # <https://blender.org/api/blender_python_api_2_78a_release/bpy.types.Property.html>
@@ -15,11 +16,6 @@ from bpy.props import FloatVectorProperty
 class DrawSettings(bpy.types.PropertyGroup):
     drawing_enabled: BoolProperty(
         name="Show Zamboni interface",
-        default=True,
-        update=update_all_polyzamboni_drawings
-    )
-    show_auto_completed_cuts: BoolProperty(
-        name="Show auto-cuts",
         default=True,
         update=update_all_polyzamboni_drawings
     )
@@ -53,14 +49,17 @@ class ZamboniSettingsPerObject(bpy.types.PropertyGroup):
         name="Glue flap height",
         description="Controls how far the glue flaps extend",
         default=0.15,
-        min=0.01
+        min=0.01,
+        update=update_flap_height_callback
     )
     glue_flap_angle : FloatProperty(
         name="Glue flap angle",
         description="Determines the shape of all glue flaps",
-        default=45,
-        min=10,
-        max=170
+        default=np.pi / 2,
+        min=np.deg2rad(10),
+        max=np.deg2rad(170),
+        subtype="ANGLE",
+        update=update_flap_angle_callback
     )
     prefer_alternating_flaps : BoolProperty(
         name="ZigZag Flaps",
@@ -75,7 +74,8 @@ class ZamboniSettingsPerObject(bpy.types.PropertyGroup):
     apply_auto_cuts_to_previev : BoolProperty(
         name="Auto Cuts Preview",
         description="If set to True, all automatically generated cuts will be considered when showing a preview of the mesh unfolding",
-        default=False
+        default=False,
+        update=update_auto_cuts_usage_callback
     )
 
 linestyles = [
@@ -170,7 +170,7 @@ class GeneralExportSettings(bpy.types.PropertyGroup):
             ("HEIGHT", "Target height", "Scales all pieces to achieve the desired model height", "DRIVER_DISTANCE", 0),
             ("SCALE", "Set scale", "Directly define the scaling factor from blender units to the unit active in the scene (m per default)", "FULLSCREEN_ENTER", 1),
         ],
-        default="SCALE"
+        default="HEIGHT"
     )
     sizing_scale: FloatProperty(
         name="Custom scaling factor",
@@ -247,6 +247,8 @@ def register():
     bpy.utils.register_class(TextureExportSettings)
     Scene.polyzamboni_drawing_settings = bpy.props.PointerProperty(type=DrawSettings)
     bpy.types.Object.polyzamboni_object_prop = bpy.props.PointerProperty(type=ZamboniSettingsPerObject)
+    bpy.types.WindowManager.polyzamboni_auto_cuts_progress = FloatProperty(name="Auto Cuts Progress", min=0, max=1, default=0.0)
+    bpy.types.WindowManager.polyzamboni_auto_cuts_running = BoolProperty(name="Auto Cuts computation running", default=False)
 
 def unregister():
     bpy.utils.unregister_class(DrawSettings)
@@ -256,3 +258,5 @@ def unregister():
     bpy.utils.unregister_class(TextureExportSettings)
     del Scene.polyzamboni_drawing_settings
     del bpy.types.Object.polyzamboni_object_prop
+    del bpy.types.WindowManager.polyzamboni_auto_cuts_progress
+    del bpy.types.WindowManager.polyzamboni_auto_cuts_running

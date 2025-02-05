@@ -5,7 +5,7 @@ import os
 import networkx as nx
 import mathutils
 from .geometry import triangulate_3d_polygon, signed_point_dist_to_line
-from .constants import LOCKED_EDGES_PROP_NAME, CUT_CONSTRAINTS_PROP_NAME, PERFECT_REGION, BAD_GLUE_FLAPS_REGION, OVERLAPPING_REGION, NOT_FOLDABLE_REGION, GLUE_FLAP_NO_OVERLAPS, GLUE_FLAP_WITH_OVERLAPS, GLUE_FLAP_TO_LARGE, BUILD_ORDER_PROPERTY_NAME, GLUE_FLAP_PROPERTY_NAME
+from .constants import LOCKED_EDGES_PROP_NAME, CUT_CONSTRAINTS_PROP_NAME, AUTO_CUT_EDGES_PROP_NAME, PERFECT_REGION, BAD_GLUE_FLAPS_REGION, OVERLAPPING_REGION, NOT_FOLDABLE_REGION, GLUE_FLAP_NO_OVERLAPS, GLUE_FLAP_WITH_OVERLAPS, GLUE_FLAP_TO_LARGE, BUILD_ORDER_PROPERTY_NAME, GLUE_FLAP_PROPERTY_NAME
 from .unfolding import Unfolding, pos_list_to_triangles
 from collections import deque
 from .printprepper import ColoredTriangleData, ComponentPrintData, CutEdgeData, FoldEdgeData, GlueFlapEdgeData
@@ -13,10 +13,11 @@ from .printprepper import ColoredTriangleData, ComponentPrintData, CutEdgeData, 
 class CutGraph():
     """ This class can be attached to any Mesh object """
 
-    def __init__(self, ao : bpy.types.Object, flap_angle = 1 / 4 * np.pi, flap_height = 1.0, prefer_zigzag_flaps = True):
+    def __init__(self, ao : bpy.types.Object, flap_angle = 1 / 4 * np.pi, flap_height = 1.0, prefer_zigzag_flaps = True, use_auto_cuts=False):
         self.flap_angle = flap_angle
         self.flap_height = flap_height
         self.prefer_zigzag = prefer_zigzag_flaps
+        self.use_auto_cuts = use_auto_cuts
         self.construct_dual_graph_from_mesh(ao)
         self.designer_constraints = {}
         if CUT_CONSTRAINTS_PROP_NAME in ao:
@@ -25,6 +26,9 @@ class CutGraph():
         if LOCKED_EDGES_PROP_NAME in ao:
             for edge_index in ao[LOCKED_EDGES_PROP_NAME]:
                 self.designer_constraints[edge_index] = "glued"
+        if AUTO_CUT_EDGES_PROP_NAME in ao:
+            for edge_index in ao[AUTO_CUT_EDGES_PROP_NAME]:
+                self.designer_constraints[edge_index] = "auto"
         
         # compute connected components
         self.compute_all_connected_components()
@@ -40,8 +44,6 @@ class CutGraph():
             self.update_all_flap_geometry() # create flap geometry
         else:
             self.greedy_place_all_flaps()
-
-        print("Generated a dual graph with", self.dualgraph.number_of_nodes(), "nodes and", self.dualgraph.number_of_edges(), "edges.")
 
     #################################
     #     Input Mesh Handling       #
@@ -104,16 +106,22 @@ class CutGraph():
 
         return self.valid
 
-    def edge_is_not_cut(self, v_from, v_to):
+    def edge_is_cut(self, v_from, v_to):
         mesh_edge_index = self.dualgraph.edges[(v_from, v_to)]["edge_index"]
-        if mesh_edge_index in self.designer_constraints and self.designer_constraints[mesh_edge_index] == "cut":
-            return False
-        return True
-    
-    def mesh_edge_is_not_cut(self, edge):
-        if edge.index in self.designer_constraints and self.designer_constraints[edge.index] == "cut":
-            return False
-        return True
+        if mesh_edge_index in self.designer_constraints:
+            if self.designer_constraints[mesh_edge_index] == "cut":
+                return True
+            if self.use_auto_cuts and self.designer_constraints[mesh_edge_index] == "auto":
+                return True
+        return False
+
+    def mesh_edge_is_cut(self, edge):
+        if edge.index in self.designer_constraints:
+            if self.designer_constraints[edge.index] == "cut":
+                return True
+            if self.use_auto_cuts and self.designer_constraints[edge.index] == "auto":
+                return True
+        return False
 
     def assert_all_faces_have_components_and_unfoldings(self):
         for f in self.dualgraph.nodes:
@@ -148,7 +156,7 @@ class CutGraph():
         if self.mesh is None or self.dualgraph is None:
             print("Warning! Connected components can not yet be computed")
             return
-        graph_with_cuts_applied = nx.subgraph_view(self.dualgraph, filter_edge = self.edge_is_not_cut)
+        graph_with_cuts_applied = nx.subgraph_view(self.dualgraph, filter_edge = lambda v1, v2 : not self.edge_is_cut(v1, v2))
         all_components = list(nx.connected_components(graph_with_cuts_applied))
 
         if hasattr(self, "vertex_to_component_dict"):
@@ -160,7 +168,8 @@ class CutGraph():
             for v in component:
                 self.vertex_to_component_dict[v] = c_id
         self.components_as_sets = {c_id : component for c_id, component in enumerate(all_components)}
-        self.next_free_component_id = self.num_components # TODO remove probably
+        self.next_free_component_id = self.num_components
+        self.components_are_compact = True
         if not hasattr(self, "unfolded_components"):
             return
         # copy old unfoldings WARNING: these might not be correct anymore and need to be updated
@@ -169,6 +178,57 @@ class CutGraph():
             self.unfolded_components[c_id] = old_unfolded_components[old_vertex_to_component_dict[list(component)[0]]]
         # do a sanity check
         self.assert_all_faces_have_components_and_unfoldings()
+
+    def update_connected_components_around_edge(self, mesh_edge_index):
+        self.mesh.edges.ensure_lookup_table()
+        changed_edge = self.mesh.edges[mesh_edge_index]
+        if changed_edge.is_boundary:
+            return
+        linked_face_ids = [f.index for f in changed_edge.link_faces]
+        assert len(linked_face_ids) == 2
+        linked_component_ids = [self.vertex_to_component_dict[mesh_f] for mesh_f in linked_face_ids]
+        components_are_the_same_pre_update = linked_component_ids[0] == linked_component_ids[1]
+        component_union = self.components_as_sets[linked_component_ids[0]].union(self.components_as_sets[linked_component_ids[1]])
+        subgraph_with_cuts_applied = nx.subgraph_view(self.dualgraph, filter_node=lambda v : (v in component_union), filter_edge = lambda v1, v2 : not self.edge_is_cut(v1, v2))
+        first_component = nx.node_connected_component(subgraph_with_cuts_applied, linked_face_ids[0])
+        second_component = nx.node_connected_component(subgraph_with_cuts_applied, linked_face_ids[1])
+        components_are_the_same_post_update = next(iter(second_component)) in first_component
+
+        if components_are_the_same_pre_update and not components_are_the_same_post_update:
+            # Split component in two
+            self.components_as_sets[linked_component_ids[0]] = first_component
+            self.components_as_sets[self.next_free_component_id] = second_component
+            for v in second_component:
+                self.vertex_to_component_dict[v] = self.next_free_component_id
+            self.next_free_component_id += 1
+        if not components_are_the_same_pre_update and components_are_the_same_post_update:
+            # Merge components
+            self.components_as_sets[linked_component_ids[0]] = first_component
+            for v in second_component:
+                self.vertex_to_component_dict[v] = linked_component_ids[0]
+            del self.components_as_sets[linked_component_ids[1]] # remove free component
+            self.components_are_compact = False
+
+    def compactify_components(self):
+        if self.components_are_compact:
+            return
+        next_compact_component_index = 0
+        compact_components_as_sets = {}
+        unfoldings_per_component = {}
+
+        for c_id, component_set in self.components_as_sets.items():
+            if component_set is None:
+                continue
+            unfoldings_per_component[next_compact_component_index] = self.unfolded_components[c_id]
+            compact_components_as_sets[next_compact_component_index] = component_set
+            for face_index in component_set:
+                self.vertex_to_component_dict[face_index] = next_compact_component_index
+            next_compact_component_index += 1
+        
+        self.next_free_component_id = next_compact_component_index
+        self.components_as_sets = compact_components_as_sets.copy()
+        self.unfolded_components = unfoldings_per_component.copy()
+        self.components_are_compact = True
 
     def adjacent_connected_components_of_component(self, component_id):
         self.mesh.faces.ensure_lookup_table()
@@ -183,6 +243,7 @@ class CutGraph():
         return neighbour_ids
 
     def generate_bfs_build_oder(self, starting_face_index):
+        self.compactify_components()
         start_component_id = self.vertex_to_component_dict[starting_face_index]
         
         self.component_build_indices = {}
@@ -242,18 +303,18 @@ class CutGraph():
     #           Unfolding           #
     #################################
 
-    def unfold_connected_component(self, component_id):
+    def unfold_connected_face_set(self, face_set : set, skip_intersection_test=False):
         """Unfolds one connected component of the cut mesh into the 2D plane. Returns None if the component containts cycles."""
-        def vertex_in_component(v):
-            if v in self.components_as_sets[component_id]:
-                return True
-            return False
-        subgraph_with_cuts_applied = nx.subgraph_view(self.dualgraph, filter_node=vertex_in_component, filter_edge = self.edge_is_not_cut)
+
+        def f_in_faceset(f):
+            return f in face_set
+        subgraph_with_cuts_applied = nx.subgraph_view(self.dualgraph, filter_node=f_in_faceset, filter_edge = lambda v1, v2 : not self.edge_is_cut(v1, v2))
+        assert nx.connected.is_connected(subgraph_with_cuts_applied)
         if not nx.is_tree(subgraph_with_cuts_applied):
             return None
         
         # custom tree data
-        root = list(self.components_as_sets[component_id])[0]
+        root = list(face_set)[0]
         pred_dict = {root : (root, None)}
         tree_traversal = []
 
@@ -270,20 +331,27 @@ class CutGraph():
             for nb_f in subgraph_with_cuts_applied.neighbors(curr_f):
                 if nb_f in visited:
                     continue
-                if self.vertex_to_component_dict[nb_f] != component_id:
+                if nb_f not in face_set:
                     continue
                 pred_dict[nb_f] = (curr_f, self.dualgraph.edges[(curr_f, nb_f)]["edge_index"])
                 q.append(nb_f)
 
         # unfold the component
-        return Unfolding(self.mesh, tree_traversal, pred_dict)
+        assert len(tree_traversal) == len(face_set)
+        return Unfolding(self.mesh, tree_traversal, pred_dict, skip_intersection_test=skip_intersection_test)
+
+    def unfold_connected_component(self, component_id, skip_intersection_test=False):
+        """Unfolds one connected component of the cut mesh into the 2D plane. Returns None if the component containts cycles."""
+        return self.unfold_connected_face_set(self.components_as_sets[component_id], skip_intersection_test=skip_intersection_test)
 
     def unfold_all_connected_components(self):
         self.unfolded_components = {}
         for c_id in self.components_as_sets.keys():
+            if self.components_as_sets[c_id] is None:
+                continue
             self.unfolded_components[c_id] = self.unfold_connected_component(c_id)
 
-    def update_unfoldings_along_edges(self, edge_ids):
+    def update_unfoldings_along_edges(self, edge_ids, skip_intersection_test=False):
         components_to_update = set()
         self.mesh.edges.ensure_lookup_table()
         for touched_edge in edge_ids:
@@ -295,14 +363,16 @@ class CutGraph():
                 components_to_update.add(self.vertex_to_component_dict[f_id])
 
         for c_id in components_to_update:
-            self.unfolded_components[c_id] = self.unfold_connected_component(c_id)
+            self.unfolded_components[c_id] = self.unfold_connected_component(c_id, skip_intersection_test=skip_intersection_test)
 
         # assert that we got all components that changed this 
         for c_id in self.components_as_sets.keys():
             assert c_id in self.unfolded_components.keys()
 
     def all_components_have_unfoldings(self):
-        for c_id in self.components_as_sets.keys():
+        for c_id, component in self.components_as_sets.items():
+            if component is None:
+                continue
             if self.unfolded_components[c_id] is None:
                 return False
         return True
@@ -324,7 +394,7 @@ class CutGraph():
             cut_coordinates.append(self.world_matrix @ (vert2.co + normal_offset * vert1.normal))
         return cut_coordinates
 
-    def get_polygon_outline_for_face_drawing(self, face_index, edge_margin = 0.05):
+    def get_polygon_outline_for_face_drawing(self, face_index, edge_margin = 0.01):
         self.ensure_halfedge_to_edge_table()
         face = self.mesh.faces[face_index]
         face_normal = face.normal
@@ -339,15 +409,15 @@ class CutGraph():
             prev_point = curr_v.co + 0.25 * (prev_v.co - curr_v.co)
             next_point = curr_v.co + 0.25 * (next_v.co - curr_v.co)
 
-            v_on_component_boundary = curr_v.is_boundary or (np.array([self.vertex_to_component_dict[f.index] != face_component_id for f in curr_v.link_faces]).any())
+            v_on_cutting_edge_or_boundary = curr_v.is_boundary or np.any([self.mesh_edge_is_cut(e) for e in curr_v.link_edges])
 
             e_to_curr : bmesh.types.BMEdge = self.halfedge_to_edge[(prev_v.index, curr_v.index)]
             e_from_curr : bmesh.types.BMEdge = self.halfedge_to_edge[(curr_v.index, next_v.index)]
 
-            e_prev_curr_is_cutting = e_to_curr.is_boundary or (e_to_curr.index in self.designer_constraints.keys() and self.designer_constraints[e_to_curr.index] == "cut")
-            e_curr_to_next_is_cutting = e_from_curr.is_boundary or (e_from_curr.index in self.designer_constraints.keys() and self.designer_constraints[e_from_curr.index] == "cut")
+            e_prev_curr_is_cutting = e_to_curr.is_boundary or self.mesh_edge_is_cut(e_to_curr)
+            e_curr_to_next_is_cutting = e_from_curr.is_boundary or self.mesh_edge_is_cut(e_from_curr)
 
-            if v_on_component_boundary and not e_prev_curr_is_cutting and not e_curr_to_next_is_cutting:
+            if v_on_cutting_edge_or_boundary and not e_prev_curr_is_cutting and not e_curr_to_next_is_cutting:
                 cool_vertices.append(prev_point + edge_margin * (next_v.co - curr_v.co))
                 #cool_vertices.append(mathutils.Vector(solve_for_weird_point(prev_point, curr_v.co, next_point, face_normal) + edge_margin / 2 * (next_v.co + prev_v.co - 2 * curr_v.co)))
                 #cool_vertices.append(curr_v.co + (0.25 + edge_margin) / 2 * (next_v.co + prev_v.co - 2 * curr_v.co))
@@ -366,6 +436,8 @@ class CutGraph():
         all_vertex_positions = []
 
         for component_id, connected_component in self.components_as_sets.items():
+            if connected_component is None:
+                continue
             component_triangles = []
             for face_index in connected_component:
                 polygon_outline = self.get_polygon_outline_for_face_drawing(face_index)
@@ -467,15 +539,15 @@ class CutGraph():
             return
         
         if self.try_to_add_glue_flap(preferred_halfedge):
-            return preferred_halfedge
+            return preferred_halfedge, True
         
         # try out the other flap option
         if self.try_to_add_glue_flap((preferred_halfedge[1], preferred_halfedge[0])):
-            return (preferred_halfedge[1], preferred_halfedge[0])
+            return (preferred_halfedge[1], preferred_halfedge[0]), True
 
         # add the faulty but preferred flap
         self.try_to_add_glue_flap(preferred_halfedge, enforce=True)
-        return preferred_halfedge
+        return preferred_halfedge, False
 
     def greedy_place_all_flaps(self):
         """ Attaches flaps to all cut edges (not on boundary edges) """
@@ -483,6 +555,7 @@ class CutGraph():
         self.ensure_halfedge_to_edge_table()
         self.ensure_halfedge_to_face_table()
         self.assert_all_faces_have_components_and_unfoldings()
+        no_flap_overlaps = True
         self.glue_flaps = {}
         # clear all flap info stored in the unfoldings
         for unfolding in self.unfolded_components.values():
@@ -497,7 +570,7 @@ class CutGraph():
             if edge.is_boundary:
                 processed_edges.add(edge.index)
                 continue
-            if self.mesh_edge_is_not_cut(edge):
+            if not self.mesh_edge_is_cut(edge):
                 processed_edges.add(edge.index)
                 continue
 
@@ -517,9 +590,10 @@ class CutGraph():
                 curr_flap_01 = flap_01
                 if not (curr_e.is_boundary or self.unfolded_components[self.vertex_to_component_dict[self.halfedge_to_face[(v0.index, v1.index)].index]] is None or self.unfolded_components[self.vertex_to_component_dict[self.halfedge_to_face[(v1.index, v0.index)].index]] is None):
                     preferred_halfedge = (v0.index, v1.index) if (self.prefer_zigzag and not flap_01) or (not self.prefer_zigzag and flap_01) else (v1.index, v0.index)
-                    used_halfedge =  self.add_one_glue_flap(preferred_halfedge)
+                    used_halfedge, no_overlaps_introduced =  self.add_one_glue_flap(preferred_halfedge)
                     curr_flap_01 = used_halfedge == (v0.index, v1.index)
-                    # print("flap added!")
+                    if not no_overlaps_introduced:
+                        no_flap_overlaps = False
 
                 # collect next edges
                 for nb_e in v1.link_edges:
@@ -527,10 +601,12 @@ class CutGraph():
                     if nb_e.index in processed_edges:
                         # print("already visited edge", nb_e.index)
                         continue
-                    if self.mesh_edge_is_not_cut(nb_e):
+                    if not self.mesh_edge_is_cut(nb_e):
                         # print("not visiting edge", nb_e.index)
                         continue
                     dfs_stack.append((v1, nb_v, curr_flap_01))
+
+        return no_flap_overlaps
 
     def remove_flaps_of_edge(self, edge : bmesh.types.BMEdge):
         self.ensure_halfedge_to_face_table()
@@ -564,6 +640,7 @@ class CutGraph():
         self.ensure_halfedge_to_edge_table()
         self.ensure_halfedge_to_face_table()
         self.assert_all_faces_have_components_and_unfoldings()
+        no_flap_overlaps = True
 
         # build dfs tree of cut edges
         processed_edges = set()
@@ -575,7 +652,7 @@ class CutGraph():
             if edge.is_boundary:
                 processed_edges.add(edge.index)
                 continue
-            if self.mesh_edge_is_not_cut(edge):
+            if not self.mesh_edge_is_cut(edge):
                 # remove any existing flap here 
                 self.remove_flaps_of_edge(edge)
                 processed_edges.add(edge.index)
@@ -603,16 +680,21 @@ class CutGraph():
                     # add a new glue flap 
                     if curr_e.index not in self.glue_flaps.keys():
                         preferred_halfedge = (v0.index, v1.index) if (self.prefer_zigzag and not flap_01) or (not self.prefer_zigzag and flap_01) else (v1.index, v0.index)
-                        used_halfedge =  self.add_one_glue_flap(preferred_halfedge)
+                        used_halfedge, no_overlap_introduced =  self.add_one_glue_flap(preferred_halfedge)
                         curr_flap_01 = used_halfedge == (v0.index, v1.index)
+                        if not no_overlap_introduced:
+                            no_flap_overlaps = False
                     else:
                         # do nothing or restore old glue flap
                         he_with_flap = self.glue_flaps[curr_e.index]
                         face_with_flap = self.halfedge_to_face[he_with_flap]
                         unfold_with_flap : Unfolding = self.unfolded_components[self.vertex_to_component_dict[face_with_flap.index]]
+                        has_flap_overlaps_to_begin_with = unfold_with_flap.has_overlapping_glue_flaps()
                         if not unfold_with_flap.check_if_edge_has_flap(face_with_flap.index, curr_e):
                             flap_geometry = unfold_with_flap.compute_2d_glue_flap_triangles(face_with_flap.index, curr_e, self.flap_angle, self.flap_height)
                             unfold_with_flap.add_glue_flap_to_face_edge(face_with_flap.index, curr_e, flap_geometry)
+                            if not has_flap_overlaps_to_begin_with and unfold_with_flap.has_overlapping_glue_flaps():
+                                no_flap_overlaps = False
                         curr_flap_01 = he_with_flap == (v0.index, v1.index)
 
                 # collect next edges
@@ -623,10 +705,12 @@ class CutGraph():
                         continue
                     if nb_e.index not in all_interesting_edge_ids:
                         continue
-                    if self.mesh_edge_is_not_cut(nb_e):
+                    if not self.mesh_edge_is_cut(nb_e):
                         # print("not visiting edge", nb_e.index)
                         continue
                     dfs_stack.append((v1, nb_v, curr_flap_01))
+
+        return no_flap_overlaps
 
     def update_all_flap_geometry(self):
         """ This mehthod only changes flap geometry but not the flap placement """
@@ -672,11 +756,21 @@ class CutGraph():
     def check_if_glue_flaps_exist_and_are_valid(self):
         if not hasattr(self, "glue_flaps"):
             return False
+        # every cut edge needs a glue flap
         for dual_graph_edge in self.dualgraph.edges:
             c_1 = self.vertex_to_component_dict[dual_graph_edge[0]]
             c_2 = self.vertex_to_component_dict[dual_graph_edge[1]]
-            if c_1 is not None and c_2 is not None and not self.edge_is_not_cut(*dual_graph_edge):
+            if c_1 is not None and c_2 is not None and self.edge_is_cut(*dual_graph_edge):
                 if self.dualgraph.edges[dual_graph_edge]["edge_index"] not in self.glue_flaps.keys():
+                    return False
+        # every glue flap needs a cut edge between 
+        self.ensure_halfedge_to_face_table()
+        self.mesh.edges.ensure_lookup_table()
+        for edge_index in self.glue_flaps.keys():
+            if not self.mesh_edge_is_cut(self.mesh.edges[edge_index]):
+                return False
+            for adj_face in self.mesh.edges[edge_index].link_faces:
+                if self.unfolded_components[self.vertex_to_component_dict[adj_face.index]] is None:
                     return False
         return True
         
@@ -730,6 +824,9 @@ class CutGraph():
     def get_locked_edges_list(self):
         return [edge_index for edge_index in self.designer_constraints if self.designer_constraints[edge_index] == "glued"]
 
+    def get_auto_cuts_list(self):
+        return [edge_index for edge_index in self.designer_constraints if self.designer_constraints[edge_index] == "auto"]
+
     #################################
     #           Exporting           #
     #################################
@@ -741,6 +838,8 @@ class CutGraph():
         max_height = -np.inf
         max_width = -np.inf
         for c_id, faces_ids_in_component in self.components_as_sets.items():
+            if faces_ids_in_component is None:
+                continue
             if self.unfolded_components[c_id] is None:
                 continue
             unfolding_of_curr_component : Unfolding = self.unfolded_components[c_id]
@@ -755,7 +854,7 @@ class CutGraph():
                     # compute edge coords in unfolding space
                     vertex_coords_3d = [v.co for v in curr_edge.verts]    
                     vertex_coords_unfolded = [unfolding_of_curr_component.get_globally_consistend_2d_coord_in_face(co_3d, face_index) for co_3d in vertex_coords_3d]
-                    if curr_edge.is_boundary or not self.mesh_edge_is_not_cut(curr_edge):
+                    if curr_edge.is_boundary or self.mesh_edge_is_cut(curr_edge):
                         # this is a cut edge
                         curr_component_print_data.add_cut_edge(CutEdgeData(tuple(vertex_coords_unfolded), curr_edge.index))
 
@@ -793,6 +892,8 @@ class CutGraph():
 
         all_print_data = []
         for c_id, faces_ids_in_component in self.components_as_sets.items():
+            if faces_ids_in_component is None:
+                continue
             if self.unfolded_components[c_id] is None:
                 continue
             unfolding_of_curr_component : Unfolding = self.unfolded_components[c_id]
@@ -827,7 +928,7 @@ class CutGraph():
                     vertex_coords_3d = [v.co for v in edge_to_correct_halfedge_map[curr_edge.index]]    
                     vertex_coords_unfolded = [scaling_factor * unfolding_of_curr_component.get_globally_consistend_2d_coord_in_face(co_3d, face_index) for co_3d in vertex_coords_3d]
                     dist_cog_edge_sum += signed_point_dist_to_line(face_cog, vertex_coords_unfolded[0], vertex_coords_unfolded[1])
-                    if curr_edge.is_boundary or not self.mesh_edge_is_not_cut(curr_edge):
+                    if curr_edge.is_boundary or self.mesh_edge_is_cut(curr_edge):
                         # this is a cut edge
                         curr_component_print_data.add_cut_edge(CutEdgeData(tuple(vertex_coords_unfolded), curr_edge.index))
                     elif curr_edge.index not in fold_edge_index_set:
@@ -891,6 +992,5 @@ class CutGraph():
                 curr_component_print_data.build_step_number = self.component_build_indices[c_id]
 
             all_print_data.append(curr_component_print_data)
-
         return all_print_data
     

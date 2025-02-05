@@ -92,7 +92,7 @@ def deactivate_draw_callback(callback_handle, region_type='WINDOW'):
     if callback_handle is not None:
         bpy.types.SpaceView3D.draw_handler_remove(callback_handle, region_type)
 
-def lines_draw_callback(line_array, color, width=3.5):
+def lines_draw_callback(line_array, color, width=3):
     shader = gpu.shader.from_builtin('UNIFORM_COLOR')
     gpu.state.line_width_set(width)
     batch = batch_for_shader(shader, 'LINES', {"pos": line_array})
@@ -160,7 +160,7 @@ def hide_auto_completed_cuts():
 def show_auto_completed_cuts(cuts_as_line_array, dotted_line_length = 0.1):
     hide_auto_completed_cuts() 
     global _drawing_handle_auto_completed_cuts
-    auto_cuts_color = BLUE
+    auto_cuts_color = TEAL
     dotted_auto_cuts = make_dotted_lines(cuts_as_line_array, dotted_line_length)
     _drawing_handle_auto_completed_cuts = bpy.types.SpaceView3D.draw_handler_add(lines_draw_callback, (dotted_auto_cuts, auto_cuts_color), "WINDOW", "POST_VIEW")
 
@@ -254,8 +254,8 @@ def update_all_polyzamboni_drawings(self, context):
     show_user_provided_cuts(cutgraph_to_draw.mesh_edge_id_list_to_coordinate_list(cutgraph_to_draw.get_manual_cuts_list(), draw_settings.normal_offset), dotted_line_length=draw_settings.dotted_line_length)
     show_locked_edges(cutgraph_to_draw.mesh_edge_id_list_to_coordinate_list(cutgraph_to_draw.get_locked_edges_list(), draw_settings.normal_offset), dotted_line_length=draw_settings.dotted_line_length)
 
-    if draw_settings.show_auto_completed_cuts:
-        pass
+    if cutgraph_to_draw.use_auto_cuts:
+        show_auto_completed_cuts(cutgraph_to_draw.mesh_edge_id_list_to_coordinate_list(cutgraph_to_draw.get_auto_cuts_list(), draw_settings.normal_offset), dotted_line_length=draw_settings.dotted_line_length)
 
     if draw_settings.color_faces_by_quality:
         all_v_positions, quality_dict = cutgraph_to_draw.get_triangle_list_per_cluster_quality(draw_settings.normal_offset)

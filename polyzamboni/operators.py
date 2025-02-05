@@ -2,6 +2,7 @@ import bpy
 import bmesh
 import numpy as np
 import os
+import threading
 from bpy.props import StringProperty, EnumProperty, FloatProperty, IntProperty, BoolProperty, FloatVectorProperty, PointerProperty
 from bpy_extras.io_utils import ExportHelper
 from .properties import GeneralExportSettings, LineExportSettings, TextureExportSettings
@@ -12,6 +13,7 @@ from .constants import CUTGRAPH_ID_PROPERTY_NAME, CUT_CONSTRAINTS_PROP_NAME, LOC
 from . import exporters
 from .printprepper import fit_components_on_pages
 from .geometry import compute_planarity_score
+from .autozamboni import greedy_auto_cuts
 
 class InitializeCuttingOperator(bpy.types.Operator):
     """Start the unfolding process for this mesh"""
@@ -89,7 +91,10 @@ class InitializeCuttingOperator(bpy.types.Operator):
             bpy.ops.object.mode_set(mode="OBJECT")
         ao = bpy.context.active_object
         ao_pz_settings = ao.polyzamboni_object_prop
-        new_cutgraph = cutgraph.CutGraph(ao, np.deg2rad(ao_pz_settings.glue_flap_angle), ao_pz_settings.glue_flap_height, ao_pz_settings.prefer_alternating_flaps)
+        new_cutgraph = cutgraph.CutGraph(ao, ao_pz_settings.glue_flap_angle, 
+                                         ao_pz_settings.glue_flap_height, 
+                                         ao_pz_settings.prefer_alternating_flaps,
+                                         ao_pz_settings.apply_auto_cuts_to_previev)
         if returnto:
             bpy.ops.object.mode_set(mode=self.weird_mode_table[returnto] if returnto in self.weird_mode_table else returnto)
         globals.add_cutgraph(ao, new_cutgraph)
@@ -218,7 +223,7 @@ class RecomputeFlapsOperator(bpy.types.Operator):
         ao_zamboni_settings = ao.polyzamboni_object_prop
         curr_cutgraph : cutgraph.CutGraph = globals.PZ_CUTGRAPHS[ao[CUTGRAPH_ID_PROPERTY_NAME]]
         curr_cutgraph.flap_height = ao_zamboni_settings.glue_flap_height
-        curr_cutgraph.flap_angle =  np.deg2rad(ao_zamboni_settings.glue_flap_angle)
+        curr_cutgraph.flap_angle =  ao_zamboni_settings.glue_flap_angle
         curr_cutgraph.prefer_zigzag = ao_zamboni_settings.prefer_alternating_flaps
         if ao_zamboni_settings.lock_glue_flaps:
             curr_cutgraph.update_all_flap_geometry() # recompute flap geometry
@@ -359,12 +364,18 @@ class ZamboniCutDesignOperator(bpy.types.Operator):
         if self.design_actions == "ADD_CUT":
             for e_index in selected_edges:
                 active_cutgraph.add_cut_constraint(e_index)
+                if len(selected_edges) <= 3:
+                    active_cutgraph.update_connected_components_around_edge(e_index)
         elif self.design_actions == "GLUE_EDGE":
             for e_index in selected_edges:
                 active_cutgraph.add_lock_constraint(e_index)
+                if len(selected_edges) <= 3:
+                    active_cutgraph.update_connected_components_around_edge(e_index)
         elif self.design_actions == "RESET_EDGE":
             for e_index in selected_edges:  
                 active_cutgraph.clear_edge_constraint(e_index)
+                if len(selected_edges) <= 3:
+                    active_cutgraph.update_connected_components_around_edge(e_index)
         elif self.design_actions == "REGION_CUTOUT":
             selected_faces = [f.index for f in ao_bmesh.faces if f.select]
             active_cutgraph.add_cutout_region(selected_faces)
@@ -374,7 +385,8 @@ class ZamboniCutDesignOperator(bpy.types.Operator):
         #     update_all_polyzamboni_drawings(None, context)
         #     return {"FINISHED"}
 
-        active_cutgraph.compute_all_connected_components()
+        if self.design_actions == "REGION_CUTOUT" or len(selected_edges) > 3:
+            active_cutgraph.compute_all_connected_components()
         active_cutgraph.update_unfoldings_along_edges(selected_edges)
         active_cutgraph.greedy_update_flaps_around_changed_components(selected_edges)
         update_all_polyzamboni_drawings(None, context)
@@ -385,6 +397,113 @@ class ZamboniCutDesignOperator(bpy.types.Operator):
         active_object = context.active_object
         is_mesh = active_object is not None and active_object.type == 'MESH' 
         return is_mesh and context.mode == 'EDIT_MESH' and CUTGRAPH_ID_PROPERTY_NAME in active_object
+
+class AutoCutsOperator(bpy.types.Operator):
+    """ Automatically generate cuts """
+    bl_label = "Auto Unfold"
+    bl_idname  = "polyzamboni.auto_cuts_op"
+
+    cutting_algorithm : bpy.props.EnumProperty(
+        name="Algorithm",
+        description="The algorithm used to generate auto-cuts",
+        items=[
+            ("GREEDY", "Greedy", "Start with all edges cut and then remove as many as possible", "", 0)
+        ],
+        default="GREEDY"
+    )
+    quality_level : bpy.props.EnumProperty(
+        name="Quality",
+        description="Determine what kind of print overlaps are allowed",
+        items=[
+             ("NO_OVERLAPS_ALLOWED", "No overlaps", "Allow no overlaps (all cut pieces have to be green)", "", 0),
+             ("GLUE_FLAP_OVERLAPS_ALLOWED", "Allow overlapping glue flaps", "Allow glue flap overlaps (all cut pieces have to be yellow or green)", "", 1),
+             ("ALL_OVERLAPS_ALLOWED", "Allow all overlaps", "Allow all overlaps (all cut pieces have to be not red)", "", 2)
+        ],
+        default="NO_OVERLAPS_ALLOWED"
+    )
+    loop_alignment : bpy.props.EnumProperty(
+        name="Loop Alignment",
+        description="Determine what edges should have a high cut priority, depending on their alignment with one coordinate axis",
+        items=[
+            ("X", "X axis", "Loops around the x-axis", "", 0),
+            ("Y", "Y axis", "Loops around the y-axis", "", 1),
+            ("Z", "Z axis", "Loops around the z-axis", "", 2),
+        ],
+        default="Z"
+    )
+    max_pieces_per_component : bpy.props.IntProperty(
+        name="Max pieces per component",
+        description="The maximum amount of mesh faces per component. High values can lead to very high runtimes!",
+        default=10,
+        min=1
+    )
+
+    _timer = None
+    _running = False
+
+    def invoke(self, context, event):
+        print("invoke called")
+        wm = context.window_manager
+        return wm.invoke_props_dialog(self, title="Auto cut options", confirm_text="Lets go!")
+
+    def draw(self, context):
+        layout = self.layout
+        write_custom_split_property_row(layout.row(), "Quality", self.properties, "quality_level", 0.5)
+        write_custom_split_property_row(layout.row(), "Loops", self.properties, "loop_alignment", 0.5)
+        write_custom_split_property_row(layout.row(), "Pieces per component", self.properties, "max_pieces_per_component", 0.5)
+
+    def execute(self, context):
+        print("execute called")
+        ao = context.active_object
+        active_cutgraph_index = ao[CUTGRAPH_ID_PROPERTY_NAME]
+        if active_cutgraph_index < len(globals.PZ_CUTGRAPHS):
+            active_cutgraph : cutgraph.CutGraph = globals.PZ_CUTGRAPHS[active_cutgraph_index]
+        else:
+            print("huch?!")
+            print("cutgraph", active_cutgraph_index, "not in", globals.PZ_CUTGRAPHS)
+        
+        # progress bar setup
+        self._running = True
+        wm = context.window_manager
+        #print("operator wm", wm)
+        wm.polyzamboni_auto_cuts_progress = 0.0
+        wm.polyzamboni_auto_cuts_running = True
+        self._timer = wm.event_timer_add(time_step=0.1, window=context.window)
+
+        if self.cutting_algorithm == "GREEDY":
+            def compute_and_report_progress():
+                for progress in greedy_auto_cuts(active_cutgraph, self.quality_level, self.loop_alignment, self.max_pieces_per_component):
+                    wm.polyzamboni_auto_cuts_progress = progress
+                print("im done computing!")
+                self._running = False
+                wm.polyzamboni_auto_cuts_running = False
+            threading.Thread(target=compute_and_report_progress).start()
+
+        wm.modal_handler_add(self)
+        return { "RUNNING_MODAL" }
+
+    def modal(self, context, event):
+        if event.type == 'TIMER':
+            for region in context.area.regions:
+                if region.active_panel_category == 'PolyZamboni':
+                    region.tag_redraw()
+            if not self._running:
+                print("finished")
+                update_all_polyzamboni_drawings(None, context)
+                return {'FINISHED'}
+        return {'RUNNING_MODAL'}
+    
+    def cancel(self, context):
+        self._running = False
+        wm = context.window_manager
+        wm.event_timer_remove(self._timer)
+        wm.progress_end()
+
+    @classmethod
+    def poll(cls, context):
+        active_object = context.active_object
+        is_mesh = active_object is not None and active_object.type == 'MESH' 
+        return is_mesh and CUTGRAPH_ID_PROPERTY_NAME in active_object
 
 class ZamboniCutEditingPieMenu(bpy.types.Menu):
     """This is a custom pie menu for all Zamboni cut design operators"""
@@ -572,6 +691,7 @@ class PolyZamboniExportPDFOperator(bpy.types.Operator, ExportHelper):
 
     def invoke(self, context, event):
         # do stuff
+        bpy.ops.polyzamboni.mesh_sync_op() # sync mesh changes before exporting
         ao = context.active_object
         self.active_cutgraph : cutgraph.CutGraph = globals.PZ_CUTGRAPHS[ao[CUTGRAPH_ID_PROPERTY_NAME]]
         self.build_steps_valid = self.active_cutgraph.check_if_build_steps_are_present_and_valid()
@@ -583,6 +703,15 @@ class PolyZamboniExportPDFOperator(bpy.types.Operator, ExportHelper):
         self.curr_len_unit = context.scene.unit_settings.length_unit
         self.curr_unit_system = context.scene.unit_settings.system
         self.curr_len_scale = context.scene.unit_settings.scale_length
+        
+        #compute maximum target mesh height
+        page_margin_in_cm = 100 * self.curr_len_scale * self.general_settings.page_margin
+        max_w_in_cm = 100 * self.curr_len_scale * self.max_comp_with
+        max_h_in_cm = 100 * self.curr_len_scale * self.max_comp_height
+        curr_page_size = exporters.paper_sizes[self.general_settings.paper_size]
+        max_scaling = min((curr_page_size[0] - 2 * page_margin_in_cm) / max_w_in_cm, (curr_page_size[1] - 2 * page_margin_in_cm) / max_h_in_cm)
+        self.general_settings.sizing_scale = max_scaling
+        self.general_settings.target_model_height = max_scaling * self.mesh_height
 
         return super().invoke(context, event)
 
@@ -643,6 +772,7 @@ class PolyZamboniExportSVGOperator(bpy.types.Operator, ExportHelper):
 
     def invoke(self, context, event):
         # do stuff
+        bpy.ops.polyzamboni.mesh_sync_op() # sync mesh changes before exporting
         ao = context.active_object
         self.active_cutgraph : cutgraph.CutGraph = globals.PZ_CUTGRAPHS[ao[CUTGRAPH_ID_PROPERTY_NAME]]
         self.build_steps_valid = self.active_cutgraph.check_if_build_steps_are_present_and_valid()
@@ -654,6 +784,16 @@ class PolyZamboniExportSVGOperator(bpy.types.Operator, ExportHelper):
         self.curr_len_unit = context.scene.unit_settings.length_unit
         self.curr_unit_system = context.scene.unit_settings.system
         self.curr_len_scale = context.scene.unit_settings.scale_length
+
+        #compute maximum target mesh height
+        page_margin_in_cm = 100 * self.curr_len_scale * self.general_settings.page_margin
+        max_w_in_cm = 100 * self.curr_len_scale * self.max_comp_with
+        max_h_in_cm = 100 * self.curr_len_scale * self.max_comp_height
+        curr_page_size = exporters.paper_sizes[self.general_settings.paper_size]
+        max_scaling = min((curr_page_size[0] - 2 * page_margin_in_cm) / max_w_in_cm, (curr_page_size[1] - 2 * page_margin_in_cm) / max_h_in_cm)
+        self.general_settings.sizing_scale = max_scaling
+        self.general_settings.target_model_height = max_scaling * self.mesh_height
+
         return super().invoke(context, event)
 
     def draw(self, context):
@@ -715,6 +855,7 @@ def register():
     bpy.utils.register_class(PolyZamboniExportSVGOperator)
     bpy.utils.register_class(RemoveAllPolyzamboniDataOperator)
     bpy.utils.register_class(ComputeBuildStepsOperator)
+    bpy.utils.register_class(AutoCutsOperator)
 
     bpy.types.TOPBAR_MT_file_export.append(menu_func_polyzamboni_export_pdf)
     bpy.types.TOPBAR_MT_file_export.append(menu_func_polyzamboni_export_svg)
@@ -747,6 +888,7 @@ def unregister():
     bpy.utils.unregister_class(PolyZamboniExportSVGOperator)
     bpy.utils.unregister_class(RemoveAllPolyzamboniDataOperator)
     bpy.utils.unregister_class(ComputeBuildStepsOperator)
+    bpy.utils.unregister_class(AutoCutsOperator)
 
     #if menu_func_polyzamboni_export in bpy.types.TOPBAR_MT_file_export:
     bpy.types.TOPBAR_MT_file_export.remove(menu_func_polyzamboni_export_pdf)
