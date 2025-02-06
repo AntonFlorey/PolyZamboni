@@ -3,6 +3,7 @@ import bmesh
 import numpy as np
 import os
 import threading
+from collections import deque
 from bpy.props import StringProperty, EnumProperty, FloatProperty, IntProperty, BoolProperty, FloatVectorProperty, PointerProperty
 from bpy_extras.io_utils import ExportHelper
 from .properties import GeneralExportSettings, LineExportSettings, TextureExportSettings
@@ -14,6 +15,7 @@ from . import exporters
 from .printprepper import fit_components_on_pages
 from .geometry import compute_planarity_score
 from .autozamboni import greedy_auto_cuts
+from .callbacks import save_data_of_object
 
 class InitializeCuttingOperator(bpy.types.Operator):
     """Start the unfolding process for this mesh"""
@@ -204,6 +206,7 @@ class SeparateAllMaterialsOperator(bpy.types.Operator):
         active_cutgraph.update_unfoldings_along_edges(selected_edges)
         active_cutgraph.greedy_update_flaps_around_changed_components(selected_edges)
         update_all_polyzamboni_drawings(None, context)
+        ZamboniCutgraphEditingModeOperator.add_undo_step(active_cutgraph.create_save_data())
         return { 'FINISHED' }
     
     @classmethod
@@ -211,7 +214,7 @@ class SeparateAllMaterialsOperator(bpy.types.Operator):
         active_object = context.active_object
         is_mesh = active_object is not None and active_object.type == 'MESH' and (context.mode == 'EDIT_MESH' or active_object.select_get())
 
-        return is_mesh and CUTGRAPH_ID_PROPERTY_NAME in active_object
+        return is_mesh and CUTGRAPH_ID_PROPERTY_NAME in active_object and ZamboniCutgraphEditingModeOperator._cutgraph_editing_mode_active
 
 class RecomputeFlapsOperator(bpy.types.Operator):
     """ Applies the current flap settings and recomputes all glue flaps """
@@ -225,11 +228,12 @@ class RecomputeFlapsOperator(bpy.types.Operator):
         curr_cutgraph.flap_height = ao_zamboni_settings.glue_flap_height
         curr_cutgraph.flap_angle =  ao_zamboni_settings.glue_flap_angle
         curr_cutgraph.prefer_zigzag = ao_zamboni_settings.prefer_alternating_flaps
-        if ao_zamboni_settings.lock_glue_flaps:
-            curr_cutgraph.update_all_flap_geometry() # recompute flap geometry
-        else:
-            curr_cutgraph.greedy_place_all_flaps() # replace flaps
+        # if ao_zamboni_settings.lock_glue_flaps:
+        #     curr_cutgraph.update_all_flap_geometry() # recompute flap geometry
+        # else:
+        curr_cutgraph.greedy_place_all_flaps() # replace flaps
         update_all_polyzamboni_drawings(None, context)
+        ZamboniCutgraphEditingModeOperator.add_undo_step(curr_cutgraph.create_save_data())
         return { 'FINISHED' }
     
     @classmethod
@@ -237,7 +241,7 @@ class RecomputeFlapsOperator(bpy.types.Operator):
         active_object = context.active_object
         is_mesh = active_object is not None and active_object.type == 'MESH' and (context.mode == 'EDIT_MESH' or active_object.select_get())
 
-        return is_mesh and CUTGRAPH_ID_PROPERTY_NAME in active_object
+        return is_mesh and CUTGRAPH_ID_PROPERTY_NAME in active_object and ZamboniCutgraphEditingModeOperator._cutgraph_editing_mode_active
 
 class FlipGlueFlapsOperator(bpy.types.Operator):
     """ Flip all glue flaps attached to the selected edges """
@@ -261,13 +265,14 @@ class FlipGlueFlapsOperator(bpy.types.Operator):
             active_cutgraph.swap_glue_flap(edge_index)
 
         update_all_polyzamboni_drawings(None, context)
+        ZamboniCutgraphEditingModeOperator.add_undo_step(active_cutgraph.create_save_data())
         return { 'FINISHED' }
     
     @classmethod
     def poll(cls, context):
         active_object = context.active_object
         is_mesh = active_object is not None and active_object.type == 'MESH' 
-        return is_mesh and context.mode == 'EDIT_MESH' and CUTGRAPH_ID_PROPERTY_NAME in active_object
+        return is_mesh and context.mode == 'EDIT_MESH' and CUTGRAPH_ID_PROPERTY_NAME in active_object and ZamboniCutgraphEditingModeOperator._cutgraph_editing_mode_active
 
 class ComputeBuildStepsOperator(bpy.types.Operator):
     """ Starting at the selected face, compute a polyzamboni build order of the current mesh """
@@ -321,14 +326,93 @@ class ZamboniGlueFlapDesignOperator(bpy.types.Operator):
             return {"FINISHED"}
         elif self.design_actions == "RECOMPUTE_FLAPS":
             bpy.ops.polyzamboni.flaps_recompute_op()
-
+        save_data_of_object(context.active_object)
         return {"FINISHED"}
 
     @classmethod
     def poll(cls, context):
         active_object = context.active_object
         is_mesh = active_object is not None and active_object.type == 'MESH' 
-        return is_mesh and context.mode == 'EDIT_MESH' and CUTGRAPH_ID_PROPERTY_NAME in active_object
+        return is_mesh and context.mode == 'EDIT_MESH' and CUTGRAPH_ID_PROPERTY_NAME in active_object and ZamboniCutgraphEditingModeOperator._cutgraph_editing_mode_active
+
+class ZamboniCutgraphEditingModeOperator(bpy.types.Operator):
+    """  Cut editing modal operator """
+    bl_label = "PolyZamboni Edit Mode"
+    bl_description = "Enter the edit mode of PolyZamboni (Alt+Y)"
+    bl_idname = "polyzamboni.cutgraph_editing_modal_operator"
+
+    _undo_stack = deque()
+    _max_undo_stack_size = 20
+    _cutgraph_editing_mode_active = False
+
+    @classmethod
+    def add_undo_step(cls, cutgraph_save_data):
+        cls._undo_stack.append(cutgraph_save_data)
+        if len(cls._undo_stack) > cls._max_undo_stack_size:
+            cls._undo_stack.popleft()
+
+    def invoke(self, context, event):
+        if context.object:
+            bpy.ops.object.mode_set(mode="EDIT")
+            ao = context.active_object
+            self.active_cutgraph : cutgraph.CutGraph = globals.PZ_CUTGRAPHS[ao[CUTGRAPH_ID_PROPERTY_NAME]]
+            self.initial_cutgraph_state = self.active_cutgraph.create_save_data()
+            self.__class__._undo_stack = deque([self.initial_cutgraph_state])
+            self.__class__._cutgraph_editing_mode_active = True
+            self._cancel_at_next_event = False
+            self._finish_at_next_event = False
+            context.window_manager.modal_handler_add(self)
+            return {"RUNNING_MODAL"}
+        else:
+            self.report({'WARNING'}, "No active object, could not invoke cut edit mode")
+            return {'CANCELLED'}
+
+    def modal(self, context, event):
+        if self._cancel_at_next_event:
+            self.active_cutgraph.load_from_save_data(self.initial_cutgraph_state)
+            update_all_polyzamboni_drawings(None, bpy.context)
+            print("cancelling cutgraph editing")
+            self.__class__._cutgraph_editing_mode_active = False
+            for region in context.area.regions:
+                if region.active_panel_category == 'PolyZamboni':
+                    region.tag_redraw()
+            return {'CANCELLED'}
+        if self._finish_at_next_event:
+            print("finishing cutgraph editing")
+            self.__class__._cutgraph_editing_mode_active = False
+            for region in context.area.regions:
+                if region.active_panel_category == 'PolyZamboni':
+                    region.tag_redraw()
+            return {'FINISHED'}
+        if event.type == "ESC" and event.value == "PRESS":
+            self._cancel_at_next_event = True
+            bpy.ops.object.mode_set(mode="OBJECT")
+            return {'PASS_THROUGH'}
+        elif not event.alt and event.type == "TAB" and event.value == "PRESS":
+            self._finish_at_next_event = True
+            return {'PASS_THROUGH'}
+        if event.type == "Y" and event.alt and event.value == "PRESS":
+            self._finish_at_next_event = True
+            bpy.ops.object.mode_set(mode="OBJECT")
+            return {'RUNNING_MODAL'}
+
+        if event.ctrl and event.type == "Z" and event.value == "PRESS":
+            if len(self.__class__._undo_stack) > 1:
+                self.__class__._undo_stack.pop()
+                self.active_cutgraph.load_from_save_data(self.__class__._undo_stack[-1])
+                update_all_polyzamboni_drawings(self, context)
+            return {"RUNNING_MODAL"}
+
+        return {'PASS_THROUGH'}
+    
+    def cancel(self, context):
+        print("cancelled cut editing op")
+
+    @classmethod
+    def poll(cls, context):
+        active_object = context.active_object
+        is_mesh = active_object is not None and active_object.type == 'MESH' 
+        return is_mesh and CUTGRAPH_ID_PROPERTY_NAME in active_object
 
 class ZamboniCutDesignOperator(bpy.types.Operator):
     """ Add or remove cuts """
@@ -390,13 +474,15 @@ class ZamboniCutDesignOperator(bpy.types.Operator):
         active_cutgraph.update_unfoldings_along_edges(selected_edges)
         active_cutgraph.greedy_update_flaps_around_changed_components(selected_edges)
         update_all_polyzamboni_drawings(None, context)
+        save_data_of_object(ao)
+        ZamboniCutgraphEditingModeOperator.add_undo_step(active_cutgraph.create_save_data())
         return {"FINISHED"}
 
     @classmethod
     def poll(cls, context):
         active_object = context.active_object
         is_mesh = active_object is not None and active_object.type == 'MESH' 
-        return is_mesh and context.mode == 'EDIT_MESH' and CUTGRAPH_ID_PROPERTY_NAME in active_object
+        return is_mesh and context.mode == 'EDIT_MESH' and CUTGRAPH_ID_PROPERTY_NAME in active_object and ZamboniCutgraphEditingModeOperator._cutgraph_editing_mode_active
 
 class AutoCutsOperator(bpy.types.Operator):
     """ Automatically generate cuts """
@@ -457,7 +543,7 @@ class AutoCutsOperator(bpy.types.Operator):
         ao = context.active_object
         active_cutgraph_index = ao[CUTGRAPH_ID_PROPERTY_NAME]
         if active_cutgraph_index < len(globals.PZ_CUTGRAPHS):
-            active_cutgraph : cutgraph.CutGraph = globals.PZ_CUTGRAPHS[active_cutgraph_index]
+            self.active_cutgraph : cutgraph.CutGraph = globals.PZ_CUTGRAPHS[active_cutgraph_index]
         else:
             print("huch?!")
             print("cutgraph", active_cutgraph_index, "not in", globals.PZ_CUTGRAPHS)
@@ -472,7 +558,7 @@ class AutoCutsOperator(bpy.types.Operator):
 
         if self.cutting_algorithm == "GREEDY":
             def compute_and_report_progress():
-                for progress in greedy_auto_cuts(active_cutgraph, self.quality_level, self.loop_alignment, self.max_pieces_per_component):
+                for progress in greedy_auto_cuts(self.active_cutgraph, self.quality_level, self.loop_alignment, self.max_pieces_per_component):
                     wm.polyzamboni_auto_cuts_progress = progress
                 print("im done computing!")
                 self._running = False
@@ -490,6 +576,7 @@ class AutoCutsOperator(bpy.types.Operator):
             if not self._running:
                 print("finished")
                 update_all_polyzamboni_drawings(None, context)
+                ZamboniCutgraphEditingModeOperator.add_undo_step(self.active_cutgraph.create_save_data())
                 return {'FINISHED'}
         return {'RUNNING_MODAL'}
     
@@ -503,7 +590,7 @@ class AutoCutsOperator(bpy.types.Operator):
     def poll(cls, context):
         active_object = context.active_object
         is_mesh = active_object is not None and active_object.type == 'MESH' 
-        return is_mesh and CUTGRAPH_ID_PROPERTY_NAME in active_object
+        return is_mesh and CUTGRAPH_ID_PROPERTY_NAME in active_object and ZamboniCutgraphEditingModeOperator._cutgraph_editing_mode_active
 
 class ZamboniCutEditingPieMenu(bpy.types.Menu):
     """This is a custom pie menu for all Zamboni cut design operators"""
@@ -856,6 +943,7 @@ def register():
     bpy.utils.register_class(RemoveAllPolyzamboniDataOperator)
     bpy.utils.register_class(ComputeBuildStepsOperator)
     bpy.utils.register_class(AutoCutsOperator)
+    bpy.utils.register_class(ZamboniCutgraphEditingModeOperator)
 
     bpy.types.TOPBAR_MT_file_export.append(menu_func_polyzamboni_export_pdf)
     bpy.types.TOPBAR_MT_file_export.append(menu_func_polyzamboni_export_svg)
@@ -866,11 +954,13 @@ def register():
         # keymap for the cut editing pie menu
         keymap_item = keymap.keymap_items.new("wm.call_menu_pie", "C", "PRESS", alt=True)
         keymap_item.properties.name = "POLYZAMBONI_MT_CUT_EDITING_PIE_MENU"
-
+        polyzamboni_keymaps.append((keymap, keymap_item))
         # keymap for the glue flap editing pie menu
         keymap_item = keymap.keymap_items.new("wm.call_menu_pie", "X", "PRESS", alt=True)
         keymap_item.properties.name = "POLYZAMBONI_MT_GLUE_FLAP_EDITING_PIE_MENU"
-
+        polyzamboni_keymaps.append((keymap, keymap_item))
+        # keymap for entering polyzamboni edit mode
+        keymap_item = keymap.keymap_items.new("polyzamboni.cutgraph_editing_modal_operator", "Y", "PRESS", alt=True)
         polyzamboni_keymaps.append((keymap, keymap_item))
 
 def unregister():
@@ -889,6 +979,7 @@ def unregister():
     bpy.utils.unregister_class(RemoveAllPolyzamboniDataOperator)
     bpy.utils.unregister_class(ComputeBuildStepsOperator)
     bpy.utils.unregister_class(AutoCutsOperator)
+    bpy.utils.unregister_class(ZamboniCutgraphEditingModeOperator)
 
     #if menu_func_polyzamboni_export in bpy.types.TOPBAR_MT_file_export:
     bpy.types.TOPBAR_MT_file_export.remove(menu_func_polyzamboni_export_pdf)

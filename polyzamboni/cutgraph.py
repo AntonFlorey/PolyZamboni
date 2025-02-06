@@ -10,6 +10,14 @@ from .unfolding import Unfolding, pos_list_to_triangles
 from collections import deque
 from .printprepper import ColoredTriangleData, ComponentPrintData, CutEdgeData, FoldEdgeData, GlueFlapEdgeData
 
+class CutGraphSaveData():
+    """ Stores all data required to save and load a cutgraph """
+
+    def __init__(self, edge_constraints_dict, sparse_build_steps_dict, glue_flaps_dict):
+        self.edge_constraints = edge_constraints_dict.copy()
+        self.build_steps = sparse_build_steps_dict.copy()
+        self.glue_flaps = glue_flaps_dict.copy()
+
 class CutGraph():
     """ This class can be attached to any Mesh object """
 
@@ -44,6 +52,30 @@ class CutGraph():
             self.update_all_flap_geometry() # create flap geometry
         else:
             self.greedy_place_all_flaps()
+
+    #################################
+    #          Save & Load          #
+    #################################
+
+    def create_save_data(self):
+        return CutGraphSaveData(self.designer_constraints, self.create_sparse_build_steps_dict(), self.create_glue_flaps_dict())
+
+    def load_from_save_data(self, save_data : CutGraphSaveData):
+        # set edge constraints
+        self.designer_constraints = save_data.edge_constraints.copy()
+        # compute connected components
+        self.compute_all_connected_components()
+        # compute undoldings
+        self.unfold_all_connected_components()
+        # read build steps
+        self.read_sparse_build_steps_dict(save_data.build_steps)
+        # glue flaps
+        self.read_glue_flaps_dict(save_data.glue_flaps)
+        if self.check_if_glue_flaps_exist_and_are_valid():
+            self.update_all_flap_geometry()
+        else:
+            self.greedy_place_all_flaps()
+
 
     #################################
     #     Input Mesh Handling       #
@@ -993,4 +1025,3 @@ class CutGraph():
 
             all_print_data.append(curr_component_print_data)
         return all_print_data
-    

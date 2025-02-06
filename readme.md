@@ -1,4 +1,4 @@
-# PolyZamboni - The ultimate papercraft Blender addon :)
+# PolyZamboni - The ultimate papercraft addon for Blender
 
 Some cool text describing this addon...
 

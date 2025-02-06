@@ -1,5 +1,5 @@
 import bpy
-from .constants import CUT_CONSTRAINTS_PROP_NAME, LOCKED_EDGES_PROP_NAME, CUTGRAPH_ID_PROPERTY_NAME, GLUE_FLAP_PROPERTY_NAME, BUILD_ORDER_PROPERTY_NAME
+from .constants import CUT_CONSTRAINTS_PROP_NAME, LOCKED_EDGES_PROP_NAME, CUTGRAPH_ID_PROPERTY_NAME, GLUE_FLAP_PROPERTY_NAME, BUILD_ORDER_PROPERTY_NAME, AUTO_CUT_EDGES_PROP_NAME
 
 PZ_CUTGRAPHS = None
 PZ_LOCK_SELECT_CALLBACK = False
@@ -25,13 +25,6 @@ def reset_cutgraph(obj, cutgraph):
 
 def remove_cutgraph(obj):
     global PZ_CURRENT_CUTGRAPH_ID
-    if CUTGRAPH_ID_PROPERTY_NAME not in obj:
-        print("WARNING! Tried to remove a cutgraph that does not exist")
-        return
-    PZ_CUTGRAPHS[obj[CUTGRAPH_ID_PROPERTY_NAME]] = None # remove cutgraph from list
-    if obj[CUTGRAPH_ID_PROPERTY_NAME] == PZ_CURRENT_CUTGRAPH_ID:
-        PZ_CURRENT_CUTGRAPH_ID = None
-    del obj[CUTGRAPH_ID_PROPERTY_NAME]
     if CUT_CONSTRAINTS_PROP_NAME in obj:
         del obj[CUT_CONSTRAINTS_PROP_NAME]
     if LOCKED_EDGES_PROP_NAME in obj:
@@ -40,6 +33,16 @@ def remove_cutgraph(obj):
         del obj[GLUE_FLAP_PROPERTY_NAME]
     if BUILD_ORDER_PROPERTY_NAME in obj:
         del obj[BUILD_ORDER_PROPERTY_NAME]
+    if AUTO_CUT_EDGES_PROP_NAME in obj:
+        del obj[AUTO_CUT_EDGES_PROP_NAME]
+    if CUTGRAPH_ID_PROPERTY_NAME not in obj:
+        print("WARNING! Tried to remove a cutgraph that does not exist")
+        return
+    else:
+        if obj[CUTGRAPH_ID_PROPERTY_NAME] == PZ_CURRENT_CUTGRAPH_ID:
+            PZ_CURRENT_CUTGRAPH_ID = None
+        PZ_CUTGRAPHS[obj[CUTGRAPH_ID_PROPERTY_NAME]] = None # remove cutgraph from list
+        del obj[CUTGRAPH_ID_PROPERTY_NAME]
 
 def reset_file_dependent_globals():
     global PZ_CUTGRAPHS

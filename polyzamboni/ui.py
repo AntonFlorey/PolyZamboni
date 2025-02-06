@@ -1,6 +1,7 @@
 import bpy
 from bpy.types import Panel
 from .constants import CUTGRAPH_ID_PROPERTY_NAME
+from .operators import ZamboniCutgraphEditingModeOperator
 
 class MainPanel(bpy.types.Panel):
     bl_label = "Poly Zamboni"
@@ -23,8 +24,6 @@ class MainPanel(bpy.types.Panel):
             col2.label(icon="SHADERFX")
         else:
             row = layout.row()
-            row.label(text="Press Alt+C in Edit-Mode :)")
-            row = layout.row()
             col1 = row.column()
             col2 = row.column()
             col1.operator("polyzamboni.remove_all_op")
@@ -40,31 +39,48 @@ class MainPanel(bpy.types.Panel):
             row = layout.row()
             col1 = row.column()
             col2 = row.column()
-            col1.operator("polyzamboni.material_separation_op")
-            col2.label(icon="MATERIAL")
-            row = layout.row()
-            col1 = row.column()
-            col2 = row.column()
             col1.operator("polyzamboni.build_order_op")
             col2.label(icon="MOD_BUILD")
-            row = layout.row()
-            col1 = row.column()
-            col2 = row.column()
-            if context.window_manager.polyzamboni_auto_cuts_running:
-                col1.progress(text="running...", factor=context.window_manager.polyzamboni_auto_cuts_progress)
-                col2.label(icon="SETTINGS")
-            else:
-                col1.operator("polyzamboni.auto_cuts_op")
-                col2.label(icon="FILE_SCRIPT")
-            #print("ui wm:", context.window_manager)
-            # col1.operator("polyzamboni.auto_cuts_op")
-            
-            # layout.row().progress(text="running...", factor=auto_cut_progress)
+
             row = layout.row()
             col1 = row.column()
             col2 = row.column()
             col1.prop(zamboni_object_settings, "apply_auto_cuts_to_previev")
             col2.label(icon="LIGHT_DATA")
+
+            # cutgraph editing
+            in_polyzamboni_edit_mode = ZamboniCutgraphEditingModeOperator._cutgraph_editing_mode_active
+            editing_box = layout.box()
+            if in_polyzamboni_edit_mode:
+                editing_box.label(text="PolyZamboni Editing Tools")
+                editing_box.row().label(text="Leave (TAB, Alt+Y) or cancel (ESC)")
+                row = editing_box.row()
+                row.label(text="Press Alt+C to edit cuts")
+                row.active = in_polyzamboni_edit_mode
+                row = editing_box.row()
+                row.label(text="Press Alt+X to edit glue flaps")
+                row.active = in_polyzamboni_edit_mode
+                row = editing_box.row()
+                col1 = row.column()
+                col2 = row.column()
+                col1.operator("polyzamboni.material_separation_op")
+                col2.label(icon="MATERIAL")
+                row = editing_box.row()
+                col1 = row.column()
+                col2 = row.column()
+                if context.window_manager.polyzamboni_auto_cuts_running:
+                    col1.progress(text="running...", factor=context.window_manager.polyzamboni_auto_cuts_progress)
+                    col2.label(icon="SETTINGS")
+                else:
+                    col1.operator("polyzamboni.auto_cuts_op")
+                    col2.label(icon="FILE_SCRIPT")
+                row = editing_box.row()
+                col1 = row.column()
+                col2 = row.column()
+                col1.operator("polyzamboni.flaps_recompute_op")
+                col2.prop(zamboni_object_settings, "prefer_alternating_flaps", icon="RIGID_BODY", icon_only=True)
+            else:
+                editing_box.row().operator("polyzamboni.cutgraph_editing_modal_operator")
 
             # layout.row().label(text="Export")
             row = layout.row()
@@ -90,15 +106,8 @@ class GlueFlapSettingsPanel(bpy.types.Panel):
         if CUTGRAPH_ID_PROPERTY_NAME not in context.active_object:
             layout.label(text="No Cutgraph selected", icon="GHOST_DISABLED")
         else:
-            row = layout.row()
-            row.label(text="Press Alt+X in Edit-Mode :)")
             ao = context.active_object
             zamboni_object_settings = ao.polyzamboni_object_prop
-            row = layout.row()
-            col1 = row.column()
-            col2 = row.column()
-            col1.operator("polyzamboni.flaps_recompute_op")
-            col2.prop(zamboni_object_settings, "prefer_alternating_flaps", icon="RIGID_BODY", icon_only=True)
             row = layout.row()
             col1 = row.column()
             col2 = row.column()

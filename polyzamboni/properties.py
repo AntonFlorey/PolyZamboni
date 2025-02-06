@@ -55,7 +55,7 @@ class ZamboniSettingsPerObject(bpy.types.PropertyGroup):
     glue_flap_angle : FloatProperty(
         name="Glue flap angle",
         description="Determines the shape of all glue flaps",
-        default=np.pi / 2,
+        default=np.pi / 4,
         min=np.deg2rad(10),
         max=np.deg2rad(170),
         subtype="ANGLE",
