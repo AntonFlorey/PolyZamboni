@@ -13,20 +13,10 @@ def edge_to_key_e(e : bmesh.types.BMEdge):
 def edge_to_key(v1 : bmesh.types.BMVert, v2 : bmesh.types.BMVert):
     return tuple(sorted([v1.index, v2.index]))
 
-def basis_at_face_edge(edge : bmesh.types.BMEdge, normal):
-    vertices = edge.verts
-    return geometry.construct_2d_space_along_face_edge()
-
-def pos_list_to_triangles(pos_list):
-    res = []
-    for i in range(0, len(pos_list), 3):
-        res.append((pos_list[i], pos_list[i+1], pos_list[i+2]))
-    return res
-
 class Unfolding():
     """ Part of a 2d mesh cut open and unfolded into the euclidean plane """
 
-    def __init__(self, mesh : bmesh.types.BMesh, face_list, pred_dict, skip_intersection_test=False):
+    def __init__(self, mesh : bmesh.types.BMesh, face_list, pred_dict, face_triangulation_indices_dict, skip_intersection_test=False):
 
         # object attributes
         self.has_overlaps = False
@@ -66,10 +56,9 @@ class Unfolding():
             if pred == face_index:
                 # root face
                 self.affine_transform_to_root_coord_system_per_face[face_index] = geometry.AffineTransform2D()
-                verts_in_local_space_curr = [geometry.to_local_coords(v.co, *self.local_2d_coord_system_per_face[face_index]) for v in face.verts]
-                root_face_triangles, root_face_triangle_ids = geometry.triangulate_2d_polygon(verts_in_local_space_curr, [v.index for v in face.verts], True)
-                self.triangulated_faces_2d[face_index] = root_face_triangles
-                self.triangulation_indices[face_index] = root_face_triangle_ids
+                verts_in_local_space_curr = {v.index : geometry.to_local_coords(v.co, *self.local_2d_coord_system_per_face[face_index]) for v in face.verts}
+                self.triangulated_faces_2d[face_index] = [tuple([verts_in_local_space_curr[i] for i in tri_indices]) for tri_indices in face_triangulation_indices_dict[face_index]]
+                self.triangulation_indices[face_index] = face_triangulation_indices_dict[face_index]
                 # print("root face unfolded")
                 continue
             
@@ -83,10 +72,9 @@ class Unfolding():
             self.affine_transform_to_root_coord_system_per_face[face_index] = combined_transform
 
             # compute triangles in root face coords
-            verts_in_local_space_root = [self.get_globally_consistend_2d_coord_in_face(v.co, face.index) for v in face.verts]
-            curr_face_triangles, curr_face_triangle_ids = geometry.triangulate_2d_polygon(verts_in_local_space_root, [v.index for v in face.verts], True)
-            self.triangulated_faces_2d[face_index] = curr_face_triangles
-            self.triangulation_indices[face_index] = curr_face_triangle_ids
+            verts_in_local_space_root = {v.index : self.get_globally_consistend_2d_coord_in_face(v.co, face.index) for v in face.verts}
+            self.triangulated_faces_2d[face_index] = [tuple([verts_in_local_space_root[i] for i in tri_indices]) for tri_indices in face_triangulation_indices_dict[face_index]]
+            self.triangulation_indices[face_index] = face_triangulation_indices_dict[face_index]
 
             # check for any intersections 
             if skip_intersection_test or self.has_overlaps:
@@ -96,13 +84,10 @@ class Unfolding():
                 if self.has_overlaps:
                     break
                 other_face_index = face_list[other_face_i]
-                other_face_triangles = pos_list_to_triangles(self.triangulated_faces_2d[other_face_index])
-                current_face_triangles = pos_list_to_triangles(self.triangulated_faces_2d[face_index])
-                for triangle_a, triangle_b in product(other_face_triangles, current_face_triangles):
+                for triangle_a, triangle_b in product(self.triangulated_faces_2d[other_face_index], self.triangulated_faces_2d[face_index]):
                     if geometry.triangle_intersection_test_2d(*triangle_a, *triangle_b):
                         self.has_overlaps = True
                         break
-
 
     def get_globally_consistend_2d_coord_in_face(self, point_on_face_3d, face_index):
         """ Maps a 3D point on a given face to the unfolded face in 2D """
@@ -147,7 +132,7 @@ class Unfolding():
         # first check against all triangles in the face
         all_triangles = []
         for tri_batch in self.triangulated_faces_2d.values():
-            for tri in pos_list_to_triangles(tri_batch):
+            for tri in tri_batch:
                 all_triangles.append(tri)
 
         for unfold_triangle in all_triangles:
@@ -234,11 +219,9 @@ def test_if_two_touching_unfolded_components_overlap(unfolding_1 : Unfolding,
     transform_first_unfolding = orig_to_join_point_2 @ rotate_edges_together @ join_point_1_to_orig
 
     for triangle_list_1 in unfolding_1.triangulated_faces_2d.values():
-        unfolding_1_triangles = [tuple([transform_first_unfolding * tri_coord for tri_coord in triangle]) for triangle in pos_list_to_triangles(triangle_list_1)]
+        unfolding_1_triangles = [tuple([transform_first_unfolding * tri_coord for tri_coord in triangle]) for triangle in triangle_list_1]
         for triangle_list_2 in unfolding_2.triangulated_faces_2d.values():
-            unfolding_2_triangles = pos_list_to_triangles(triangle_list_2)
-
-            for triangle_a, triangle_b in product(unfolding_1_triangles, unfolding_2_triangles):
+            for triangle_a, triangle_b in product(unfolding_1_triangles, triangle_list_2):
                 if geometry.triangle_intersection_test_2d(*triangle_a, *triangle_b):
                     return True # they do overlap    
     return False

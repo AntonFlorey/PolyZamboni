@@ -3,10 +3,11 @@ import bmesh
 import numpy as np
 import os
 import networkx as nx
+import math
 import mathutils
-from .geometry import triangulate_3d_polygon, signed_point_dist_to_line
+from .geometry import triangulate_3d_polygon, signed_point_dist_to_line, face_corner_convex_3d, solve_for_weird_intersection_point
 from .constants import LOCKED_EDGES_PROP_NAME, CUT_CONSTRAINTS_PROP_NAME, AUTO_CUT_EDGES_PROP_NAME, PERFECT_REGION, BAD_GLUE_FLAPS_REGION, OVERLAPPING_REGION, NOT_FOLDABLE_REGION, GLUE_FLAP_NO_OVERLAPS, GLUE_FLAP_WITH_OVERLAPS, GLUE_FLAP_TO_LARGE, BUILD_ORDER_PROPERTY_NAME, GLUE_FLAP_PROPERTY_NAME
-from .unfolding import Unfolding, pos_list_to_triangles
+from .unfolding import Unfolding
 from collections import deque
 from .printprepper import ColoredTriangleData, ComponentPrintData, CutEdgeData, FoldEdgeData, GlueFlapEdgeData
 
@@ -95,9 +96,21 @@ class CutGraph():
                     print("POLYZAMBONI ERROR: Please ensure that faces connect at at most one common edge!")
                 self.dualgraph.add_edge(curr_id, nb_id, edge_index=connecting_edge.index)
         
+        # compute and store all face triangulations
+        self.face_triangulation_indices = {}
+        for face in self.mesh.faces:
+            _, triangulation_indices = triangulate_3d_polygon([v.co for v in face.verts], face.normal, [v.index for v in face.verts], crash_on_fail=True)
+            self.face_triangulation_indices[face.index] = triangulation_indices
+
+        # compute offsets for user feedback region drawing
+        min_edge_len = min([e.calc_length() for e in self.mesh.edges])
+        self.small_offset = 0.05 * min_edge_len
+        self.large_offset = 0.25 * min_edge_len
+
         self.halfedge_to_edge = None # delete old halfedge to edge dict
         self.halfedge_to_face = None # delete old halfedge to face dict
         self.valid = True # make sure we check mesh validity again
+        self.render_corner_cuts_dict = {} # make sure we recompute designer feedback
 
     #################################
     #             Misc.             #
@@ -370,7 +383,7 @@ class CutGraph():
 
         # unfold the component
         assert len(tree_traversal) == len(face_set)
-        return Unfolding(self.mesh, tree_traversal, pred_dict, skip_intersection_test=skip_intersection_test)
+        return Unfolding(self.mesh, tree_traversal, pred_dict, self.face_triangulation_indices, skip_intersection_test=skip_intersection_test)
 
     def unfold_connected_component(self, component_id, skip_intersection_test=False):
         """Unfolds one connected component of the cut mesh into the 2D plane. Returns None if the component containts cycles."""
@@ -426,20 +439,87 @@ class CutGraph():
             cut_coordinates.append(self.world_matrix @ (vert2.co + normal_offset * vert1.normal))
         return cut_coordinates
 
-    def get_polygon_outline_for_face_drawing(self, face_index, edge_margin = 0.01):
+    def __get_corner_points_all_interior_or_cut(self, corner_pos, prev_pos, next_pos, normal, dist_to_edges):
+        ctp : mathutils.Vector = (prev_pos - corner_pos)
+        ctn : mathutils.Vector = (next_pos - corner_pos)
+        corner_angle = math.acos(np.clip(ctp.normalized().dot(ctn.normalized()), -1, 1))
+        shell_factor = 1 / math.sin(corner_angle / 2)
+        corner_is_convex = face_corner_convex_3d(prev_pos, corner_pos, next_pos, normal)
+        rotation_to_angle_bisect_vec : mathutils.Matrix = mathutils.Matrix.Rotation((corner_angle if corner_is_convex else 2 * np.pi - corner_angle) / 2, 3, normal)
+        angle_bisect_vec = rotation_to_angle_bisect_vec @ ctn.normalized()
+        return [mathutils.Vector(corner_pos + dist_to_edges * shell_factor * angle_bisect_vec)]
+
+    def __get_corner_points_only_vertex_on_cut(self, corner_pos, prev_pos, next_pos, normal : mathutils.Vector, cut_dist, offset_dist):
+        ctp : mathutils.Vector = (prev_pos - corner_pos)
+        ctn : mathutils.Vector = (next_pos - corner_pos)
+        corner_is_convex = face_corner_convex_3d(prev_pos, corner_pos, next_pos, normal)
+        corner_angle = math.acos(np.clip(ctp.normalized().dot(ctn.normalized()), -1, 1))
+        if not corner_is_convex:
+            corner_angle = 2 * np.pi - corner_angle
+        rotation_to_angle_bisect_vec : mathutils.Matrix = mathutils.Matrix.Rotation(corner_angle / 2, 3, normal)
+        angle_bisect_vec = rotation_to_angle_bisect_vec @ ctn.normalized()
+        shell_factor = 1 / math.sin(corner_angle / 2)
+        one_point_th_angle = math.asin(offset_dist / cut_dist)
+        if corner_angle / 2 <= one_point_th_angle:
+            return [mathutils.Vector(corner_pos + offset_dist * shell_factor * angle_bisect_vec)]
+        else:
+            dist_parallel_to_edges = math.sqrt(cut_dist**2 - offset_dist**2)
+            point_a = mathutils.Vector(corner_pos + dist_parallel_to_edges * ctp.normalized() + offset_dist * ctp.cross(normal).normalized())
+            point_b = mathutils.Vector(corner_pos + cut_dist * angle_bisect_vec)
+            point_c = mathutils.Vector(corner_pos + dist_parallel_to_edges * ctn.normalized() + offset_dist * -ctn.cross(normal).normalized())
+            return [point_a, point_b, point_c]
+
+    def __get_corner_points_one_edge_cut(self, corner_pos, prev_pos, next_pos, normal : mathutils.Vector, cut_dist, offset_dist, prev_is_cut):
+        ctp : mathutils.Vector = (prev_pos - corner_pos)
+        ctn : mathutils.Vector = (next_pos - corner_pos)
+        corner_is_convex = face_corner_convex_3d(prev_pos, corner_pos, next_pos, normal)
+        corner_angle = math.acos(np.clip(ctp.normalized().dot(ctn.normalized()), -1, 1))
+        dist_parallel_to_edges = math.sqrt(cut_dist**2 - offset_dist**2)
+        n_a = ctp.cross(normal).normalized()
+        n_b = -ctn.cross(normal).normalized()
+        if not corner_is_convex:
+            corner_angle = 2 * np.pi - corner_angle
+            rotation_to_angle_bisect_vec : mathutils.Matrix = mathutils.Matrix.Rotation(corner_angle / 2, 3, normal)
+            angle_bisect_vec = rotation_to_angle_bisect_vec @ ctn.normalized()
+            if prev_is_cut:
+                point_a = mathutils.Vector(corner_pos + cut_dist * n_a)
+                point_b = mathutils.Vector(corner_pos + cut_dist * angle_bisect_vec)
+                point_c = mathutils.Vector(corner_pos + dist_parallel_to_edges * ctn.normalized() + offset_dist * n_b)
+            else:
+                point_a = mathutils.Vector(corner_pos + dist_parallel_to_edges * ctp.normalized() + offset_dist * n_a)
+                point_b = mathutils.Vector(corner_pos + cut_dist * angle_bisect_vec)
+                point_c = mathutils.Vector(corner_pos + cut_dist * n_b)
+            return [point_a, point_b, point_c]
+        # convex cases
+        one_point_th_angle = math.asin(offset_dist / cut_dist) + math.pi / 2
+        if corner_angle > one_point_th_angle:
+            # two points
+            if prev_is_cut:
+                point_a = mathutils.Vector(corner_pos + cut_dist * n_a)
+                point_b = mathutils.Vector(corner_pos + dist_parallel_to_edges * ctn.normalized() + offset_dist * n_b)
+            else:
+                point_a = mathutils.Vector(corner_pos + dist_parallel_to_edges * ctp.normalized() + offset_dist * n_a)
+                point_b = mathutils.Vector(corner_pos + cut_dist * n_b)
+            return [point_a, point_b]
+        else:
+            # one point (intersection computation)
+            if prev_is_cut:
+                return [mathutils.Vector(solve_for_weird_intersection_point(corner_pos, prev_pos, next_pos, normal, cut_dist, offset_dist))]
+            else:
+                return [mathutils.Vector(solve_for_weird_intersection_point(corner_pos, prev_pos, next_pos, normal, offset_dist, cut_dist))]
+
+    def get_polygon_outline_for_face_drawing(self, face_index):
         self.ensure_halfedge_to_edge_table()
         face = self.mesh.faces[face_index]
         face_normal = face.normal
-        face_component_id = self.vertex_to_component_dict[face_index] # vertex of dual graph is a face of the mesh.. confusing...
         verts = list(face.verts)
+        if face_index not in self.render_corner_cuts_dict.keys():
+            self.render_corner_cuts_dict[face_index] = {v.index : {} for v in verts}
         cool_vertices = []
         for v_id in range(len(verts)):
             curr_v = verts[v_id]
             prev_v = verts[(v_id + len(verts) - 1) % len(verts)]
             next_v = verts[(v_id + 1) % len(verts)]
-
-            prev_point = curr_v.co + 0.25 * (prev_v.co - curr_v.co)
-            next_point = curr_v.co + 0.25 * (next_v.co - curr_v.co)
 
             v_on_cutting_edge_or_boundary = curr_v.is_boundary or np.any([self.mesh_edge_is_cut(e) for e in curr_v.link_edges])
 
@@ -449,15 +529,26 @@ class CutGraph():
             e_prev_curr_is_cutting = e_to_curr.is_boundary or self.mesh_edge_is_cut(e_to_curr)
             e_curr_to_next_is_cutting = e_from_curr.is_boundary or self.mesh_edge_is_cut(e_from_curr)
 
-            if v_on_cutting_edge_or_boundary and not e_prev_curr_is_cutting and not e_curr_to_next_is_cutting:
-                cool_vertices.append(prev_point + edge_margin * (next_v.co - curr_v.co))
-                #cool_vertices.append(mathutils.Vector(solve_for_weird_point(prev_point, curr_v.co, next_point, face_normal) + edge_margin / 2 * (next_v.co + prev_v.co - 2 * curr_v.co)))
-                #cool_vertices.append(curr_v.co + (0.25 + edge_margin) / 2 * (next_v.co + prev_v.co - 2 * curr_v.co))
-                cool_vertices.append(next_point + edge_margin * (prev_v.co - curr_v.co))
+            if not v_on_cutting_edge_or_boundary and not e_prev_curr_is_cutting and not e_curr_to_next_is_cutting:
+                if "000" not in self.render_corner_cuts_dict[face_index][curr_v.index].keys():
+                    self.render_corner_cuts_dict[face_index][curr_v.index]["000"] = self.__get_corner_points_all_interior_or_cut(curr_v.co, prev_v.co, next_v.co, face_normal, self.small_offset)
+                cool_vertices += self.render_corner_cuts_dict[face_index][curr_v.index]["000"]
+            elif v_on_cutting_edge_or_boundary and e_prev_curr_is_cutting and e_curr_to_next_is_cutting:
+                if "111" not in self.render_corner_cuts_dict[face_index][curr_v.index].keys():
+                    self.render_corner_cuts_dict[face_index][curr_v.index]["111"] = self.__get_corner_points_all_interior_or_cut(curr_v.co, prev_v.co, next_v.co, face_normal, self.large_offset)
+                cool_vertices += self.render_corner_cuts_dict[face_index][curr_v.index]["111"]
+            elif v_on_cutting_edge_or_boundary and not e_prev_curr_is_cutting and not e_curr_to_next_is_cutting:
+                if "100" not in self.render_corner_cuts_dict[face_index][curr_v.index].keys():
+                    self.render_corner_cuts_dict[face_index][curr_v.index]["100"] = self.__get_corner_points_only_vertex_on_cut(curr_v.co, prev_v.co, next_v.co, face_normal, self.large_offset, self.small_offset)
+                cool_vertices += self.render_corner_cuts_dict[face_index][curr_v.index]["100"]
+            elif e_prev_curr_is_cutting:
+                if "101" not in self.render_corner_cuts_dict[face_index][curr_v.index].keys():
+                    self.render_corner_cuts_dict[face_index][curr_v.index]["101"] = self.__get_corner_points_one_edge_cut(curr_v.co, prev_v.co, next_v.co, face_normal, self.large_offset, self.small_offset, True)
+                cool_vertices += self.render_corner_cuts_dict[face_index][curr_v.index]["101"]
             else:
-                to_prev_offset = 0.25 if e_curr_to_next_is_cutting else edge_margin
-                to_next_offset = 0.25 if e_prev_curr_is_cutting else edge_margin
-                cool_vertices.append(curr_v.co + to_prev_offset * (prev_v.co - curr_v.co) + to_next_offset * (next_v.co - curr_v.co))
+                if "110" not in self.render_corner_cuts_dict[face_index][curr_v.index].keys():
+                    self.render_corner_cuts_dict[face_index][curr_v.index]["110"] = self.__get_corner_points_one_edge_cut(curr_v.co, prev_v.co, next_v.co, face_normal, self.large_offset, self.small_offset, False)
+                cool_vertices += self.render_corner_cuts_dict[face_index][curr_v.index]["110"]
 
         return cool_vertices
 
@@ -993,7 +1084,7 @@ class CutGraph():
                             text_path = norm_path
 
                 # collect all faces
-                triangles_in_unfolding_space = pos_list_to_triangles([scaling_factor * tri_coord for tri_coord in unfolding_of_curr_component.triangulated_faces_2d[face_index]])
+                triangles_in_unfolding_space = [tuple(scaling_factor * np.asarray(tri_coords)) for tri_coords in unfolding_of_curr_component.triangulated_faces_2d[face_index]]
                 
                 # uvs
                 uvs_available = len(obj.data.uv_layers) > 0

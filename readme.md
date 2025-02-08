@@ -26,6 +26,6 @@ Make sure to give the correct path to the requirements file by replacing `some_p
 - This installation guide uses Windows path formats, but the same steps should also do the trick on Linux and macOS systems (not tested yet).
 
 ## Addon installation
-Now the addon can be added to blender. For this, zip the `PolyZamboni` folder containing this readme file and the `__init__.py` file. Then go into Blender and go to **Edit-><ins>P</ins>references**. On the top left of the **Add-ons** tab, you can then click on **<ins>I</ins>nstall from Disk** and select the zipped `PolyZamboni` folder. The addon should now be enabled and ready to go :D
+Now the addon can be added to blender. For this, zip the `PolyZamboni` folder containing this readme file and the `__init__.py` file. Then go into Blender and go to **Edit-><ins>P</ins>references**. On the top left of the **Add-ons** tab, you can then click on **<ins>I</ins>nstall from Disk** and select the zipped `PolyZamboni` folder. The addon should now be enabled and ready to go.
 
 ![screenshot](images/addon_install_from_disc.png)

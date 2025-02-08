@@ -100,7 +100,7 @@ def greedy_auto_cuts(cutgraph : CutGraph, quality_level="NO_OVERLAPS_ALLOWED", t
         cutgraph.update_connected_components_around_edge(edge.index)
         component_computation_time += time.time() - component_start_time
         unfolding_start_time = time.time()
-        cutgraph.update_unfoldings_along_edges([edge.index], skip_intersection_test=True)
+        cutgraph.update_unfoldings_along_edges([edge.index], skip_intersection_test=(not merging_produces_overlaps))
         unfoldings_time += time.time() - unfolding_start_time
         flaps_start_time = time.time()
         flaps_success = cutgraph.greedy_update_flaps_around_changed_components([edge.index])
@@ -114,7 +114,7 @@ def greedy_auto_cuts(cutgraph : CutGraph, quality_level="NO_OVERLAPS_ALLOWED", t
             cutgraph.update_connected_components_around_edge(edge.index)
             component_computation_time += time.time() - component_start_time
             unfolding_start_time = time.time()
-            cutgraph.update_unfoldings_along_edges([edge.index], skip_intersection_test=True)
+            cutgraph.update_unfoldings_along_edges([edge.index], skip_intersection_test=(not merging_produces_overlaps))
             unfoldings_time += time.time() - unfolding_start_time
             flaps_start_time = time.time()
             cutgraph.greedy_update_flaps_around_changed_components([edge.index])

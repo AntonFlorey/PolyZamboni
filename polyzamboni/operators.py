@@ -359,6 +359,9 @@ class ZamboniCutgraphEditingModeOperator(bpy.types.Operator):
             self.initial_cutgraph_state = self.active_cutgraph.create_save_data()
             self.__class__._undo_stack = deque([self.initial_cutgraph_state])
             self.__class__._cutgraph_editing_mode_active = True
+            for region in context.area.regions:
+                if region.active_panel_category == 'PolyZamboni':
+                    region.tag_redraw()
             self._cancel_at_next_event = False
             self._finish_at_next_event = False
             context.window_manager.modal_handler_add(self)

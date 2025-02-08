@@ -74,7 +74,7 @@ class ZamboniSettingsPerObject(bpy.types.PropertyGroup):
     apply_auto_cuts_to_previev : BoolProperty(
         name="Auto Cuts Preview",
         description="If set to True, all automatically generated cuts will be considered when showing a preview of the mesh unfolding",
-        default=False,
+        default=True,
         update=update_auto_cuts_usage_callback
     )
 
