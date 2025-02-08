@@ -206,109 +206,6 @@ def triangulate_3d_polygon(ccw_vertex_list, normal, external_vertex_id = None, c
 
     return [to_world_coords(v, *local_2d_space) for v in triangles_2d], triangles_via_ids
 
-def triangulate_2d_polygon(ccw_vertex_list, external_vertex_id = None, crash_on_fail = False):
-    """ Triangulates a 2D polygon. """
-    
-    k = len(ccw_vertex_list)
-    if external_vertex_id is None:
-        external_vertex_id = list(range(k))
-    
-    triangles_in_2d = []
-    triangles_via_ids = []
-    triangle_areas = []
-    processed_verts = [False] * len(ccw_vertex_list)
-    determinants = []
-    for v_id in range(k):
-        curr_v = ccw_vertex_list[v_id]
-        prev_v = ccw_vertex_list[(v_id + k - 1) % k]
-        next_v = ccw_vertex_list[(v_id + 1) % k]
-        determinants.append(determinant_2d(curr_v - prev_v, next_v - curr_v))
-    next_v_index = list(range(1, k)) + [0]
-    prev_v_index = [k - 1] + list(range(k - 1))
-    
-    triangulation_done = False
-    while not triangulation_done:
-        triangulation_done = True
-        if np.less(np.array(determinants), 0).all():
-            print("OH NONNONONO")
-            break
-        some_ear_clipped = False
-        for curr_v_id in range(k):
-            if processed_verts[curr_v_id]:
-                continue
-            triangulation_done = False
-            
-            # skip concave vertex
-            if determinants[curr_v_id] < 1e-4:           
-                continue
-            
-            # check if all other verts lie outside of the triangle
-            v_a = ccw_vertex_list[prev_v_index[curr_v_id]]
-            v_b = ccw_vertex_list[curr_v_id]
-            v_c = ccw_vertex_list[next_v_index[curr_v_id]]
-
-            # skip degenerate triangles
-            if abs(signed_triangle_area(v_a, v_b, v_c)) < 0.0:
-                continue
-
-            is_ear = True
-            for other_v_id in range(k):
-                if other_v_id == curr_v_id or prev_v_index[curr_v_id] == other_v_id or next_v_index[curr_v_id] == other_v_id or processed_verts[other_v_id]:
-                    continue
-                if point_in_2d_triangle(ccw_vertex_list[other_v_id], v_a, v_b, v_c):
-                    is_ear = False
-                    break
-            
-            # clip the ear
-            if is_ear:
-                triangle_areas.append(signed_triangle_area(v_a, v_b, v_c))
-                some_ear_clipped = True
-                triangles_in_2d += [v_a, v_b, v_c]
-                triangles_via_ids.append((external_vertex_id[prev_v_index[curr_v_id]], external_vertex_id[curr_v_id], external_vertex_id[next_v_index[curr_v_id]]))
-                if len(triangles_in_2d) == 3 * (k - 2):
-                    triangulation_done = True
-                    break
-                processed_verts[curr_v_id] = True
-
-                # calculate det of two adjacent verts
-                determinants[prev_v_index[curr_v_id]] = determinant_2d(v_a - ccw_vertex_list[prev_v_index[prev_v_index[curr_v_id]]], v_c - v_a)
-                determinants[next_v_index[curr_v_id]] = determinant_2d(v_c - v_a, ccw_vertex_list[next_v_index[next_v_index[curr_v_id]]] - v_c)
-
-                # delete curr vertex from ring
-                next_v_index[prev_v_index[curr_v_id]] = next_v_index[curr_v_id]
-                prev_v_index[next_v_index[curr_v_id]] = prev_v_index[curr_v_id]
-
-        if len(triangles_in_2d) == 3 * (k - 3):
-            # just add last triangle
-            for curr_v_id in range(k):
-                if processed_verts[curr_v_id]:
-                    continue
-                v_a = ccw_vertex_list[prev_v_index[curr_v_id]]
-                v_b = ccw_vertex_list[curr_v_id]
-                v_c = ccw_vertex_list[next_v_index[curr_v_id]]
-                if crash_on_fail:
-                    assert determinant_2d(v_b - v_a, v_c - v_a) > 0
-                triangles_in_2d += [v_a, v_b, v_c]
-                triangles_via_ids.append((external_vertex_id[prev_v_index[curr_v_id]], external_vertex_id[curr_v_id], external_vertex_id[next_v_index[curr_v_id]]))
-                break
-            triangulation_done = True
-            break
-        
-        if not some_ear_clipped: # only for debugging
-            print("OH Hell naaah")
-            print(ccw_vertex_list)
-            print(external_vertex_id)
-            print(determinants)
-            print(triangles_via_ids)
-            print(processed_verts)
-            print(triangle_areas)
-            break
-
-    if crash_on_fail:
-        assert len(triangles_in_2d) == 3 * (k - 2)
-
-    return triangles_in_2d, triangles_via_ids
-
 def triangulate_2d_polygon_angle_optimal(ccw_vertex_list, external_vertex_id = None, crash_on_fail = False):
     """ Triangulates a 2D polygon. """
     
@@ -390,27 +287,6 @@ def triangulate_2d_polygon_angle_optimal(ccw_vertex_list, external_vertex_id = N
         assert len(triangles_in_2d) == 3 * (k - 2)
 
     return triangles_in_2d, triangles_via_ids
-
-def solve_for_weird_point(v_a, v_b, v_c, normal):
-    x_ax = np.array(v_a - v_b)
-    x_ax = x_ax / np.linalg.norm(x_ax)
-    n = np.array(normal)
-    y_ax = np.cross(n, x_ax)
-    y_ax = y_ax / np.linalg.norm(y_ax)
-    orig = np.array(v_b)
-
-    a_2d = to_local_coords(np.asarray(v_a), orig, x_ax, y_ax)
-    b_2d = to_local_coords(np.asarray(v_b), orig, x_ax, y_ax)
-    c_2d = to_local_coords(np.asarray(v_c), orig, x_ax, y_ax)
-
-    n_1 = a_2d - b_2d
-    n_2 = c_2d - b_2d
-
-    M = np.array([n_1, n_2])
-    rhs = np.array([np.dot(n_1, a_2d), np.dot(n_2, c_2d)]).reshape(2,1)
-    weird_p_2d = np.linalg.solve(M, rhs)
-
-    return to_world_coords(weird_p_2d, orig, x_ax, y_ax)
 
 def solve_for_weird_intersection_point(center_point_3d, prev_point_3d, next_point_3d, normal, prev_offset, next_offset):
     local_basis = construct_2d_space_along_face_edge(center_point_3d, next_point_3d, normal)
