@@ -22,6 +22,20 @@ class MainPanel(bpy.types.Panel):
             col2 = row.column()
             col1.operator("polyzamboni.cut_initialization_op")
             col2.label(icon="SHADERFX")
+
+            if context.active_object.polyzamboni_object_prop.multi_touching_faces_present:
+                row = layout.row()
+                col1 = row.column()
+                col2 = row.column()
+                col1.operator("polyzamboni.multi_touching_face_selection_op")
+                col2.label(icon="ERROR")
+            if context.active_object.polyzamboni_object_prop.faces_which_cant_be_triangulated_are_present:
+                row = layout.row()
+                col1 = row.column()
+                col2 = row.column()
+                col1.operator("polyzamboni.no_tri_face_selection_op")
+                col2.label(icon="ERROR")
+    
         else:
             row = layout.row()
             col1 = row.column()

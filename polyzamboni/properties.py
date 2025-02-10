@@ -77,6 +77,14 @@ class ZamboniSettingsPerObject(bpy.types.PropertyGroup):
         default=True,
         update=update_auto_cuts_usage_callback
     )
+    multi_touching_faces_present : BoolProperty(
+        name="Multi touching faces present",
+        default=False
+    )
+    faces_which_cant_be_triangulated_are_present : BoolProperty(
+        name="Not tri-able faces present",
+        default=False
+    )
 
 linestyles = [
         ("-", "-", "", "", 0),

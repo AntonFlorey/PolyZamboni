@@ -13,7 +13,7 @@ from . import cutgraph
 from .constants import CUTGRAPH_ID_PROPERTY_NAME, CUT_CONSTRAINTS_PROP_NAME, LOCKED_EDGES_PROP_NAME
 from . import exporters
 from .printprepper import fit_components_on_pages
-from .geometry import compute_planarity_score
+from .geometry import compute_planarity_score, triangulate_3d_polygon
 from .autozamboni import greedy_auto_cuts
 from .callbacks import save_data_of_object
 
@@ -42,6 +42,7 @@ class InitializeCuttingOperator(bpy.types.Operator):
         self.selected_mesh_is_manifold = np.all([edge.is_manifold or edge.is_boundary for edge in mesh.edges] + [v.is_manifold for v in mesh.verts])
         self.normals_are_okay = np.all([edge.is_contiguous or edge.is_boundary for edge in mesh.edges])
         self.double_connected_face_pair_present = False
+        self.non_triangulatable_faces_present = False
         self.max_planarity_score = max([compute_planarity_score([np.array(v.co) for v in face.verts]) for face in mesh.faces])
 
         if not self.selected_mesh_is_manifold:
@@ -61,7 +62,19 @@ class InitializeCuttingOperator(bpy.types.Operator):
                 self.double_connected_face_pair_present = True
                 break
             face_pair_set.add(tuple(sorted([f.index for f in edge.link_faces])))
+        ao.polyzamboni_object_prop.multi_touching_faces_present = self.double_connected_face_pair_present
         if self.double_connected_face_pair_present:
+            wm = context.window_manager
+            return wm.invoke_props_dialog(self, title="Something went wrong D:", confirm_text="Okay")
+
+        # check all face triangulations
+        for face in mesh.faces:
+            _, tri_ids = triangulate_3d_polygon([v.co for v in face.verts], face.normal)
+            if len(tri_ids) != len(face.verts) - 2:
+                self.non_triangulatable_faces_present = True
+                break
+        ao.polyzamboni_object_prop.faces_which_cant_be_triangulated_are_present = self.non_triangulatable_faces_present
+        if self.non_triangulatable_faces_present:
             wm = context.window_manager
             return wm.invoke_props_dialog(self, title="Something went wrong D:", confirm_text="Okay")
 
@@ -79,12 +92,14 @@ class InitializeCuttingOperator(bpy.types.Operator):
             layout.row().label(text="Bad normals! Try \"Recalculate Outside\" (Shift-N)", icon="ERROR")
         if self.double_connected_face_pair_present:
             layout.row().label(text="Some faces touch at more than one edge!", icon="ERROR")
+        if self.non_triangulatable_faces_present:
+            layout.row().label(text="Some faces cant be triangulated by PolyZamboni!", icon="ERROR")
         if self.max_planarity_score > 0.1:
             layout.row().label(text="Some faces are highly non-planar! (err: {:.2f})".format(self.max_planarity_score))
             layout.row().label(text="This might crash the addon later...")
 
     def execute(self, context):
-        if not self.selected_mesh_is_manifold or self.double_connected_face_pair_present or not self.normals_are_okay:
+        if not self.selected_mesh_is_manifold or self.double_connected_face_pair_present or not self.normals_are_okay or self.non_triangulatable_faces_present:
             return { 'FINISHED' }
         # get the currently selected object
         returnto=False
@@ -110,6 +125,83 @@ class InitializeCuttingOperator(bpy.types.Operator):
         is_mesh = active_object is not None and active_object.type == 'MESH' and (context.mode == 'EDIT_MESH' or active_object.select_get())
 
         return is_mesh and CUTGRAPH_ID_PROPERTY_NAME not in active_object
+
+class SelectMultiTouchingFacesOperator(bpy.types.Operator):
+    """Select all face pairs that touch at more than one edge"""
+    bl_label = "Select ambiguous faces"
+    bl_description = "Select all faces that share more than one edge with another face"
+    bl_idname  = "polyzamboni.multi_touching_face_selection_op"
+
+    def execute(self, context):
+        ao = context.active_object
+        bpy.ops.object.mode_set(mode="EDIT")
+        mesh : bmesh.types.BMesh = bmesh.from_edit_mesh(ao.data)
+
+        face_pair_set = set()
+        faces_to_select = set()
+        for edge in mesh.edges:
+            if edge.is_boundary:
+                continue
+            assert len(edge.link_faces) == 2
+            if tuple(sorted([f.index for f in edge.link_faces])) in face_pair_set:
+                for f in edge.link_faces:
+                    faces_to_select.add(f.index)
+            face_pair_set.add(tuple(sorted([f.index for f in edge.link_faces])))
+
+        if len(faces_to_select) == 0:
+            ao.polyzamboni_object_prop.multi_touching_faces_present = False
+
+        # deselect all faces
+        for face in mesh.faces:
+            face.select_set(False)
+        mesh.faces.ensure_lookup_table()
+        for face_index in faces_to_select:
+            mesh.faces[face_index].select_set(True)
+
+        bmesh.update_edit_mesh(ao.data)
+        return {'FINISHED'}
+
+    @classmethod
+    def poll(cls, context):
+        active_object = context.active_object
+        is_mesh = active_object is not None and active_object.type == 'MESH' and (context.mode == 'EDIT_MESH' or active_object.select_get())
+        return is_mesh
+
+class SelectNonTriangulatableFacesOperator(bpy.types.Operator):
+    """Select all faces that can not be triangulated by PolyZamboni"""
+    bl_label = "Select non triangulatable faces"
+    bl_description = "Select all faces that can not be triangulated by PolyZamboni"
+    bl_idname  = "polyzamboni.no_tri_face_selection_op"
+
+    def execute(self, context):
+        ao = context.active_object
+        bpy.ops.object.mode_set(mode="EDIT")
+        mesh : bmesh.types.BMesh = bmesh.from_edit_mesh(ao.data)
+        
+        faces_to_select = set()
+        for face in mesh.faces:
+            _, tri_ids = triangulate_3d_polygon([v.co for v in face.verts], face.normal)
+            if len(tri_ids) != len(face.verts) - 2:
+                faces_to_select.add(face.index)
+
+        if len(faces_to_select) == 0:
+            ao.polyzamboni_object_prop.faces_which_cant_be_triangulated_are_present = False
+
+        # deselect all faces
+        for face in mesh.faces:
+            face.select_set(False)
+        mesh.faces.ensure_lookup_table()
+        for face_index in faces_to_select:
+            mesh.faces[face_index].select_set(True)
+
+        bmesh.update_edit_mesh(ao.data)
+        return {'FINISHED'}
+
+    @classmethod
+    def poll(cls, context):
+        active_object = context.active_object
+        is_mesh = active_object is not None and active_object.type == 'MESH' and (context.mode == 'EDIT_MESH' or active_object.select_get())
+        return is_mesh
 
 class RemoveAllPolyzamboniDataOperator(bpy.types.Operator):
     """Remove all attached Polyzamboni Data"""
@@ -160,7 +252,7 @@ class ResetAllCutsOperator(bpy.types.Operator):
         return is_mesh and CUTGRAPH_ID_PROPERTY_NAME in active_object
 
 class SyncMeshOperator(bpy.types.Operator):
-    """Transfer mesh changes to the cutgraph to repair it"""
+    """Transfer mesh changes to the cutgraph. Topology changes will likely break everything!"""
     bl_label = "Sync Mesh Changes"
     bl_idname = "polyzamboni.mesh_sync_op"
 
@@ -947,6 +1039,8 @@ def register():
     bpy.utils.register_class(ComputeBuildStepsOperator)
     bpy.utils.register_class(AutoCutsOperator)
     bpy.utils.register_class(ZamboniCutgraphEditingModeOperator)
+    bpy.utils.register_class(SelectMultiTouchingFacesOperator)
+    bpy.utils.register_class(SelectNonTriangulatableFacesOperator)
 
     bpy.types.TOPBAR_MT_file_export.append(menu_func_polyzamboni_export_pdf)
     bpy.types.TOPBAR_MT_file_export.append(menu_func_polyzamboni_export_svg)
@@ -983,6 +1077,8 @@ def unregister():
     bpy.utils.unregister_class(ComputeBuildStepsOperator)
     bpy.utils.unregister_class(AutoCutsOperator)
     bpy.utils.unregister_class(ZamboniCutgraphEditingModeOperator)
+    bpy.utils.unregister_class(SelectMultiTouchingFacesOperator)
+    bpy.utils.unregister_class(SelectNonTriangulatableFacesOperator)
 
     #if menu_func_polyzamboni_export in bpy.types.TOPBAR_MT_file_export:
     bpy.types.TOPBAR_MT_file_export.remove(menu_func_polyzamboni_export_pdf)

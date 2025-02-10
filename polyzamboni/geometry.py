@@ -205,9 +205,6 @@ def triangulate_2d_polygon_angle_optimal(ccw_vertex_list, external_vertex_id = N
     prev_v_index = [k - 1] + list(range(k - 1))
 
     for _ in range(k - 2):
-        if np.less(np.array(determinants), 0).all():
-            print("OH NONNONONO")
-            break
         best_ear_vertex = None
         largest_min_angle = -np.inf
         for curr_v_id in range(k):
@@ -238,9 +235,7 @@ def triangulate_2d_polygon_angle_optimal(ccw_vertex_list, external_vertex_id = N
                 largest_min_angle = curr_min_angle
                 best_ear_vertex = curr_v_id
         # select best triangle
-        if best_ear_vertex is None:
-            print("SHIT NO EAR FOUND! POLYZAMBONI MIGHT CRASH NOW...")
-        else:
+        if best_ear_vertex is not None:
             v_a = ccw_vertex_list[prev_v_index[best_ear_vertex]]
             v_b = ccw_vertex_list[best_ear_vertex]
             v_c = ccw_vertex_list[next_v_index[best_ear_vertex]]

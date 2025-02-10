@@ -566,23 +566,24 @@ class CutGraph():
             prev_v = verts[(v_id + len(verts) - 1) % len(verts)]
             next_v = verts[(v_id + 1) % len(verts)]
 
-            v_on_cutting_edge_or_boundary = curr_v.is_boundary or np.any([self.mesh_edge_is_cut(e) for e in curr_v.link_edges])
+            # v_on_cutting_edge_or_boundary = curr_v.is_boundary or np.any([self.mesh_edge_is_cut(e) for e in curr_v.link_edges])
+            v_on_cutting_edge = np.any([self.mesh_edge_is_cut(e) for e in curr_v.link_edges])
 
             e_to_curr : bmesh.types.BMEdge = self.halfedge_to_edge[(prev_v.index, curr_v.index)]
             e_from_curr : bmesh.types.BMEdge = self.halfedge_to_edge[(curr_v.index, next_v.index)]
 
-            e_prev_curr_is_cutting = e_to_curr.is_boundary or self.mesh_edge_is_cut(e_to_curr)
-            e_curr_to_next_is_cutting = e_from_curr.is_boundary or self.mesh_edge_is_cut(e_from_curr)
+            e_prev_curr_is_cutting = self.mesh_edge_is_cut(e_to_curr)
+            e_curr_to_next_is_cutting = self.mesh_edge_is_cut(e_from_curr)
 
-            if not v_on_cutting_edge_or_boundary and not e_prev_curr_is_cutting and not e_curr_to_next_is_cutting:
+            if not v_on_cutting_edge and not e_prev_curr_is_cutting and not e_curr_to_next_is_cutting:
                 if "000" not in self.render_corner_cuts_dict[face_index][curr_v.index].keys():
                     self.render_corner_cuts_dict[face_index][curr_v.index]["000"] = self.__get_corner_points_all_interior_or_cut(curr_v.co, prev_v.co, next_v.co, face_normal, self.small_offset)
                 cool_vertices += self.render_corner_cuts_dict[face_index][curr_v.index]["000"]
-            elif v_on_cutting_edge_or_boundary and e_prev_curr_is_cutting and e_curr_to_next_is_cutting:
+            elif v_on_cutting_edge and e_prev_curr_is_cutting and e_curr_to_next_is_cutting:
                 if "111" not in self.render_corner_cuts_dict[face_index][curr_v.index].keys():
                     self.render_corner_cuts_dict[face_index][curr_v.index]["111"] = self.__get_corner_points_all_interior_or_cut(curr_v.co, prev_v.co, next_v.co, face_normal, self.large_offset)
                 cool_vertices += self.render_corner_cuts_dict[face_index][curr_v.index]["111"]
-            elif v_on_cutting_edge_or_boundary and not e_prev_curr_is_cutting and not e_curr_to_next_is_cutting:
+            elif v_on_cutting_edge and not e_prev_curr_is_cutting and not e_curr_to_next_is_cutting:
                 if "100" not in self.render_corner_cuts_dict[face_index][curr_v.index].keys():
                     self.render_corner_cuts_dict[face_index][curr_v.index]["100"] = self.__get_corner_points_only_vertex_on_cut(curr_v.co, prev_v.co, next_v.co, face_normal, self.large_offset, self.small_offset)
                 cool_vertices += self.render_corner_cuts_dict[face_index][curr_v.index]["100"]

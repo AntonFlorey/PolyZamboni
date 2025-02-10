@@ -2,6 +2,7 @@ import bpy
 import bmesh
 from . import globals
 from .drawing import update_all_polyzamboni_drawings, hide_all_drawings
+from .geometry import triangulate_3d_polygon
 from . import cutgraph
 from bpy.app.handlers import persistent
 from .constants import LOCKED_EDGES_PROP_NAME, CUT_CONSTRAINTS_PROP_NAME, CUTGRAPH_ID_PROPERTY_NAME, BUILD_ORDER_PROPERTY_NAME, GLUE_FLAP_PROPERTY_NAME, AUTO_CUT_EDGES_PROP_NAME
@@ -38,7 +39,14 @@ def try_to_load_cutgraph(obj : bpy.types.Object):
             break
         face_pair_set.add(tuple(sorted([f.index for f in edge.link_faces])))
     
-    if selected_mesh_is_manifold and normals_are_okay and not double_connected_face_pair_present:
+    non_triangulatable_face_present = False
+    for face in mesh.faces:
+            _, tri_ids = triangulate_3d_polygon([v.co for v in face.verts], face.normal)
+            if len(tri_ids) != len(face.verts) - 2:
+                non_triangulatable_face_present = True
+                break
+
+    if selected_mesh_is_manifold and normals_are_okay and not double_connected_face_pair_present and not non_triangulatable_face_present:
         loaded_cutgraph = cutgraph.CutGraph(obj, 
                                             obj.polyzamboni_object_prop.glue_flap_angle,
                                             obj.polyzamboni_object_prop.glue_flap_height,
