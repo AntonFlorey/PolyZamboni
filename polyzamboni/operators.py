@@ -383,11 +383,7 @@ class ComputeBuildStepsOperator(bpy.types.Operator):
             print("cutgraph", active_cutgraph_index, "not in", globals.PZ_CUTGRAPHS)
 
         selected_faces = [f.index for f in ao_bmesh.faces if f.select]
-
-        start_face_index = 0
-        if len(selected_faces) > 0:
-            start_face_index = selected_faces[0]
-        active_cutgraph.generate_bfs_build_oder(start_face_index)
+        active_cutgraph.generate_bfs_build_oder(selected_faces)
 
         return { 'FINISHED' }
 

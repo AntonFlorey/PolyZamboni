@@ -322,15 +322,10 @@ class CutGraph():
                 neighbour_ids.add(nb_component_index)
         return neighbour_ids
 
-    def generate_bfs_build_oder(self, starting_face_index):
-        self.compactify_components()
-        start_component_id = self.vertex_to_component_dict[starting_face_index]
-
-        visited_components = set()
-        next_build_index = 1
+    def __build_order_bfs(self, starting_component_index, next_free_build_index, visited_components):
         component_queue = deque()
-        component_queue.append(start_component_id)
-
+        component_queue.append(starting_component_index)
+        next_build_index = next_free_build_index
         while component_queue:
             curr_component_id = component_queue.popleft()
             if curr_component_id in visited_components:
@@ -343,6 +338,18 @@ class CutGraph():
                 if nb_component_index in visited_components:
                     continue
                 component_queue.append(nb_component_index)
+        return next_build_index
+
+    def generate_bfs_build_oder(self, starting_face_indices):
+        self.compactify_components()
+        visited_components = set()
+        next_build_index = 1
+        for starting_face_index in starting_face_indices:
+            next_build_index = self.__build_order_bfs(self.vertex_to_component_dict[starting_face_index], next_build_index, visited_components)
+        for component_id in self.connected_components.keys():
+            if component_id in visited_components:
+                continue
+            next_build_index = self.__build_order_bfs(component_id, next_build_index, visited_components)
 
         # sanity check
         assert next_build_index == len(self.connected_components.keys()) + 1
