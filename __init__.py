@@ -35,9 +35,8 @@ def register():
     operators.register()
     ui.register()
     bpy.app.handlers.load_post.append(callbacks.on_file_load)
-    bpy.app.handlers.depsgraph_update_post.append(callbacks.on_object_select)
+    bpy.app.handlers.depsgraph_update_post.append(callbacks.on_object_select) # this gets called more often than just on object select but its good enough for now
     bpy.app.handlers.save_pre.append(callbacks.save_cutgraph_data)
-    # bpy.app.handlers.undo_post.append(callbacks.refresh_drawings)
 
 def unregister():
     print("PolyZamboni is cleaning up after itself...")
@@ -52,8 +51,6 @@ def unregister():
         bpy.app.handlers.depsgraph_update_post.remove(callbacks.on_object_select)
     if callbacks.save_cutgraph_data in bpy.app.handlers.save_pre:
         bpy.app.handlers.save_pre.remove(callbacks.save_cutgraph_data)
-    # if callbacks.refresh_drawings in bpy.app.handlers.undo_post:
-    #     bpy.app.handlers.undo_post.remove(callbacks.refresh_drawings)
     print("Done.")
 
 if __name__ == "__main__":

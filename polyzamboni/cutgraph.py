@@ -19,6 +19,17 @@ class CutGraphSaveData():
         self.build_steps = sparse_build_steps_dict.copy()
         self.glue_flaps = glue_flaps_dict.copy()
 
+class ConnectedComponent():
+    """ One connected component (or island) of a cut and unfolded mesh """
+     
+    def __init__(self, face_index_set, unfolding=None, render_triangles=None, render_vertex_positions=None):
+        self._face_index_set = face_index_set
+        self._unfolding : Unfolding = unfolding
+        self._triangles_for_rendering = render_triangles
+        self._vertices_for_rendering = render_vertex_positions
+        self._render_triangles_outdated = False
+        self._build_step_number = None
+
 class CutGraph():
     """ This class can be attached to any Mesh object """
 
@@ -39,13 +50,18 @@ class CutGraph():
             for edge_index in ao[AUTO_CUT_EDGES_PROP_NAME]:
                 self.designer_constraints[edge_index] = "auto"
         
+        # print("Dual graph constructed")
+
         # compute connected components
         self.compute_all_connected_components()
+        # print("Connected components computed")
         # try to read build steps
         if BUILD_ORDER_PROPERTY_NAME in ao:
             self.read_sparse_build_steps_dict(ao[BUILD_ORDER_PROPERTY_NAME].to_dict())
+            # print("Build steps read")
         # compute undoldings
         self.unfold_all_connected_components()
+        # print("Components unfolded")
         # try to read glue flaps or recompute them
         if GLUE_FLAP_PROPERTY_NAME in ao:
             self.read_glue_flaps_dict(ao[GLUE_FLAP_PROPERTY_NAME].to_dict())
@@ -53,6 +69,7 @@ class CutGraph():
             self.update_all_flap_geometry() # create flap geometry
         else:
             self.greedy_place_all_flaps()
+        # print("Glue flaps computed")
 
     #################################
     #          Save & Load          #
@@ -76,7 +93,6 @@ class CutGraph():
             self.update_all_flap_geometry()
         else:
             self.greedy_place_all_flaps()
-
 
     #################################
     #     Input Mesh Handling       #
@@ -105,12 +121,16 @@ class CutGraph():
         # compute offsets for user feedback region drawing
         min_edge_len = min([e.calc_length() for e in self.mesh.edges])
         self.small_offset = 0.05 * min_edge_len
-        self.large_offset = 0.25 * min_edge_len
+        self.large_offset = 0.35 * min_edge_len
 
         self.halfedge_to_edge = None # delete old halfedge to edge dict
         self.halfedge_to_face = None # delete old halfedge to face dict
         self.valid = True # make sure we check mesh validity again
-        self.render_corner_cuts_dict = {} # make sure we recompute designer feedback
+        self.render_corner_cuts_dict = {}
+        if hasattr(self, "connected_components"):
+            current_connected_component : ConnectedComponent
+            for current_connected_component in self.connected_components.values():
+                current_connected_component._render_triangles_outdated = True
 
     #################################
     #             Misc.             #
@@ -172,8 +192,7 @@ class CutGraph():
         for f in self.dualgraph.nodes:
             assert f in self.vertex_to_component_dict.keys()
             c_id = self.vertex_to_component_dict[f]
-            assert c_id in self.components_as_sets.keys()
-            assert c_id in self.unfolded_components.keys()
+            assert c_id in self.connected_components.keys()
 
     def ensure_halfedge_to_edge_table(self):
         if hasattr(self, "halfedge_to_edge") and self.halfedge_to_edge is not None:
@@ -193,6 +212,14 @@ class CutGraph():
                 j = (i + 1) % len(verts_ccw)
                 self.halfedge_to_face[(verts_ccw[i], verts_ccw[j])] = face
 
+    def get_edge_face_and_unfolding_of_halfedge(self, halfedge):
+        self.ensure_halfedge_to_edge_table()
+        self.ensure_halfedge_to_face_table()
+        edge = self.halfedge_to_edge[halfedge]
+        face = self.halfedge_to_face[halfedge]
+        unfold : Unfolding = self.connected_components[self.vertex_to_component_dict[face.index]]._unfolding
+        return edge, face, unfold
+
     #################################
     #      Connected Components     #
     #################################
@@ -204,23 +231,26 @@ class CutGraph():
         graph_with_cuts_applied = nx.subgraph_view(self.dualgraph, filter_edge = lambda v1, v2 : not self.edge_is_cut(v1, v2))
         all_components = list(nx.connected_components(graph_with_cuts_applied))
 
+        copy_old_component_data = False
         if hasattr(self, "vertex_to_component_dict"):
             old_vertex_to_component_dict = self.vertex_to_component_dict.copy()
+        if hasattr(self, "connected_components"):
+            old_connected_components = self.connected_components.copy()
+            copy_old_component_data = True
 
         self.num_components = len(all_components)
         self.vertex_to_component_dict = {}
-        for c_id, component in enumerate(all_components):
-            for v in component:
+        self.connected_components = {}
+        for c_id, component_faces in enumerate(all_components):
+            for v in component_faces:
                 self.vertex_to_component_dict[v] = c_id
-        self.components_as_sets = {c_id : component for c_id, component in enumerate(all_components)}
+            if copy_old_component_data:
+                old_component : ConnectedComponent = old_connected_components[old_vertex_to_component_dict[list(component_faces)[0]]]
+                self.connected_components[c_id] = ConnectedComponent(component_faces, old_component._unfolding, old_component._triangles_for_rendering, old_component._vertices_for_rendering) # copied data might be outdated!
+            else:
+                self.connected_components[c_id] = ConnectedComponent(component_faces)
         self.next_free_component_id = self.num_components
         self.components_are_compact = True
-        if not hasattr(self, "unfolded_components"):
-            return
-        # copy old unfoldings WARNING: these might not be correct anymore and need to be updated
-        old_unfolded_components = self.unfolded_components.copy()
-        for c_id, component in self.components_as_sets.items():
-            self.unfolded_components[c_id] = old_unfolded_components[old_vertex_to_component_dict[list(component)[0]]]
         # do a sanity check
         self.assert_all_faces_have_components_and_unfoldings()
 
@@ -232,54 +262,59 @@ class CutGraph():
         linked_face_ids = [f.index for f in changed_edge.link_faces]
         assert len(linked_face_ids) == 2
         linked_component_ids = [self.vertex_to_component_dict[mesh_f] for mesh_f in linked_face_ids]
+        component_one : ConnectedComponent = self.connected_components[linked_component_ids[0]]
+        component_two : ConnectedComponent = self.connected_components[linked_component_ids[1]]
         components_are_the_same_pre_update = linked_component_ids[0] == linked_component_ids[1]
-        component_union = self.components_as_sets[linked_component_ids[0]].union(self.components_as_sets[linked_component_ids[1]])
+        component_union = component_one._face_index_set.union(component_two._face_index_set)
         subgraph_with_cuts_applied = nx.subgraph_view(self.dualgraph, filter_node=lambda v : (v in component_union), filter_edge = lambda v1, v2 : not self.edge_is_cut(v1, v2))
-        first_component = nx.node_connected_component(subgraph_with_cuts_applied, linked_face_ids[0])
-        second_component = nx.node_connected_component(subgraph_with_cuts_applied, linked_face_ids[1])
-        components_are_the_same_post_update = next(iter(second_component)) in first_component
+        first_component_faces = nx.node_connected_component(subgraph_with_cuts_applied, linked_face_ids[0])
+        second_component_faces = nx.node_connected_component(subgraph_with_cuts_applied, linked_face_ids[1])
+        components_are_the_same_post_update = next(iter(second_component_faces)) in first_component_faces
+        
+        # mark as changed for redraw
+        component_one._render_triangles_outdated = True
+        component_two._render_triangles_outdated = True
 
         if components_are_the_same_pre_update and not components_are_the_same_post_update:
             # Split component in two
-            self.components_as_sets[linked_component_ids[0]] = first_component
-            self.components_as_sets[self.next_free_component_id] = second_component
-            for v in second_component:
+            self.connected_components[linked_component_ids[0]] = ConnectedComponent(first_component_faces)
+            self.connected_components[self.next_free_component_id] = ConnectedComponent(second_component_faces)
+            for v in second_component_faces:
                 self.vertex_to_component_dict[v] = self.next_free_component_id
             self.next_free_component_id += 1
         if not components_are_the_same_pre_update and components_are_the_same_post_update:
             # Merge components
-            self.components_as_sets[linked_component_ids[0]] = first_component
-            for v in second_component:
+            self.connected_components[linked_component_ids[0]] = ConnectedComponent(first_component_faces)
+            for v in second_component_faces:
                 self.vertex_to_component_dict[v] = linked_component_ids[0]
-            del self.components_as_sets[linked_component_ids[1]] # remove free component
+            del self.connected_components[linked_component_ids[1]] # remove free component
             self.components_are_compact = False
 
     def compactify_components(self):
         if self.components_are_compact:
             return
         next_compact_component_index = 0
-        compact_components_as_sets = {}
-        unfoldings_per_component = {}
+        compact_connected_components = {}
 
-        for c_id, component_set in self.components_as_sets.items():
-            if component_set is None:
+        curr_connected_component : ConnectedComponent
+        for _, curr_connected_component in self.connected_components.items():
+            if curr_connected_component is None:
                 continue
-            unfoldings_per_component[next_compact_component_index] = self.unfolded_components[c_id]
-            compact_components_as_sets[next_compact_component_index] = component_set
-            for face_index in component_set:
+            compact_connected_components[next_compact_component_index] = curr_connected_component
+            for face_index in curr_connected_component._face_index_set:
                 self.vertex_to_component_dict[face_index] = next_compact_component_index
             next_compact_component_index += 1
         
         self.next_free_component_id = next_compact_component_index
-        self.components_as_sets = compact_components_as_sets.copy()
-        self.unfolded_components = unfoldings_per_component.copy()
+        self.connected_components = compact_connected_components.copy()
         self.components_are_compact = True
 
     def adjacent_connected_components_of_component(self, component_id):
         self.mesh.faces.ensure_lookup_table()
         self.mesh.edges.ensure_lookup_table()
         neighbour_ids = set()
-        for component_face_index in self.components_as_sets[component_id]:
+        connected_component : ConnectedComponent = self.connected_components[component_id]
+        for component_face_index in connected_component._face_index_set:
             for nb_face_index in self.dualgraph.neighbors(component_face_index):
                 nb_component_index = self.vertex_to_component_dict[nb_face_index]
                 if nb_component_index == component_id:
@@ -290,8 +325,7 @@ class CutGraph():
     def generate_bfs_build_oder(self, starting_face_index):
         self.compactify_components()
         start_component_id = self.vertex_to_component_dict[starting_face_index]
-        
-        self.component_build_indices = {}
+
         visited_components = set()
         next_build_index = 1
         component_queue = deque()
@@ -302,7 +336,8 @@ class CutGraph():
             if curr_component_id in visited_components:
                 continue
             visited_components.add(curr_component_id)
-            self.component_build_indices[curr_component_id] = next_build_index
+            curr_conn_component : ConnectedComponent = self.connected_components[curr_component_id]
+            curr_conn_component._build_step_number = next_build_index
             next_build_index += 1
             for nb_component_index in self.adjacent_connected_components_of_component(curr_component_id):
                 if nb_component_index in visited_components:
@@ -310,39 +345,51 @@ class CutGraph():
                 component_queue.append(nb_component_index)
 
         # sanity check
-        assert next_build_index == len(self.components_as_sets.keys()) + 1
+        assert next_build_index == len(self.connected_components.keys()) + 1
         self.build_steps_valid = True
 
     def every_component_has_build_step(self):
-        if not hasattr(self, "component_build_indices"):
-            return False
-        for c_id in self.components_as_sets.keys():
-            if c_id not in self.component_build_indices.keys():
+        curr_connected_component : ConnectedComponent
+        for curr_connected_component in self.connected_components.values():
+            if curr_connected_component._build_step_number is None:
                 return False
         return True
 
     def check_if_build_steps_are_present_and_valid(self):
         if hasattr(self, "build_steps_valid") and not self.build_steps_valid:
             return self.build_steps_valid
-        self.build_steps_valid = self.every_component_has_build_step() and len(self.components_as_sets.keys()) == len(self.component_build_indices.keys())
+        self.build_steps_valid = True
+        if not self.every_component_has_build_step():
+            self.build_steps_valid = False
+            return False
+        all_build_step_numbers = set()
+        curr_connected_component : ConnectedComponent
+        for curr_connected_component in self.connected_components.values():
+            curr_build_number = curr_connected_component._build_step_number
+            if curr_build_number > len(self.connected_components) or curr_build_number in all_build_step_numbers:
+                self.build_steps_valid = False
+                break
+            all_build_step_numbers.add(curr_build_number)
         return self.build_steps_valid
 
     def create_sparse_build_steps_dict(self):
         if not self.check_if_build_steps_are_present_and_valid():
             return {}
         sparse_face_dict = {}
-        for c_id, face_set in self.components_as_sets.items():
-            if len(face_set) == 0:
+        curr_connected_component : ConnectedComponent
+        for c_id, curr_connected_component in self.connected_components.items():
+            if len(curr_connected_component._face_index_set) == 0:
                 continue # wtf case
-            sparse_face_dict[str(list(face_set)[0])] = self.component_build_indices[c_id]
+            sparse_face_dict[str(list(curr_connected_component._face_index_set)[0])] = curr_connected_component._build_step_number
         return sparse_face_dict
 
     def read_sparse_build_steps_dict(self, sparse_build_steps):
-        self.component_build_indices = {}
-        for c_id, face_set in self.components_as_sets.items():
-            for face_index in face_set:
+        curr_connected_component : ConnectedComponent
+        for _, curr_connected_component in self.connected_components.items():
+            for face_index in curr_connected_component._face_index_set:
                 if str(face_index) in sparse_build_steps.keys():
-                    self.component_build_indices[c_id] = sparse_build_steps[str(face_index)]
+                    curr_connected_component._build_step_number = sparse_build_steps[str(face_index)]
+                    break
 
     #################################
     #           Unfolding           #
@@ -387,14 +434,13 @@ class CutGraph():
 
     def unfold_connected_component(self, component_id, skip_intersection_test=False):
         """Unfolds one connected component of the cut mesh into the 2D plane. Returns None if the component containts cycles."""
-        return self.unfold_connected_face_set(self.components_as_sets[component_id], skip_intersection_test=skip_intersection_test)
+        connected_component : ConnectedComponent = self.connected_components[component_id]
+        return self.unfold_connected_face_set(connected_component._face_index_set, skip_intersection_test=skip_intersection_test)
 
     def unfold_all_connected_components(self):
-        self.unfolded_components = {}
-        for c_id in self.components_as_sets.keys():
-            if self.components_as_sets[c_id] is None:
-                continue
-            self.unfolded_components[c_id] = self.unfold_connected_component(c_id)
+        current_connected_component : ConnectedComponent
+        for c_id, current_connected_component in self.connected_components.items():
+            current_connected_component._unfolding = self.unfold_connected_component(c_id, False)
 
     def update_unfoldings_along_edges(self, edge_ids, skip_intersection_test=False):
         components_to_update = set()
@@ -408,17 +454,16 @@ class CutGraph():
                 components_to_update.add(self.vertex_to_component_dict[f_id])
 
         for c_id in components_to_update:
-            self.unfolded_components[c_id] = self.unfold_connected_component(c_id, skip_intersection_test=skip_intersection_test)
-
-        # assert that we got all components that changed this 
-        for c_id in self.components_as_sets.keys():
-            assert c_id in self.unfolded_components.keys()
+            current_connected_component : ConnectedComponent = self.connected_components[c_id]
+            current_connected_component._unfolding = self.unfold_connected_component(c_id, skip_intersection_test=skip_intersection_test)
+            # doing this here is a nasty side effect but whatever
+            current_connected_component._build_step_number = None
+            current_connected_component._render_triangles_outdated = True
 
     def all_components_have_unfoldings(self):
-        for c_id, component in self.components_as_sets.items():
-            if component is None:
-                continue
-            if self.unfolded_components[c_id] is None:
+        current_connected_component : ConnectedComponent
+        for current_connected_component in self.connected_components.values():
+            if current_connected_component._unfolding is None:
                 return False
         return True
 
@@ -554,21 +599,32 @@ class CutGraph():
 
     def get_connected_component_triangle_lists_for_drawing(self, face_offset):
         self.mesh.faces.ensure_lookup_table()
-        triangles_per_component = {}
 
+        if not hasattr(self, "component_triangle_list_cache"):
+            self.component_triangle_list_cache = {}
+
+        triangles_per_component = {}
         all_vertex_positions = []
 
-        for component_id, connected_component in self.components_as_sets.items():
-            if connected_component is None:
-                continue
-            component_triangles = []
-            for face_index in connected_component:
-                polygon_outline = self.get_polygon_outline_for_face_drawing(face_index)
-                curr_start_index = len(all_vertex_positions)
-                all_vertex_positions += [self.world_matrix @ (v + face_offset * self.mesh.faces[face_index].normal) for v in polygon_outline]
-                _, curr_triangle_ids =  triangulate_3d_polygon(polygon_outline, self.mesh.faces[face_index].normal, list(range(curr_start_index, len(all_vertex_positions))))
-                component_triangles += curr_triangle_ids
-            triangles_per_component[component_id] = component_triangles
+        curr_connected_component : ConnectedComponent
+        for component_id, curr_connected_component in self.connected_components.items():
+            # only compute render data if it is missing or marked to be recomputed
+            if curr_connected_component._render_triangles_outdated or curr_connected_component._triangles_for_rendering is None:
+                component_triangles = []
+                component_vertex_positions = []
+                for face_index in curr_connected_component._face_index_set:
+                    polygon_outline = self.get_polygon_outline_for_face_drawing(face_index)
+                    curr_offset = len(component_vertex_positions)
+                    _, curr_triangle_ids = triangulate_3d_polygon(polygon_outline, self.mesh.faces[face_index].normal, list(range(curr_offset, curr_offset + len(polygon_outline))))
+                    component_vertex_positions += [(v, face_index) for v in polygon_outline]
+                    component_triangles += curr_triangle_ids
+                curr_connected_component._vertices_for_rendering = component_vertex_positions.copy()
+                curr_connected_component._triangles_for_rendering = component_triangles.copy()
+
+            vertex_id_offset = len(all_vertex_positions)
+            all_vertex_positions += [self.world_matrix @ (v + face_offset * self.mesh.faces[f_index].normal) for (v, f_index) in curr_connected_component._vertices_for_rendering]
+            triangles_per_component[component_id] = [(vertex_id_offset + tri[0], vertex_id_offset + tri[1], vertex_id_offset + tri[2]) for tri in curr_connected_component._triangles_for_rendering]
+
         return all_vertex_positions, triangles_per_component
     
     def get_triangle_list_per_cluster_quality(self, face_offset):
@@ -583,10 +639,11 @@ class CutGraph():
             NOT_FOLDABLE_REGION : []
             }
         for cluster_id, triangles in tris_per_cluster.items():
-            if self.unfolded_components[cluster_id] is None:
+            current_connected_component : ConnectedComponent = self.connected_components[cluster_id]
+            if current_connected_component._unfolding is None:
                 quality_dict[NOT_FOLDABLE_REGION] += triangles
                 continue
-            unfolding : Unfolding = self.unfolded_components[cluster_id]
+            unfolding : Unfolding = current_connected_component._unfolding
             if unfolding.has_overlaps:
                 quality_dict[OVERLAPPING_REGION] += triangles
                 continue
@@ -602,8 +659,6 @@ class CutGraph():
         if not hasattr(self, "glue_flaps"):
             return {} 
         self.assert_all_faces_have_components_and_unfoldings()
-        self.ensure_halfedge_to_edge_table()
-        self.ensure_halfedge_to_face_table()
         self.mesh.edges.ensure_lookup_table()
         quality_dict = {
             GLUE_FLAP_NO_OVERLAPS : [],
@@ -612,8 +667,7 @@ class CutGraph():
             }
         for edge_index, halfedge in self.glue_flaps.items():
             opp_halfedge = (halfedge[1], halfedge[0])
-            opp_face : bmesh.types.BMFace = self.halfedge_to_face[opp_halfedge]
-            opp_unfolding : Unfolding = self.unfolded_components[self.vertex_to_component_dict[opp_face.index]]
+            opp_edge, opp_face, opp_unfolding = self.get_edge_face_and_unfolding_of_halfedge(opp_halfedge)
             if opp_unfolding is None:
                 continue
             flap_triangles_3d = opp_unfolding.compute_3d_glue_flap_triangles_inside_face(opp_face.index, self.halfedge_to_edge[halfedge], self.flap_angle, self.flap_height)
@@ -626,7 +680,7 @@ class CutGraph():
                 tri_1 = flap_triangles_3d[1]
                 flap_line_array = [tri_0[0], tri_0[1], tri_0[1], tri_0[2], tri_1[0], tri_1[1]]
             # apply offset
-            flap_line_array = [self.world_matrix @ (mathutils.Vector(v) + 1.2 * face_offset * opp_face.normal) for v in flap_line_array]
+            flap_line_array = [self.world_matrix @ (mathutils.Vector(v) + 1.5 * face_offset * opp_face.normal) for v in flap_line_array]
             if opp_unfolding.flap_is_overlapping(self.mesh.edges[edge_index]):
                 quality_dict[GLUE_FLAP_WITH_OVERLAPS] += flap_line_array
                 continue
@@ -639,9 +693,7 @@ class CutGraph():
     #################################
 
     def try_to_add_glue_flap(self, halfedge, enforce=False):
-        edge = self.halfedge_to_edge[halfedge]
-        face = self.halfedge_to_face[halfedge]
-        unfold : Unfolding = self.unfolded_components[self.vertex_to_component_dict[face.index]]
+        edge, face, unfold = self.get_edge_face_and_unfolding_of_halfedge(halfedge)
         flap_geometry = unfold.compute_2d_glue_flap_triangles(face.index, edge, self.flap_angle, self.flap_height)
         if unfold.check_for_flap_collisions(flap_geometry):
             # flap does not work
@@ -655,7 +707,7 @@ class CutGraph():
         mesh_edge : bmesh.types.BMEdge = self.halfedge_to_edge[preferred_halfedge]
         if mesh_edge.index in self.glue_flaps.keys():
             print("this edge already has a glue flap attached to it")
-            return
+            return 
         
         if mesh_edge.is_boundary:
             print("boundary edge cannot have a glue flap.")
@@ -681,9 +733,10 @@ class CutGraph():
         no_flap_overlaps = True
         self.glue_flaps = {}
         # clear all flap info stored in the unfoldings
-        for unfolding in self.unfolded_components.values():
-            if unfolding is not None:
-                unfolding.remove_all_flap_info()
+        curr_connected_component : ConnectedComponent
+        for curr_connected_component in self.connected_components.values():
+            if curr_connected_component._unfolding is not None:
+                curr_connected_component._unfolding.remove_all_flap_info()
 
         # build dfs tree of cut edges
         processed_edges = set()
@@ -711,7 +764,10 @@ class CutGraph():
 
                 # add the glue flap
                 curr_flap_01 = flap_01
-                if not (curr_e.is_boundary or self.unfolded_components[self.vertex_to_component_dict[self.halfedge_to_face[(v0.index, v1.index)].index]] is None or self.unfolded_components[self.vertex_to_component_dict[self.halfedge_to_face[(v1.index, v0.index)].index]] is None):
+                if not curr_e.is_boundary:
+                    connected_component_01 : ConnectedComponent = self.connected_components[self.vertex_to_component_dict[self.halfedge_to_face[(v0.index, v1.index)].index]]
+                    connected_component_10 : ConnectedComponent = self.connected_components[self.vertex_to_component_dict[self.halfedge_to_face[(v1.index, v0.index)].index]]
+                if not (curr_e.is_boundary or connected_component_01._unfolding is None or connected_component_10._unfolding is None):
                     preferred_halfedge = (v0.index, v1.index) if (self.prefer_zigzag and not flap_01) or (not self.prefer_zigzag and flap_01) else (v1.index, v0.index)
                     used_halfedge, no_overlaps_introduced =  self.add_one_glue_flap(preferred_halfedge)
                     curr_flap_01 = used_halfedge == (v0.index, v1.index)
@@ -732,11 +788,9 @@ class CutGraph():
         return no_flap_overlaps
 
     def remove_flaps_of_edge(self, edge : bmesh.types.BMEdge):
-        self.ensure_halfedge_to_face_table()
         if edge.index in self.glue_flaps.keys():
             glue_he = self.glue_flaps[edge.index]
-            face_with_flap = self.halfedge_to_face[glue_he]
-            unfolding_with_flap : Unfolding = self.unfolded_components[self.vertex_to_component_dict[face_with_flap.index]]
+            _, face_with_flap, unfolding_with_flap = self.get_edge_face_and_unfolding_of_halfedge(glue_he)
             if unfolding_with_flap is not None:
                 unfolding_with_flap.remove_flap_from_edge(face_with_flap.index, edge) # remove geometric info 
             del self.glue_flaps[edge.index]
@@ -754,7 +808,7 @@ class CutGraph():
                 updated_components.add(self.vertex_to_component_dict[f_id])
         	
         all_interesting_edge_ids = set()
-        for face_set in [self.components_as_sets[c_id] for c_id in updated_components]:
+        for face_set in [self.connected_components[c_id]._face_index_set for c_id in updated_components]:
             for face_index in face_set:
                 for edge in self.mesh.faces[face_index].edges:
                     all_interesting_edge_ids.add(edge.index)
@@ -796,7 +850,10 @@ class CutGraph():
 
                 # add the glue flap
                 curr_flap_01 = flap_01
-                if not curr_e.is_boundary and (self.unfolded_components[self.vertex_to_component_dict[self.halfedge_to_face[(v0.index, v1.index)].index]] is None or self.unfolded_components[self.vertex_to_component_dict[self.halfedge_to_face[(v1.index, v0.index)].index]] is None):
+                if not curr_e.is_boundary:
+                    connected_component_01 : ConnectedComponent = self.connected_components[self.vertex_to_component_dict[self.halfedge_to_face[(v0.index, v1.index)].index]]
+                    connected_component_10 : ConnectedComponent = self.connected_components[self.vertex_to_component_dict[self.halfedge_to_face[(v1.index, v0.index)].index]]
+                if not curr_e.is_boundary and (connected_component_01._unfolding is None or connected_component_10._unfolding is None):
                     # remove any flaps attached to this edge
                     self.remove_flaps_of_edge(curr_e)
                 elif not curr_e.is_boundary:
@@ -810,8 +867,7 @@ class CutGraph():
                     else:
                         # do nothing or restore old glue flap
                         he_with_flap = self.glue_flaps[curr_e.index]
-                        face_with_flap = self.halfedge_to_face[he_with_flap]
-                        unfold_with_flap : Unfolding = self.unfolded_components[self.vertex_to_component_dict[face_with_flap.index]]
+                        _, face_with_flap, unfold_with_flap = self.get_edge_face_and_unfolding_of_halfedge(he_with_flap)
                         has_flap_overlaps_to_begin_with = unfold_with_flap.has_overlapping_glue_flaps()
                         if not unfold_with_flap.check_if_edge_has_flap(face_with_flap.index, curr_e):
                             flap_geometry = unfold_with_flap.compute_2d_glue_flap_triangles(face_with_flap.index, curr_e, self.flap_angle, self.flap_height)
@@ -842,13 +898,13 @@ class CutGraph():
         self.mesh.edges.ensure_lookup_table()
         self.assert_all_faces_have_components_and_unfoldings()
         # clear all flap info stored in the unfoldings
-        for unfolding in self.unfolded_components.values():
-            if unfolding is not None:
-                unfolding.remove_all_flap_info()
+        curr_connected_component : ConnectedComponent
+        for curr_connected_component in self.connected_components.values():
+            if curr_connected_component._unfolding is not None:
+                curr_connected_component._unfolding.remove_all_flap_info()
 
         for edge_id, halfedge in self.glue_flaps.items():
-            face : bmesh.types.BMFace = self.halfedge_to_face[halfedge]
-            unfolding : Unfolding = self.unfolded_components[self.vertex_to_component_dict[face.index]]
+            _, face, unfolding = self.get_edge_face_and_unfolding_of_halfedge(halfedge)
             new_geometry = unfolding.compute_2d_glue_flap_triangles(face.index, self.mesh.edges[edge_id], self.flap_angle, self.flap_height)
             unfolding.add_glue_flap_to_face_edge(face.index, self.mesh.edges[edge_id], new_geometry)
         
@@ -860,8 +916,7 @@ class CutGraph():
         self.mesh.edges.ensure_lookup_table()
         # remove current glue flap
         curr_halfedge = self.glue_flaps[edge_id]
-        curr_face = self.halfedge_to_face[curr_halfedge]
-        curr_unfolding : Unfolding = self.unfolded_components[self.vertex_to_component_dict[curr_face.index]]
+        _, curr_face, curr_unfolding = self.get_edge_face_and_unfolding_of_halfedge(curr_halfedge)
         curr_unfolding.remove_flap_from_edge(curr_face.index, self.mesh.edges[edge_id])
         # add glue flap on the opposide halfedge
         self.try_to_add_glue_flap((curr_halfedge[1], curr_halfedge[0]), enforce=True)
@@ -893,10 +948,10 @@ class CutGraph():
             if not self.mesh_edge_is_cut(self.mesh.edges[edge_index]):
                 return False
             for adj_face in self.mesh.edges[edge_index].link_faces:
-                if self.unfolded_components[self.vertex_to_component_dict[adj_face.index]] is None:
+                if self.connected_components[self.vertex_to_component_dict[adj_face.index]]._unfolding is None:
                     return False
         return True
-        
+    
     #################################
     #  User Constraints Interface   #
     #################################
@@ -960,12 +1015,14 @@ class CutGraph():
         self.mesh.faces.ensure_lookup_table()
         max_height = -np.inf
         max_width = -np.inf
-        for c_id, faces_ids_in_component in self.components_as_sets.items():
+        curr_connected_component : ConnectedComponent
+        for c_id, curr_connected_component in self.connected_components.items():
+            faces_ids_in_component = curr_connected_component._face_index_set
             if faces_ids_in_component is None:
                 continue
-            if self.unfolded_components[c_id] is None:
+            unfolding_of_curr_component : Unfolding = curr_connected_component._unfolding
+            if unfolding_of_curr_component is None:
                 continue
-            unfolding_of_curr_component : Unfolding = self.unfolded_components[c_id]
             curr_component_print_data = ComponentPrintData()
 
             # collect cut edges and fold edges
@@ -1014,13 +1071,14 @@ class CutGraph():
         self.mesh.faces.ensure_lookup_table()
 
         all_print_data = []
-        for c_id, faces_ids_in_component in self.components_as_sets.items():
+        curr_connected_component : ConnectedComponent
+        for c_id, curr_connected_component in self.connected_components.items():
+            faces_ids_in_component = curr_connected_component._face_index_set
             if faces_ids_in_component is None:
                 continue
-            if self.unfolded_components[c_id] is None:
+            unfolding_of_curr_component : Unfolding = curr_connected_component._unfolding
+            if unfolding_of_curr_component is None:
                 continue
-            unfolding_of_curr_component : Unfolding = self.unfolded_components[c_id]
-
             curr_component_print_data = ComponentPrintData()
 
             # collect material index of first face
@@ -1111,8 +1169,8 @@ class CutGraph():
             step_number_pos = np.mean([scaling_factor * unfolding_of_curr_component.get_globally_consistend_2d_coord_in_face(v.co, face_with_step_number) for v in self.mesh.faces[face_with_step_number].verts], axis=0)
 
             curr_component_print_data.build_step_number_position = step_number_pos
-            if self.every_component_has_build_step():
-                curr_component_print_data.build_step_number = self.component_build_indices[c_id]
+            if curr_connected_component._build_step_number is not None:
+                curr_component_print_data.build_step_number = curr_connected_component._build_step_number
 
             all_print_data.append(curr_component_print_data)
         return all_print_data

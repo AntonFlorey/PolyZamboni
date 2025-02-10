@@ -2,7 +2,7 @@ import bmesh
 import numpy as np
 import time
 
-from .cutgraph import CutGraph
+from .cutgraph import CutGraph, ConnectedComponent
 from .unfolding import Unfolding, test_if_two_touching_unfolded_components_overlap
 
 axis_dict = {
@@ -75,8 +75,10 @@ def greedy_auto_cuts(cutgraph : CutGraph, quality_level="NO_OVERLAPS_ALLOWED", t
         linked_component_ids = [cutgraph.vertex_to_component_dict[mesh_f] for mesh_f in linked_face_ids]
         # check for cyclic components
         if linked_component_ids[0] == linked_component_ids[1]:
-            continue 
-        component_union = cutgraph.components_as_sets[linked_component_ids[0]].union(cutgraph.components_as_sets[linked_component_ids[1]])
+            continue
+        connected_component_1 : ConnectedComponent = cutgraph.connected_components[linked_component_ids[0]]
+        connected_component_2 : ConnectedComponent = cutgraph.connected_components[linked_component_ids[1]]
+        component_union = connected_component_1._face_index_set.union(connected_component_2._face_index_set)
         if len(component_union) > max_faces_per_component:
             continue # component would be to large!
         # check for overlapping mesh pieces
@@ -85,8 +87,8 @@ def greedy_auto_cuts(cutgraph : CutGraph, quality_level="NO_OVERLAPS_ALLOWED", t
         cutgraph.ensure_halfedge_to_face_table()
         face_index_1 = cutgraph.halfedge_to_face[tuple([v.index for v in halfedge_1])].index
         face_index_2 = cutgraph.halfedge_to_face[tuple([v.index for v in halfedge_2])].index
-        unfolding_1 : Unfolding = cutgraph.unfolded_components[cutgraph.vertex_to_component_dict[face_index_1]]
-        unfolding_2 : Unfolding = cutgraph.unfolded_components[cutgraph.vertex_to_component_dict[face_index_2]]
+        unfolding_1 : Unfolding = cutgraph.connected_components[cutgraph.vertex_to_component_dict[face_index_1]]._unfolding
+        unfolding_2 : Unfolding = cutgraph.connected_components[cutgraph.vertex_to_component_dict[face_index_2]]._unfolding
         if len(unfolding_1.triangulated_faces_2d.keys()) < len(unfolding_2.triangulated_faces_2d.keys()):
             merging_produces_overlaps = test_if_two_touching_unfolded_components_overlap(unfolding_1, unfolding_2, face_index_1, face_index_2, halfedge_1, halfedge_2)
         else:

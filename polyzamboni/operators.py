@@ -800,8 +800,8 @@ class PolyZamboniExportPDFOperator(bpy.types.Operator, ExportHelper):
         max_h_in_cm = 100 * self.curr_len_scale * self.max_comp_height
         curr_page_size = exporters.paper_sizes[self.general_settings.paper_size]
         max_scaling = min((curr_page_size[0] - 2 * page_margin_in_cm) / max_w_in_cm, (curr_page_size[1] - 2 * page_margin_in_cm) / max_h_in_cm)
-        self.general_settings.sizing_scale = max_scaling
-        self.general_settings.target_model_height = max_scaling * self.mesh_height
+        self.general_settings.sizing_scale = 0.9 * max_scaling
+        self.general_settings.target_model_height = 0.9 * max_scaling * self.mesh_height
 
         return super().invoke(context, event)
 
@@ -881,8 +881,8 @@ class PolyZamboniExportSVGOperator(bpy.types.Operator, ExportHelper):
         max_h_in_cm = 100 * self.curr_len_scale * self.max_comp_height
         curr_page_size = exporters.paper_sizes[self.general_settings.paper_size]
         max_scaling = min((curr_page_size[0] - 2 * page_margin_in_cm) / max_w_in_cm, (curr_page_size[1] - 2 * page_margin_in_cm) / max_h_in_cm)
-        self.general_settings.sizing_scale = max_scaling
-        self.general_settings.target_model_height = max_scaling * self.mesh_height
+        self.general_settings.sizing_scale = 0.9 * max_scaling
+        self.general_settings.target_model_height = 0.9 * max_scaling * self.mesh_height
 
         return super().invoke(context, event)
 

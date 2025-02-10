@@ -192,8 +192,8 @@ class Unfolding():
         for face_index in self.glue_flaps_per_face.keys():
             self.glue_flaps_per_face[face_index] = {}
         # reset overlap info
-        self.flap_collides_with = {}
-            
+        self.flap_collides_with = {}       
+
 def test_if_two_touching_unfolded_components_overlap(unfolding_1 : Unfolding, 
                                                      unfolding_2 : Unfolding, 
                                                      join_face_index_1, 

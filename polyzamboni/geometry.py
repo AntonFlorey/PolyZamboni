@@ -39,27 +39,6 @@ def debug_draw_polygons_2d(polygons_2d, filename):
     plt.savefig(filename)
     plt.close(fig)
 
-def debug_draw_polygon_2d(polygon_2d, vertex_indices):
-
-    # Polygon zeichnen
-    polygon = plt.Polygon(polygon_2d, closed=True, edgecolor='r', facecolor='orange')
-
-    fig, ax = plt.subplots()
-    ax.add_patch(polygon)
-    ax.set_xlim(min(polygon_2d[:,0])-0.1, max(polygon_2d[:,0])+0.1)
-    ax.set_ylim(min(polygon_2d[:,1])-0.1, max(polygon_2d[:,1])+0.1)
-    ax.set_aspect('equal')  # Gleiche Skala für x und y
-
-    for i, (x, y) in zip(vertex_indices, polygon_2d): 
-        ax.text(x, y, str(i), fontsize=6, ha='center', va='center', color='black')#, bbox=dict(facecolor='black', edgecolor='none', boxstyle='round,pad=0.3'))
-
-    plt.xlabel('X-Achse')
-    plt.ylabel('Y-Achse')
-    plt.title('Gezeichnetes Polygon')
-    plt.grid(True)
-    plt.savefig("test.png")
-    plt.close(fig)
-
 class AffineTransform2D():
     """ Affine Transformation in 2D Space """
     def __init__(self, linear_part = np.eye(2), affine_part = np.zeros(2)):
@@ -308,7 +287,6 @@ def solve_for_weird_intersection_point(center_point_3d, prev_point_3d, next_poin
     weird_p_2d = np.linalg.solve(M, rhs)
 
     return to_world_coords(weird_p_2d, *local_basis)
-
 
 def triangle_intersection_test_2d(t1_a, t1_b, t1_c, t2_a, t2_b, t2_c):
     if determinant_2d(t1_b - t1_a, t1_c - t1_a) <= 0:
