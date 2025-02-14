@@ -9,7 +9,7 @@ from .geometry import triangulate_3d_polygon, signed_point_dist_to_line, face_co
 from .constants import LOCKED_EDGES_PROP_NAME, CUT_CONSTRAINTS_PROP_NAME, AUTO_CUT_EDGES_PROP_NAME, PERFECT_REGION, BAD_GLUE_FLAPS_REGION, OVERLAPPING_REGION, NOT_FOLDABLE_REGION, GLUE_FLAP_NO_OVERLAPS, GLUE_FLAP_WITH_OVERLAPS, GLUE_FLAP_TO_LARGE, BUILD_ORDER_PROPERTY_NAME, GLUE_FLAP_PROPERTY_NAME
 from .unfolding import Unfolding
 from collections import deque
-from .printprepper import ColoredTriangleData, ComponentPrintData, CutEdgeData, FoldEdgeData, GlueFlapEdgeData
+from .printprepper import ColoredTriangleData, ComponentPrintData, CutEdgeData, FoldEdgeData, GlueFlapEdgeData, FoldEdgeAtGlueFlapData
 
 class CutGraphSaveData():
     """ Stores all data required to save and load a cutgraph """
@@ -1043,8 +1043,12 @@ class CutGraph():
                     vertex_coords_3d = [v.co for v in curr_edge.verts]    
                     vertex_coords_unfolded = [unfolding_of_curr_component.get_globally_consistend_2d_coord_in_face(co_3d, face_index) for co_3d in vertex_coords_3d]
                     if curr_edge.is_boundary or self.mesh_edge_is_cut(curr_edge):
-                        # this is a cut edge
-                        curr_component_print_data.add_cut_edge(CutEdgeData(tuple(vertex_coords_unfolded), curr_edge.index))
+                        if unfolding_of_curr_component.check_if_edge_has_flap(curr_face.index, curr_edge):
+                            # this is a fold edge of a glue flap
+                            curr_component_print_data.add_fold_edges_at_flaps(FoldEdgeAtGlueFlapData(tuple(vertex_coords_unfolded), curr_edge.is_convex, curr_edge.calc_face_angle(), curr_edge.index))
+                        else:
+                            # this is a cut edge
+                            curr_component_print_data.add_cut_edge(CutEdgeData(tuple(vertex_coords_unfolded), curr_edge.index))
 
                 # collect edges for glue flaps
                 for flap_triangles in unfolding_of_curr_component.glue_flaps_per_face[face_index].values():
@@ -1118,8 +1122,13 @@ class CutGraph():
                     vertex_coords_unfolded = [scaling_factor * unfolding_of_curr_component.get_globally_consistend_2d_coord_in_face(co_3d, face_index) for co_3d in vertex_coords_3d]
                     dist_cog_edge_sum += signed_point_dist_to_line(face_cog, vertex_coords_unfolded[0], vertex_coords_unfolded[1])
                     if curr_edge.is_boundary or self.mesh_edge_is_cut(curr_edge):
-                        # this is a cut edge
-                        curr_component_print_data.add_cut_edge(CutEdgeData(tuple(vertex_coords_unfolded), curr_edge.index))
+                        # check if this edge has a glue flap attached to it
+                        if unfolding_of_curr_component.check_if_edge_has_flap(curr_face.index, curr_edge):
+                            # this is a fold edge of a glue flap
+                            curr_component_print_data.add_fold_edges_at_flaps(FoldEdgeAtGlueFlapData(tuple(vertex_coords_unfolded), curr_edge.is_convex, curr_edge.calc_face_angle(), curr_edge.index))
+                        else:
+                            # this is a cut edge
+                            curr_component_print_data.add_cut_edge(CutEdgeData(tuple(vertex_coords_unfolded), curr_edge.index))
                     elif curr_edge.index not in fold_edge_index_set:
                         # this is a fold edge
                         fold_edge_index_set.add(curr_edge.index)

@@ -1,5 +1,7 @@
 # PolyZamboni - The ultimate papercraft addon for Blender
 
+![screenshot](images/PolyZamboniBannerNoText.jpg)
+
 Some cool text describing this addon...
 
 ## Requirements

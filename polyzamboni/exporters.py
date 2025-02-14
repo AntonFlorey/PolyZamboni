@@ -8,7 +8,7 @@ import matplotlib.image as mpimg
 import matplotlib.transforms as mtransforms
 import numpy as np
 from .geometry import AffineTransform2D
-from .printprepper import ComponentPrintData, ColoredTriangleData, CutEdgeData, FoldEdgeData, GlueFlapEdgeData
+from .printprepper import ComponentPrintData, ColoredTriangleData, CutEdgeData, FoldEdgeData, GlueFlapEdgeData, FoldEdgeAtGlueFlapData
 
 # feel free to add more paper sizes (in cm)
 paper_sizes = {
@@ -177,6 +177,17 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
         page_coords = self.__transform_component_line_coords_to_page_coord(fold_edge_data.coords, page_transform, self.prints_on_model_inside)
         self.__draw_line(ax, page_coords, self.convex_fold_edge_linestyle if fold_edge_data.is_convex else self.concave_fold_edge_linestyle, color=self.__linear_to_srgb(self.color_of_lines))
 
+    def __draw_fold_edge_at_glue_flap(self, ax : axes.Axes, fold_edge_at_flap_data : FoldEdgeAtGlueFlapData, page_transform : AffineTransform2D):
+        page_coords = self.__transform_component_line_coords_to_page_coord(fold_edge_at_flap_data.coords, page_transform, self.prints_on_model_inside)
+        if fold_edge_at_flap_data.fold_angle <= self.fold_hide_threshold_angle:
+            self.__draw_line(ax, page_coords, self.cut_edge_linestyle, color=self.__linear_to_srgb(self.color_of_lines))
+        else:
+            self.__draw_line(ax, page_coords, self.convex_fold_edge_linestyle if fold_edge_at_flap_data.is_convex else self.concave_fold_edge_linestyle, color=self.__linear_to_srgb(self.color_of_lines))
+        # add edge number
+        if not self.show_edge_numbers:
+            return
+        self.__write_text_along_line(ax, page_coords, str(fold_edge_at_flap_data.edge_index), self.edge_number_font_size, color=self.__linear_to_srgb(self.color_of_edge_numbers), offset_cm=self.edge_number_offset, flipped=self.prints_on_model_inside)
+
     def __draw_glue_flap_edge(self, ax : axes.Axes, glue_flap_edge_data : GlueFlapEdgeData, page_transform : AffineTransform2D):
         # transform line coords and draw
         page_coords = self.__transform_component_line_coords_to_page_coord(glue_flap_edge_data.coords, page_transform, self.prints_on_model_inside)
@@ -290,6 +301,9 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
             
             for fold_edge_print_data in component_print_data.fold_edges:
                 self.__draw_fold_edge(ax, fold_edge_print_data, component_page_transform)
+
+            for fold_edge_at_flap_print_data in component_print_data.fold_edges_at_flaps:
+                self.__draw_fold_edge_at_glue_flap(ax, fold_edge_at_flap_print_data, component_page_transform)
 
             for glue_flap_edge_data in component_print_data.glue_flap_edges:
                 self.__draw_glue_flap_edge(ax, glue_flap_edge_data, component_page_transform)

@@ -12,6 +12,13 @@ class FoldEdgeData():
         self.is_convex = convex
         self.fold_angle = fold_angle
 
+class FoldEdgeAtGlueFlapData():
+    def __init__(self, coords, convex, fold_angle, edge_index):
+        self.coords = coords
+        self.is_convex = convex
+        self.fold_angle = fold_angle
+        self.edge_index = edge_index
+
 class GlueFlapEdgeData():
     def __init__(self, coords):
         self.coords = coords
@@ -32,6 +39,7 @@ class ComponentPrintData():
         self.upper_right = np.zeros(2)
         self.cut_edges = []
         self.fold_edges = []
+        self.fold_edges_at_flaps = []
         self.glue_flap_edges = []
         self.colored_triangles = []
         self.dominating_mat_index = 0 # we need this if different materials should be printed on different pages
@@ -53,6 +61,10 @@ class ComponentPrintData():
         self.fold_edges.append(fold_edge)
         self.__update_bb_after_adding_edge(fold_edge.coords)
 
+    def add_fold_edges_at_flaps(self, fold_edge_at_flap : FoldEdgeAtGlueFlapData):
+        self.fold_edges_at_flaps.append(fold_edge_at_flap)
+        self.__update_bb_after_adding_edge(fold_edge_at_flap.coords)
+
     def add_glue_flap_edge(self, glue_flap_edge : GlueFlapEdgeData):
         self.glue_flap_edges.append(glue_flap_edge)
         self.__update_bb_after_adding_edge(glue_flap_edge.coords)
@@ -65,12 +77,16 @@ class ComponentPrintData():
             yield cut_edge_data
         for fold_edge_data in self.fold_edges:
             yield fold_edge_data
+        for fold_edge_at_flap_data in self.fold_edges_at_flaps:
+            yield fold_edge_at_flap_data
         for glue_flap_edge_data in self.glue_flap_edges:
             yield glue_flap_edge_data
 
     def __pca(self):
         # collect all coords along cut edges (not glue flaps for now)
-        boundary_coords = np.array([cut_edge_data.coords[0] for cut_edge_data in self.cut_edges])
+        cut_edge_first_coords = [cut_edge_data.coords[0] for cut_edge_data in self.cut_edges]
+        fold_edge_at_glue_flap_first_coords = [fold_edge_at_flap_data.coords[0] for fold_edge_at_flap_data in self.fold_edges_at_flaps]
+        boundary_coords = np.array(cut_edge_first_coords + fold_edge_at_glue_flap_first_coords)
         mean_shifted_coords = boundary_coords - np.mean(boundary_coords, axis=0)
         corr_mat = mean_shifted_coords.T @ mean_shifted_coords
         eigenvalues, eigenvectors = np.linalg.eigh(corr_mat)

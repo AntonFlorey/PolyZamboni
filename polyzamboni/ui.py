@@ -16,7 +16,7 @@ class MainPanel(bpy.types.Panel):
 
         row.label(text="thanks for using me!", icon="FUND")
 
-        if CUTGRAPH_ID_PROPERTY_NAME not in context.active_object:
+        if context.active_object is not None and CUTGRAPH_ID_PROPERTY_NAME not in context.active_object:
             row = layout.row()
             col1 = row.column()
             col2 = row.column()
@@ -117,7 +117,7 @@ class GlueFlapSettingsPanel(bpy.types.Panel):
 
     def draw(self, context : bpy.types.Context):
         layout = self.layout
-        if CUTGRAPH_ID_PROPERTY_NAME not in context.active_object:
+        if context.active_object is not None and CUTGRAPH_ID_PROPERTY_NAME not in context.active_object:
             layout.label(text="No Cutgraph selected", icon="GHOST_DISABLED")
         else:
             ao = context.active_object
