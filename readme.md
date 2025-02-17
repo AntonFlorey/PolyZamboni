@@ -1,6 +1,6 @@
 # PolyZamboni - Papercraft in Blender
 
-![banner](images/PolyZambonibanner.jpg)
+![banner](images/PolyZamboniBannerNoText.jpg)
 
 Turn your low-poly creations into papercraft instructions with this Blender addon. You no longer need any additional software or good faith in some automatic unfolding algorithm. PolyZamboni provides you with all tools necessary to create high quality paper models!  
 
@@ -44,10 +44,10 @@ Not all meshes can be processed by PolyZamboni. The following things prevent thi
 You will get a warning whenever one of these fail-cases occur and the option to select all faces that need to be fixed.
 
 ### Get started
-
-<img src ="images/SpotUnfoldingProcess.gif" width=350>
-<img src ="images/SpotUnfoldingResult.png" width=350>
-
+<p float="middle">
+    <img src ="images/SpotUnfoldingProcess.gif" width=350>
+    <img src ="images/SpotUnfoldingResult.png" width=350>
+</p>
 
 ### Interactive editing 
 
