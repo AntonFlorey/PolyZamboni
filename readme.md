@@ -45,8 +45,8 @@ You will get a warning whenever one of these fail-cases occur and the option to 
 
 ### Get started
 <p float="middle">
-    <img src ="images/SpotUnfoldingProcess.gif" width=350>
-    <img src ="images/SpotUnfoldingResult.png" width=350>
+    <img src ="images/SpotUnfoldingProcess.gif" width=360>
+    <img src ="images/SpotUnfoldingResult.png" width=360>
 </p>
 
 ### Interactive editing 
