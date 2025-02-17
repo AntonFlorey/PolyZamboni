@@ -145,12 +145,12 @@ class GeneralExportSettings(bpy.types.PropertyGroup):
     )
     edge_number_font_size : IntProperty(
         name="Edge number font size",
-        default=8,
+        default=6,
         min = 1
     )
     build_steps_font_size : IntProperty(
         name="Build steps font size",
-        default=16,
+        default=12,
         min=1
     )
     edge_number_color : FloatVectorProperty(
@@ -189,7 +189,7 @@ class GeneralExportSettings(bpy.types.PropertyGroup):
 class LineExportSettings(bpy.types.PropertyGroup):
     line_width: FloatProperty(
         name="Line width",
-        default=1,
+        default=0.5,
         min=0.1,
     )
     hide_fold_edge_angle_th: FloatProperty(
@@ -228,7 +228,7 @@ class LineExportSettings(bpy.types.PropertyGroup):
     )
     edge_number_offset : FloatProperty(
         name="Edge number offset",
-        default=0.001,
+        default=0.0005,
         min=0,
         subtype="DISTANCE"
     )

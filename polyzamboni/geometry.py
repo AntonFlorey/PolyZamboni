@@ -88,7 +88,6 @@ def compute_voronoi_areas(mesh : bmesh.types.BMesh):
     for v in mesh.verts:
         voronoi_areas[v.index] = sum([face_areas[f.index] / len(f.verts) for f in v.link_faces])
 
-    # assertion
     assert np.allclose(sum(face_areas.values()), sum(voronoi_areas.values()))
 
     return voronoi_areas
@@ -107,7 +106,6 @@ def compute_planarity_score(face_coords):
 
 def to_local_coords(point_in_3d, frame_orig, base_x, base_y):
     relative_coord = np.asarray(point_in_3d) - frame_orig
-    # project
     return np.array([np.dot(base_x, relative_coord), np.dot(base_y, relative_coord)])
 
 def to_world_coords(point_in_2d, frame_orig, base_x, base_y):
@@ -116,7 +114,7 @@ def to_world_coords(point_in_2d, frame_orig, base_x, base_y):
 def construct_orthogonal_basis_at_2d_edge(v_2d_from, v_2d_to):
     x_ax = np.array(v_2d_to - v_2d_from)
     x_ax = x_ax / np.linalg.norm(x_ax)
-    y_ax = np.array([-x_ax[1], x_ax[0]]) # rotate by 90 degrees
+    y_ax = np.array([-x_ax[1], x_ax[0]]) # rotation by 90 degrees
     return x_ax, y_ax
 
 def construct_2d_space_along_face_edge(v_3d_from, v_3d_to, n_3d):
@@ -134,14 +132,11 @@ def affine_2d_transformation_between_two_2d_spaces_on_same_plane(space_a, space_
     x_ax_b_in_space_a = to_local_coords(space_a[0] + space_b[1], *space_a)
     y_ax_b_in_space_a = to_local_coords(space_a[0] + space_b[2], *space_a)
     A = np.array([[x_ax_b_in_space_a[0], y_ax_b_in_space_a[0]], [x_ax_b_in_space_a[1], y_ax_b_in_space_a[1]]])
-    
-    #print("det of near-rotation matrix:", np.linalg.det(A))
-
     return AffineTransform2D(A, orig_b_in_space_a)
 
 def signed_point_dist_to_line(point, v_a, v_b):
     v_ab = v_b - v_a
-    n = np.array([-v_ab[1], v_ab[0]]) # rotate 90 degree
+    n = np.array([-v_ab[1], v_ab[0]]) # rotation by 90 degrees
     n = n / np.linalg.norm(n)
     return np.dot(n,point - v_a)
 

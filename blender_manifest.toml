@@ -1,0 +1,49 @@
+schema_version = "1.0.0"
+
+id = "polyzamboni"
+version = "1.0.0"
+name = "PolyZamboni"
+tagline = "Papercraft in Blender"
+maintainer = "Anton Florey <anton.florey@googlemail.com>"
+type = "add-on"
+website = "https://github.com/AntonFlorey/PolyZamboni"
+tags = ["3D View", "Import-Export"]
+blender_version_min = "4.2.0"
+
+license = [
+  "SPDX:GPL-3.0-or-later",
+]
+
+platforms = ["windows-x64", "macos-arm64", "linux-x64", "macos-x64"]
+# Other supported platforms: "windows-arm64", "macos-x64"
+
+# 3rd party Python modules.
+# https://docs.blender.org/manual/en/dev/advanced/extensions/python_wheels.html
+wheels = [
+  "./wheels/networkx-3.4.2-py3-none-any.whl",
+  "./wheels/packaging-24.2-py3-none-any.whl",
+  "./wheels/cycler-0.12.1-py3-none-any.whl",
+  "./wheels/pyparsing-3.2.1-py3-none-any.whl",
+  "./wheels/python_dateutil-2.9.0.post0-py2.py3-none-any.whl",
+  "./wheels/six-1.17.0-py2.py3-none-any.whl",
+  "./wheels/matplotlib-3.10.0-cp311-cp311-win_amd64.whl",
+  "./wheels/matplotlib-3.10.0-cp311-cp311-macosx_11_0_arm64.whl",
+  "./wheels/matplotlib-3.10.0-cp311-cp311-macosx_10_12_x86_64.whl",
+  "./wheels/matplotlib-3.10.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+  "./wheels/pillow-11.1.0-cp311-cp311-macosx_10_10_x86_64.whl",
+  "./wheels/pillow-11.1.0-cp311-cp311-macosx_11_0_arm64.whl",
+  "./wheels/pillow-11.1.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+  "./wheels/pillow-11.1.0-cp311-cp311-win_amd64.whl",
+  "./wheels/contourpy-1.3.1-cp311-cp311-macosx_10_9_x86_64.whl",
+  "./wheels/contourpy-1.3.1-cp311-cp311-win_amd64.whl",
+  "./wheels/contourpy-1.3.1-cp311-cp311-macosx_11_0_arm64.whl",
+  "./wheels/contourpy-1.3.1-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+  "./wheels/fonttools-4.56.0-cp311-cp311-macosx_10_9_x86_64.whl",
+  "./wheels/fonttools-4.56.0-cp311-cp311-macosx_10_9_universal2.whl",
+  "./wheels/fonttools-4.56.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+  "./wheels/fonttools-4.56.0-cp311-cp311-win_amd64.whl",
+  "./wheels/kiwisolver-1.4.8-cp311-cp311-macosx_10_9_x86_64.whl",
+  "./wheels/kiwisolver-1.4.8-cp311-cp311-macosx_11_0_arm64.whl",
+  "./wheels/kiwisolver-1.4.8-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+  "./wheels/kiwisolver-1.4.8-cp311-cp311-win_amd64.whl",
+]

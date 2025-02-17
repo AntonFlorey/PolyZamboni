@@ -60,9 +60,7 @@ def try_to_load_cutgraph(obj : bpy.types.Object):
 
 @persistent
 def on_object_select(scene):
-    # print("something may happen now")
     if globals.PZ_LOCK_SELECT_CALLBACK:
-        # print("nah it doesnt")
         return
     any_objects_selected = len(bpy.context.selected_objects) != 0
     active_object = bpy.context.active_object
@@ -80,21 +78,15 @@ def on_object_select(scene):
     if CUT_CONSTRAINTS_PROP_NAME not in active_object and LOCKED_EDGES_PROP_NAME not in active_object:
         globals.PZ_CURRENT_CUTGRAPH_ID = None
         hide_all_drawings()
-        #print("no preexisting cutgraph detected")
         return
     globals.PZ_LOCK_SELECT_CALLBACK = True
-    # print("entering select callback lock")
     if CUTGRAPH_ID_PROPERTY_NAME not in active_object:
-        # print("initializing cutgraph from existing cuts")
         try_to_load_cutgraph(active_object)
-        # print("We now have", len(pz_globals.PZ_CUTGRAPHS), "cutgraphs")
     
     if CUTGRAPH_ID_PROPERTY_NAME in active_object and (globals.PZ_CURRENT_CUTGRAPH_ID is None or globals.PZ_CURRENT_CUTGRAPH_ID != active_object[CUTGRAPH_ID_PROPERTY_NAME]):
-        # print("set a different cut graph as active:", active_object["cut_graph_id"])
         globals.PZ_CURRENT_CUTGRAPH_ID = active_object[CUTGRAPH_ID_PROPERTY_NAME]
         update_all_polyzamboni_drawings(None, bpy.context)
-    # if in_edit_mode:
-    #     update_all_polyzamboni_drawings(None, bpy.context)
+
     globals.PZ_LOCK_SELECT_CALLBACK = False
 
 def get_active_cutgraph_and_pz_settings(context):

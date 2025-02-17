@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+import platform
 from matplotlib import axes
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
@@ -9,6 +10,13 @@ import matplotlib.transforms as mtransforms
 import numpy as np
 from .geometry import AffineTransform2D
 from .printprepper import ComponentPrintData, ColoredTriangleData, CutEdgeData, FoldEdgeData, GlueFlapEdgeData, FoldEdgeAtGlueFlapData
+
+# when testing on macosx, closing a matplotlib plot crashes blender. This is a workaround that kind of works. 
+# if anyone knows a better way of dealing with this problem let me know :)
+if platform.system() == "Darwin":
+    import matplotlib
+    matplotlib.use("agg") # try to use a different backend 
+    
 
 # feel free to add more paper sizes (in cm)
 paper_sizes = {

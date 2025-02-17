@@ -448,6 +448,7 @@ class CutGraph():
         current_connected_component : ConnectedComponent
         for c_id, current_connected_component in self.connected_components.items():
             current_connected_component._unfolding = self.unfold_connected_component(c_id, False)
+            current_connected_component._render_triangles_outdated = True
 
     def update_unfoldings_along_edges(self, edge_ids, skip_intersection_test=False):
         components_to_update = set()
