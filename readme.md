@@ -5,7 +5,7 @@
 Turn your low-poly creations into papercraft instructions with this Blender addon. You no longer need any additional software or good faith in some automatic unfolding algorithm. PolyZamboni provides you with all tools necessary to create high quality paper models!  
 
 ## Addon installation
-To add polyzamboni to Blender, clone this repository and zip the `PolyZamboni` folder containing this readme file and the `__init__.py` file. Then go into Blender and go to **Edit-><ins>P</ins>references**. On the top left of the **Add-ons** tab, you can now click on **<ins>I</ins>nstall from Disk** and select the zipped `PolyZamboni` folder. If all required python packages are installed, the addon should now be enabled and ready to go.
+To add polyzamboni to Blender, clone this repository and zip the `PolyZamboni` folder containing this readme file and the `__init__.py` file. Then go into Blender and go to **Edit-><ins>P</ins>references**. On the top left of the **Add-ons** tab, you can now click on **<ins>I</ins>nstall from Disk** and select the zipped `PolyZamboni` folder. If all [required python packages](#requirements) are installed, the addon should now be enabled and ready to go.
 
 ![screenshot](images/addon_install_from_disc.png)
 
