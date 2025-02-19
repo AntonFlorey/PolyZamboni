@@ -69,7 +69,7 @@ Once you are satisfied with your edits, you can export the paper model instructi
 ## And now: Get creative!
 I am thrilled to see what you can create with this addon. Share your cool papercraft creations with me and the world!
 
-![banner](images/PolyZamboniBannerNoText.jpg)
+![banner](images/MyCreations.png)
 
 ## Additional features
 I want to explain a couple more neat things built into this addon. These features might need some more work in the future as they are not as flexible and intuitive as the rest.
