@@ -72,7 +72,7 @@ class Unfolding():
             self.affine_transform_to_root_coord_system_per_face[face_index] = combined_transform
 
             # compute triangles in root face coords
-            verts_in_local_space_root = {v.index : self.get_globally_consistend_2d_coord_in_face(v.co, face.index) for v in face.verts}
+            verts_in_local_space_root = {v.index : self.get_globally_consistent_2d_coord_in_face(v.co, face.index) for v in face.verts}
             self.triangulated_faces_2d[face_index] = [tuple([verts_in_local_space_root[i] for i in tri_indices]) for tri_indices in face_triangulation_indices_dict[face_index]]
             self.triangulation_indices[face_index] = face_triangulation_indices_dict[face_index]
 
@@ -89,7 +89,7 @@ class Unfolding():
                         self.has_overlaps = True
                         break
 
-    def get_globally_consistend_2d_coord_in_face(self, point_on_face_3d, face_index):
+    def get_globally_consistent_2d_coord_in_face(self, point_on_face_3d, face_index):
         """ Maps a 3D point on a given face to the unfolded face in 2D """
 
         in_local_coords = geometry.to_local_coords(point_on_face_3d, *self.local_2d_coord_system_per_face[face_index])
@@ -129,33 +129,40 @@ class Unfolding():
 
     def check_for_flap_collisions(self, flap_triangles, store_collisions=False, edge : bmesh.types.BMEdge =None):
         """ Returns true if the provided triangles overlap with any face or existing flap triangles """
+        collision_detected = False
         # first check against all triangles in the face
         all_triangles = []
         for tri_batch in self.triangulated_faces_2d.values():
             for tri in tri_batch:
                 all_triangles.append(tri)
 
+        def store_collision(colliding_edge_key, other_edge_key):
+            self.flap_collides_with.setdefault(colliding_edge_key, set())
+            self.flap_collides_with[colliding_edge_key].add(other_edge_key)            
+
         for unfold_triangle in all_triangles:
             for flap_triangle in flap_triangles:
                 if geometry.triangle_intersection_test_2d(*unfold_triangle, *flap_triangle):
+                    collision_detected = True
                     if store_collisions:
-                        self.flap_collides_with.setdefault(edge_to_key_e(edge), set())
-                        self.flap_collides_with[edge_to_key_e(edge)].add((-1,-1)) # (-1,-1) represents a collision with the unfolded mesh
-                    return True
+                        store_collision(edge_to_key_e(edge), (-1,-1))
+                    else:
+                        return True
         
-        # check agains all existing flaps
+        # check against all existing flaps
         for edge_to_triangles_dict in self.glue_flaps_per_face.values():
             for other_edge_key, other_flap_triangles in edge_to_triangles_dict.items():
                 for other_flap_triangle in other_flap_triangles:
                     for flap_triangle in flap_triangles:
                         if geometry.triangle_intersection_test_2d(*other_flap_triangle, *flap_triangle):
+                            collision_detected = True
                             if store_collisions:
-                                self.flap_collides_with.setdefault(edge_to_key_e(edge), set())
-                                self.flap_collides_with[edge_to_key_e(edge)].add(other_edge_key) # store the key of the other edge
+                                store_collision(edge_to_key_e(edge), other_edge_key)
+                                store_collision(other_edge_key, edge_to_key_e(edge))
                             else:
                                 return True
-                
-        return False # no collisions
+
+        return collision_detected 
     
     def add_glue_flap_to_face_edge(self, face_index, input_edge, flap_triangles):
         """ Write flap triangles (in 2d root space) to a dict for later intersection tests and printing"""
@@ -205,13 +212,13 @@ def test_if_two_touching_unfolded_components_overlap(unfolding_1 : Unfolding,
     # compute affine transformation from unfolding 1 to unfolding 2
 
     # translations
-    join_point_1 = unfolding_1.get_globally_consistend_2d_coord_in_face(join_verts_1[1].co, join_face_index_1)
-    join_point_2 = unfolding_2.get_globally_consistend_2d_coord_in_face(join_verts_2[0].co, join_face_index_2)
+    join_point_1 = unfolding_1.get_globally_consistent_2d_coord_in_face(join_verts_1[1].co, join_face_index_1)
+    join_point_2 = unfolding_2.get_globally_consistent_2d_coord_in_face(join_verts_2[0].co, join_face_index_2)
     join_point_1_to_orig = geometry.AffineTransform2D(affine_part=-join_point_1)
     orig_to_join_point_2 = geometry.AffineTransform2D(affine_part=join_point_2)
     # rotation
-    x_ax_1, y_ax_1 = geometry.construct_orthogonal_basis_at_2d_edge(join_point_1, unfolding_1.get_globally_consistend_2d_coord_in_face(join_verts_1[0].co, join_face_index_1))
-    x_ax_2, y_ax_2 = geometry.construct_orthogonal_basis_at_2d_edge(join_point_2, unfolding_2.get_globally_consistend_2d_coord_in_face(join_verts_2[1].co, join_face_index_2))
+    x_ax_1, y_ax_1 = geometry.construct_orthogonal_basis_at_2d_edge(join_point_1, unfolding_1.get_globally_consistent_2d_coord_in_face(join_verts_1[0].co, join_face_index_1))
+    x_ax_2, y_ax_2 = geometry.construct_orthogonal_basis_at_2d_edge(join_point_2, unfolding_2.get_globally_consistent_2d_coord_in_face(join_verts_2[1].co, join_face_index_2))
     basis_mat_1 = np.array([x_ax_1, y_ax_1]).T
     basis_mat_2 = np.array([x_ax_2, y_ax_2]).T
     rotate_edges_together = geometry.AffineTransform2D(linear_part=basis_mat_2 @ np.linalg.inv(basis_mat_1))

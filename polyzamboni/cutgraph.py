@@ -119,6 +119,7 @@ class CutGraph():
             self.face_triangulation_indices[face.index] = triangulation_indices
 
         # compute offsets for user feedback region drawing
+        self.min_edge_len_per_face = {f.index : min([e.calc_length() for e in f.edges]) for f in self.mesh.faces}
         min_edge_len = min([e.calc_length() for e in self.mesh.edges])
         self.small_offset = 0.05 * min_edge_len
         self.large_offset = 0.35 * min_edge_len
@@ -126,7 +127,6 @@ class CutGraph():
         self.halfedge_to_edge = None # delete old halfedge to edge dict
         self.halfedge_to_face = None # delete old halfedge to face dict
         self.valid = True # make sure we check mesh validity again
-        self.render_corner_cuts_dict = {}
         if hasattr(self, "connected_components"):
             current_connected_component : ConnectedComponent
             for current_connected_component in self.connected_components.values():
@@ -561,13 +561,11 @@ class CutGraph():
             else:
                 return [mathutils.Vector(solve_for_weird_intersection_point(corner_pos, prev_pos, next_pos, normal, offset_dist, cut_dist))]
 
-    def get_polygon_outline_for_face_drawing(self, face_index):
+    def get_polygon_outline_for_face_drawing(self, face_index, cut_dist):
         self.ensure_halfedge_to_edge_table()
         face = self.mesh.faces[face_index]
         face_normal = face.normal
         verts = list(face.verts)
-        if face_index not in self.render_corner_cuts_dict.keys():
-            self.render_corner_cuts_dict[face_index] = {v.index : {} for v in verts}
         cool_vertices = []
         for v_id in range(len(verts)):
             curr_v = verts[v_id]
@@ -584,25 +582,15 @@ class CutGraph():
             e_curr_to_next_is_cutting = self.mesh_edge_is_cut(e_from_curr)
 
             if not v_on_cutting_edge and not e_prev_curr_is_cutting and not e_curr_to_next_is_cutting:
-                if "000" not in self.render_corner_cuts_dict[face_index][curr_v.index].keys():
-                    self.render_corner_cuts_dict[face_index][curr_v.index]["000"] = self.__get_corner_points_all_interior_or_cut(curr_v.co, prev_v.co, next_v.co, face_normal, self.small_offset)
-                cool_vertices += self.render_corner_cuts_dict[face_index][curr_v.index]["000"]
+                cool_vertices += self.__get_corner_points_all_interior_or_cut(curr_v.co, prev_v.co, next_v.co, face_normal, self.small_offset)
             elif v_on_cutting_edge and e_prev_curr_is_cutting and e_curr_to_next_is_cutting:
-                if "111" not in self.render_corner_cuts_dict[face_index][curr_v.index].keys():
-                    self.render_corner_cuts_dict[face_index][curr_v.index]["111"] = self.__get_corner_points_all_interior_or_cut(curr_v.co, prev_v.co, next_v.co, face_normal, self.large_offset)
-                cool_vertices += self.render_corner_cuts_dict[face_index][curr_v.index]["111"]
+                cool_vertices += self.__get_corner_points_all_interior_or_cut(curr_v.co, prev_v.co, next_v.co, face_normal, cut_dist)
             elif v_on_cutting_edge and not e_prev_curr_is_cutting and not e_curr_to_next_is_cutting:
-                if "100" not in self.render_corner_cuts_dict[face_index][curr_v.index].keys():
-                    self.render_corner_cuts_dict[face_index][curr_v.index]["100"] = self.__get_corner_points_only_vertex_on_cut(curr_v.co, prev_v.co, next_v.co, face_normal, self.large_offset, self.small_offset)
-                cool_vertices += self.render_corner_cuts_dict[face_index][curr_v.index]["100"]
+                cool_vertices += self.__get_corner_points_only_vertex_on_cut(curr_v.co, prev_v.co, next_v.co, face_normal, cut_dist, self.small_offset)
             elif e_prev_curr_is_cutting:
-                if "101" not in self.render_corner_cuts_dict[face_index][curr_v.index].keys():
-                    self.render_corner_cuts_dict[face_index][curr_v.index]["101"] = self.__get_corner_points_one_edge_cut(curr_v.co, prev_v.co, next_v.co, face_normal, self.large_offset, self.small_offset, True)
-                cool_vertices += self.render_corner_cuts_dict[face_index][curr_v.index]["101"]
+                cool_vertices += self.__get_corner_points_one_edge_cut(curr_v.co, prev_v.co, next_v.co, face_normal, cut_dist, self.small_offset, True)
             else:
-                if "110" not in self.render_corner_cuts_dict[face_index][curr_v.index].keys():
-                    self.render_corner_cuts_dict[face_index][curr_v.index]["110"] = self.__get_corner_points_one_edge_cut(curr_v.co, prev_v.co, next_v.co, face_normal, self.large_offset, self.small_offset, False)
-                cool_vertices += self.render_corner_cuts_dict[face_index][curr_v.index]["110"]
+                cool_vertices += self.__get_corner_points_one_edge_cut(curr_v.co, prev_v.co, next_v.co, face_normal, cut_dist, self.small_offset, False)
 
         return cool_vertices
 
@@ -619,10 +607,11 @@ class CutGraph():
         for component_id, curr_connected_component in self.connected_components.items():
             # only compute render data if it is missing or marked to be recomputed
             if curr_connected_component._render_triangles_outdated or curr_connected_component._triangles_for_rendering is None:
+                component_cut_dist = 0.3 * min([self.min_edge_len_per_face[f_index] for f_index in curr_connected_component._face_index_set])
                 component_triangles = []
                 component_vertex_positions = []
                 for face_index in curr_connected_component._face_index_set:
-                    polygon_outline = self.get_polygon_outline_for_face_drawing(face_index)
+                    polygon_outline = self.get_polygon_outline_for_face_drawing(face_index, cut_dist=component_cut_dist)
                     curr_offset = len(component_vertex_positions)
                     _, curr_triangle_ids = triangulate_3d_polygon(polygon_outline, self.mesh.faces[face_index].normal, list(range(curr_offset, curr_offset + len(polygon_outline))))
                     component_vertex_positions += [(v, face_index) for v in polygon_outline]
@@ -677,6 +666,7 @@ class CutGraph():
         for edge_index, halfedge in self.glue_flaps.items():
             opp_halfedge = (halfedge[1], halfedge[0])
             opp_edge, opp_face, opp_unfolding = self.get_edge_face_and_unfolding_of_halfedge(opp_halfedge)
+            _, _, he_unfolding = self.get_edge_face_and_unfolding_of_halfedge(halfedge)
             if opp_unfolding is None:
                 continue
             flap_triangles_3d = opp_unfolding.compute_3d_glue_flap_triangles_inside_face(opp_face.index, self.halfedge_to_edge[halfedge], self.flap_angle, self.flap_height)
@@ -690,7 +680,7 @@ class CutGraph():
                 flap_line_array = [tri_0[0], tri_0[1], tri_0[1], tri_0[2], tri_1[0], tri_1[1]]
             # apply offset
             flap_line_array = [self.world_matrix @ (mathutils.Vector(v) + 1.5 * face_offset * opp_face.normal) for v in flap_line_array]
-            if opp_unfolding.flap_is_overlapping(self.mesh.edges[edge_index]):
+            if he_unfolding.flap_is_overlapping(self.mesh.edges[edge_index]):
                 quality_dict[GLUE_FLAP_WITH_OVERLAPS] += flap_line_array
                 continue
             # TODO Flaps that are to large... maybe not needed
@@ -1042,7 +1032,7 @@ class CutGraph():
                 for curr_edge in curr_face.edges:
                     # compute edge coords in unfolding space
                     vertex_coords_3d = [v.co for v in curr_edge.verts]    
-                    vertex_coords_unfolded = [unfolding_of_curr_component.get_globally_consistend_2d_coord_in_face(co_3d, face_index) for co_3d in vertex_coords_3d]
+                    vertex_coords_unfolded = [unfolding_of_curr_component.get_globally_consistent_2d_coord_in_face(co_3d, face_index) for co_3d in vertex_coords_3d]
                     if curr_edge.is_boundary or self.mesh_edge_is_cut(curr_edge):
                         if unfolding_of_curr_component.check_if_edge_has_flap(curr_face.index, curr_edge):
                             # this is a fold edge of a glue flap
@@ -1113,14 +1103,14 @@ class CutGraph():
                     curr_e = self.halfedge_to_edge[(face_vertex_loop[v_i].index, face_vertex_loop[v_j].index)]
                     edge_to_correct_halfedge_map[curr_e.index] = (face_vertex_loop[v_i], face_vertex_loop[v_j])
 
-                face_cog = np.mean([scaling_factor * unfolding_of_curr_component.get_globally_consistend_2d_coord_in_face(v.co, face_index) for v in face_vertex_loop], axis=0)
+                face_cog = np.mean([scaling_factor * unfolding_of_curr_component.get_globally_consistent_2d_coord_in_face(v.co, face_index) for v in face_vertex_loop], axis=0)
 
                 # collect all edges
                 dist_cog_edge_sum = 0
                 for curr_edge in curr_face.edges:
                     # compute edge coords in unfolding space
                     vertex_coords_3d = [v.co for v in edge_to_correct_halfedge_map[curr_edge.index]]    
-                    vertex_coords_unfolded = [scaling_factor * unfolding_of_curr_component.get_globally_consistend_2d_coord_in_face(co_3d, face_index) for co_3d in vertex_coords_3d]
+                    vertex_coords_unfolded = [scaling_factor * unfolding_of_curr_component.get_globally_consistent_2d_coord_in_face(co_3d, face_index) for co_3d in vertex_coords_3d]
                     dist_cog_edge_sum += signed_point_dist_to_line(face_cog, vertex_coords_unfolded[0], vertex_coords_unfolded[1])
                     if curr_edge.is_boundary or self.mesh_edge_is_cut(curr_edge):
                         # check if this edge has a glue flap attached to it
@@ -1184,7 +1174,7 @@ class CutGraph():
                         curr_component_print_data.add_glue_flap_edge(GlueFlapEdgeData((scaling_factor * flap_triangles[1][1],scaling_factor * flap_triangles[1][2])))
 
             face_with_step_number = list(sorted(faces_ids_in_component, key=lambda face_index : face_cog_scores[face_index], reverse=True))[0] # sorting in the end is a bit meh but whatever
-            step_number_pos = np.mean([scaling_factor * unfolding_of_curr_component.get_globally_consistend_2d_coord_in_face(v.co, face_with_step_number) for v in self.mesh.faces[face_with_step_number].verts], axis=0)
+            step_number_pos = np.mean([scaling_factor * unfolding_of_curr_component.get_globally_consistent_2d_coord_in_face(v.co, face_with_step_number) for v in self.mesh.faces[face_with_step_number].verts], axis=0)
 
             curr_component_print_data.build_step_number_position = step_number_pos
             if curr_connected_component._build_step_number is not None:

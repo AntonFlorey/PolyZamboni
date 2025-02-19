@@ -1076,7 +1076,6 @@ def unregister():
     bpy.utils.unregister_class(SelectMultiTouchingFacesOperator)
     bpy.utils.unregister_class(SelectNonTriangulatableFacesOperator)
 
-    #if menu_func_polyzamboni_export in bpy.types.TOPBAR_MT_file_export:
     bpy.types.TOPBAR_MT_file_export.remove(menu_func_polyzamboni_export_pdf)
     bpy.types.TOPBAR_MT_file_export.remove(menu_func_polyzamboni_export_svg)
 

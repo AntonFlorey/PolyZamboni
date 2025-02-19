@@ -194,8 +194,11 @@ def recursively_collect_all_page_components(node : PagePartitionNode, component_
 
 def fit_components_on_pages(components, page_size, page_margin, component_margin, different_materials_on_different_pages):
     """ This funciton returns a list of pages, each page containing a subset of the given components with translations attached to them"""
-
-    page_partitions = { 0 : [create_new_page_partition(page_size, page_margin)]}
+    
+    some_material_index = 0
+    if len(components) > 0:
+        some_material_index = components[0].dominating_mat_index
+    page_partitions = { some_material_index : [create_new_page_partition(page_size, page_margin)]}
 
     #preprocess components
     component_print_data : ComponentPrintData
