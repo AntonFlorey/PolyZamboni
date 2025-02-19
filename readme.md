@@ -52,7 +52,9 @@ All connected face regions, separated by cut edges, are visualized via colored p
 
 Glue flaps are also visualized on top of faces at the position they will have in the papercraft version of your mesh. If any flap overlaps with something in the instruction, it will be colored red. 
 
-<img src ="images/SpotFeedbackAnnotated.png" width=700>
+<p float="middle">
+    <img src ="images/SpotFeedbackAnnotated.png">
+</p>
 
 ### Exporting instruction sheets 
 Once you are satisfied with your edits, you can export the paper model instruction. Go to **File-><ins>E</ins>xport->Polyzamboni Export PDF/SVG** or just click in the respective buttons in the side panel. PolyZamboni lets you fully customize the instructions appearance. Here is a list of export options:
@@ -67,7 +69,7 @@ Once you are satisfied with your edits, you can export the paper model instructi
 ## And now: Get creative!
 I am thrilled to see what you can create with this addon. Share your cool papercraft creations with me and the world!
 
-![banner](images/PolyZambonibannerNoText.jpg)
+![banner](images/PolyZamboniBannerNoText.jpg)
 
 ## Additional features
 I want to explain a couple more neat things built into this addon. These features might need some more work in the future as they are not as flexible and intuitive as the rest.
