@@ -4,6 +4,8 @@
 
 Turn your low-poly creations into papercraft instructions with this Blender addon. You no longer need any additional software or good faith in some automatic unfolding algorithm. PolyZamboni provides you with all tools necessary to create high quality paper models!  
 
+<a href="https://www.github.com/AntonFlorey/PolyZamboni/releases"><img src="https://img.shields.io/github/v/release/AntonFlorey/PolyZamboni" alt="Badge displaying release version." style="height:20px"/></a> <a href="https://www.github.com/AntonFlorey/PolyZamboni/releases"><img src="https://img.shields.io/github/downloads/AntonFlorey/PolyZamboni/total.svg" alt="Repo total downloads count." style="height:20px"/></a> <a href="https://github.com/AntonFlorey/PolyZamboni/blob/main/LICENSE"><img src="https://img.shields.io/github/license/AntonFlorey/PolyZamboni" alt="Badge displaying license." style="height:20px"/></a> <a href="https://github.com/AntonFlorey/PolyZamboni"><img src="https://img.shields.io/github/stars/AntonFlorey/PolyZamboni?style=social" alt="Badge displaying count of GitHub stars." style="height:20px"/></a>
+
 <a href="https://buymeacoffee.com/antonflorei" target="_blank"><img src="https://www.buymeacoffee.com/assets/img/custom_images/yellow_img.png" alt="Buy Me A Coffee" style="height: 37px !important;width: 170px !important;box-shadow: 0px 3px 2px 0px rgba(190, 190, 190, 0.5) !important;-webkit-box-shadow: 0px 3px 2px 0px rgba(190, 190, 190, 0.5) !important;" ></a>
 
 ## Addon installation
