@@ -140,8 +140,10 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
         page_coord_c = self.__transform_component_coord_to_page_coord(component_tri_coords[2], page_transform, flip_along_short_side)
         return (page_coord_a, page_coord_b, page_coord_c)
 
-    def __draw_line(self, ax : axes.Axes, line_coords, linestyle, color):
+    def __draw_line(self, ax : axes.Axes, line_coords, linestyle, color, zorder=None):
         line = lines.Line2D([line_coords[0][0], line_coords[1][0]], [line_coords[0][1], line_coords[1][1]], linewidth=self.line_width, linestyle=custom_line_styles[linestyle], c=color, solid_capstyle="round")
+        if zorder is not None:
+            line.zorder = zorder
         ax.add_line(line)
 
     def __write_text(self, ax : axes.Axes, text, coord, text_size, color, page_transform : AffineTransform2D):
@@ -199,7 +201,7 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
     def __draw_glue_flap_edge(self, ax : axes.Axes, glue_flap_edge_data : GlueFlapEdgeData, page_transform : AffineTransform2D):
         # transform line coords and draw
         page_coords = self.__transform_component_line_coords_to_page_coord(glue_flap_edge_data.coords, page_transform, self.prints_on_model_inside)
-        self.__draw_line(ax, page_coords, self.glue_flap_linestyle, color=self.__linear_to_srgb(self.color_of_lines))
+        self.__draw_line(ax, page_coords, self.glue_flap_linestyle, color=self.__linear_to_srgb(self.color_of_lines), zorder=-2)
 
     def __create_thickened_triangle_coords(self, triangle_coords, eps):
         a_t, b_t, c_t = tuple(np.asarray(v) for v in triangle_coords)
