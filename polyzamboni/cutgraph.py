@@ -7,7 +7,7 @@ import math
 import mathutils
 from .geometry import triangulate_3d_polygon, signed_point_dist_to_line, face_corner_convex_3d, solve_for_weird_intersection_point
 from .constants import LOCKED_EDGES_PROP_NAME, CUT_CONSTRAINTS_PROP_NAME, AUTO_CUT_EDGES_PROP_NAME, PERFECT_REGION, BAD_GLUE_FLAPS_REGION, OVERLAPPING_REGION, NOT_FOLDABLE_REGION, GLUE_FLAP_NO_OVERLAPS, GLUE_FLAP_WITH_OVERLAPS, GLUE_FLAP_TO_LARGE, BUILD_ORDER_PROPERTY_NAME, GLUE_FLAP_PROPERTY_NAME
-from .unfolding import Unfolding
+from .unfolding import Unfolding, InnerFaceTransforms
 from collections import deque
 from .printprepper import ColoredTriangleData, ComponentPrintData, CutEdgeData, FoldEdgeData, GlueFlapEdgeData, FoldEdgeAtGlueFlapData
 
@@ -69,7 +69,6 @@ class CutGraph():
             self.update_all_flap_geometry() # create flap geometry
         else:
             self.greedy_place_all_flaps()
-        # print("Glue flaps computed")
 
     #################################
     #          Save & Load          #
@@ -117,6 +116,11 @@ class CutGraph():
         for face in self.mesh.faces:
             _, triangulation_indices = triangulate_3d_polygon([v.co for v in face.verts], face.normal, [v.index for v in face.verts], crash_on_fail=True)
             self.face_triangulation_indices[face.index] = triangulation_indices
+
+        # compute and store affine transforms for each face
+        self.inner_transform_data_per_face = {}
+        for face in self.mesh.faces:
+            self.inner_transform_data_per_face[face.index] = InnerFaceTransforms(face)
 
         # compute offsets for user feedback region drawing
         self.min_edge_len_per_face = {f.index : min([e.calc_length() for e in f.edges]) for f in self.mesh.faces}
@@ -437,7 +441,7 @@ class CutGraph():
 
         # unfold the component
         assert len(tree_traversal) == len(face_set)
-        return Unfolding(self.mesh, tree_traversal, pred_dict, self.face_triangulation_indices, skip_intersection_test=skip_intersection_test)
+        return Unfolding(self.mesh, tree_traversal, pred_dict, self.face_triangulation_indices, self.inner_transform_data_per_face, skip_intersection_test=skip_intersection_test)
 
     def unfold_connected_component(self, component_id, skip_intersection_test=False):
         """Unfolds one connected component of the cut mesh into the 2D plane. Returns None if the component containts cycles."""
@@ -607,7 +611,7 @@ class CutGraph():
         for component_id, curr_connected_component in self.connected_components.items():
             # only compute render data if it is missing or marked to be recomputed
             if curr_connected_component._render_triangles_outdated or curr_connected_component._triangles_for_rendering is None:
-                component_cut_dist = 0.3 * min([self.min_edge_len_per_face[f_index] for f_index in curr_connected_component._face_index_set])
+                component_cut_dist = 0.25 * min([self.min_edge_len_per_face[f_index] for f_index in curr_connected_component._face_index_set])
                 component_triangles = []
                 component_vertex_positions = []
                 for face_index in curr_connected_component._face_index_set:
@@ -618,6 +622,7 @@ class CutGraph():
                     component_triangles += curr_triangle_ids
                 curr_connected_component._vertices_for_rendering = component_vertex_positions.copy()
                 curr_connected_component._triangles_for_rendering = component_triangles.copy()
+                curr_connected_component._render_triangles_outdated = False
 
             vertex_id_offset = len(all_vertex_positions)
             all_vertex_positions += [self.world_matrix @ (v + face_offset * self.mesh.faces[f_index].normal) for (v, f_index) in curr_connected_component._vertices_for_rendering]
@@ -628,7 +633,6 @@ class CutGraph():
     def get_triangle_list_per_cluster_quality(self, face_offset):
         if not self.check_validity():
             return [], {} # draw nothing but at least no crash
-
         all_v_positions, tris_per_cluster = self.get_connected_component_triangle_lists_for_drawing(face_offset)
         quality_dict = {
             PERFECT_REGION : [],

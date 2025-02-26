@@ -13,10 +13,27 @@ def edge_to_key_e(e : bmesh.types.BMEdge):
 def edge_to_key(v1 : bmesh.types.BMVert, v2 : bmesh.types.BMVert):
     return tuple(sorted([v1.index, v2.index]))
 
+class InnerFaceTransforms():
+    def __init__(self, face : bmesh.types.BMFace):
+        self.interior_affine_transforms = {}
+        face_normal = face.normal
+        face_vertices_ccw = face.verts
+        assert len(face_vertices_ccw) > 2
+        # Choose one coordinate system for the face
+        self.local_2d_coord_system = geometry.construct_2d_space_along_face_edge(face_vertices_ccw[0].co, face_vertices_ccw[1].co, face_normal)
+        self.interior_affine_transforms[edge_to_key(face_vertices_ccw[0], face_vertices_ccw[1])] = geometry.AffineTransform2D()
+
+        # Compute affine transformations from all other edges to the first one
+        for i in range(1, len(face_vertices_ccw)):
+            j = (i + 1) % len(face_vertices_ccw)
+            curr_basis = geometry.construct_2d_space_along_face_edge(face_vertices_ccw[i].co, face_vertices_ccw[j].co, face_normal)
+            transition = geometry.affine_2d_transformation_between_two_2d_spaces_on_same_plane(self.local_2d_coord_system, curr_basis)
+            self.interior_affine_transforms[edge_to_key(face_vertices_ccw[i], face_vertices_ccw[j])] = transition
+
 class Unfolding():
     """ Part of a 2d mesh cut open and unfolded into the euclidean plane """
 
-    def __init__(self, mesh : bmesh.types.BMesh, face_list, pred_dict, face_triangulation_indices_dict, skip_intersection_test=False):
+    def __init__(self, mesh : bmesh.types.BMesh, face_list, pred_dict, face_triangulation_indices_dict, inner_transform_data_per_face, skip_intersection_test=False):
 
         # object attributes
         self.has_overlaps = False
@@ -28,24 +45,12 @@ class Unfolding():
         self.local_2d_coord_system_per_face = {}
         self.glue_flaps_per_face = {f_id : {} for f_id in face_list} # store glue flaps here
 
-        # precompute all necessary stuff per face
+        # get inner face transform data
         mesh.faces.ensure_lookup_table()
         for face_index in face_list:
-            face = mesh.faces[face_index]
-            face_normal = face.normal
-
-            face_vertices_ccw = face.verts
-            assert len(face_vertices_ccw) > 2
-            # Choose one coordinate system for the face
-            self.local_2d_coord_system_per_face[face_index] = geometry.construct_2d_space_along_face_edge(face_vertices_ccw[0].co, face_vertices_ccw[1].co, face_normal)
-            self.interior_affine_transforms[face_index][edge_to_key(face_vertices_ccw[0], face_vertices_ccw[1])] = geometry.AffineTransform2D()
-
-            # Compute affine transformations from all other edges to the first one
-            for i in range(1, len(face_vertices_ccw)):
-                j = (i + 1) % len(face_vertices_ccw)
-                curr_basis = geometry.construct_2d_space_along_face_edge(face_vertices_ccw[i].co, face_vertices_ccw[j].co, face_normal)
-                transition = geometry.affine_2d_transformation_between_two_2d_spaces_on_same_plane(self.local_2d_coord_system_per_face[face_index], curr_basis)
-                self.interior_affine_transforms[face_index][edge_to_key(face_vertices_ccw[i], face_vertices_ccw[j])] = transition
+            curr_face_transform_data : InnerFaceTransforms = inner_transform_data_per_face[face_index]
+            self.local_2d_coord_system_per_face[face_index] = curr_face_transform_data.local_2d_coord_system
+            self.interior_affine_transforms[face_index] = curr_face_transform_data.interior_affine_transforms
 
         # propagate affine transformations through the face tree
         mesh.edges.ensure_lookup_table()
