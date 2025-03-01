@@ -1,15 +1,118 @@
+"""
+Functions in this file are responsible for computing connected components or provide cutgraph utility.
+"""
+
 import bpy
+from bpy.types import Mesh
 import bmesh
 import numpy as np
 import os
 import networkx as nx
 import math
 import mathutils
+from . import io
+from . import utils
+
 from .geometry import triangulate_3d_polygon, signed_point_dist_to_line, face_corner_convex_3d, solve_for_weird_intersection_point
 from .constants import LOCKED_EDGES_PROP_NAME, CUT_CONSTRAINTS_PROP_NAME, AUTO_CUT_EDGES_PROP_NAME, PERFECT_REGION, BAD_GLUE_FLAPS_REGION, OVERLAPPING_REGION, NOT_FOLDABLE_REGION, GLUE_FLAP_NO_OVERLAPS, GLUE_FLAP_WITH_OVERLAPS, GLUE_FLAP_TO_LARGE, BUILD_ORDER_PROPERTY_NAME, GLUE_FLAP_PROPERTY_NAME
+
 from .unfolding import Unfolding, InnerFaceTransforms
 from collections import deque
 from .printprepper import ColoredTriangleData, ComponentPrintData, CutEdgeData, FoldEdgeData, GlueFlapEdgeData, FoldEdgeAtGlueFlapData
+
+def compute_all_face_triangulation_indices(mesh : Mesh):
+    """ This has nothing to do with the cutgraph but I put it here for now """
+    pass # TODO
+
+def compute_all_connected_components(mesh : Mesh, use_auto_cuts : bool, edge_constraints=None):
+    """ Returns connected components as sets and a dict from face indices to component ids. None if no edge constraints exist. """
+    # fetch data if not provided
+    if edge_constraints is None:
+        edge_constraints = io.read_edge_constraints_dict(mesh)
+    if edge_constraints is None:
+        print("POLYZAMBONI WARNING: Tried to compute connected components without edge constraints present.")
+        return None
+    # do stuff
+    dual_graph = utils.construct_dual_graph_from_mesh(mesh)
+    dual_graph_with_cuts_applied = nx.subgraph_view(dual_graph, filter_edge = lambda v1, v2 : not mesh_edge_is_cut(dual_graph.edges[(v1, v2)]["edge_index"], edge_constraints, use_auto_cuts))
+    all_components = list(nx.connected_components(dual_graph_with_cuts_applied))
+
+    face_to_component_dict = {}
+    connected_components = {}
+    for c_id, component_faces in enumerate(all_components):
+        for f in component_faces:
+            face_to_component_dict[f] = c_id
+        connected_components[c_id] = component_faces
+
+    return connected_components, face_to_component_dict
+    
+def compute_adjacent_connected_component_ids_of_component(mesh : Mesh, component_id, 
+                                                          bmesh : bmesh.types.BMesh = None, 
+                                                          dual_graph=None, 
+                                                          connected_components=None, 
+                                                          face_to_component_dict=None):
+        # fetch data if not provided
+        if dual_graph is None:
+            dual_graph = utils.construct_dual_graph_from_bmesh(bmesh) if bmesh is not None else utils.construct_dual_graph_from_mesh(mesh)
+        if connected_components is None:
+            connected_components, face_to_component_dict = io.read_connected_components(mesh)
+        # do the thing
+        neighbour_ids = set()
+        for component_face_index in connected_components[component_id]:
+            for nb_face_index in dual_graph.neighbors(component_face_index):
+                nb_component_index = face_to_component_dict[nb_face_index]
+                if nb_component_index == component_id:
+                    continue
+                neighbour_ids.add(nb_component_index)
+        return neighbour_ids
+
+def build_order_bfs(mesh : Mesh, starting_component_index, next_free_build_index, visited_components : set[int], build_step_dict : dict,
+                    bmesh : bmesh.types.BMesh = None, 
+                    dual_graph=None, 
+                    connected_components=None, 
+                    face_to_component_dict=None):
+    component_queue = deque()
+    component_queue.append(starting_component_index)
+    next_build_index = next_free_build_index
+    while component_queue:
+        curr_component_id = component_queue.popleft()
+        if curr_component_id in visited_components:
+            continue
+        visited_components.add(curr_component_id)
+        build_step_dict[curr_component_id] = next_build_index
+        next_build_index += 1
+        for nb_component_index in compute_adjacent_connected_component_ids_of_component(mesh, curr_component_id, bmesh, dual_graph, connected_components, face_to_component_dict):
+            if nb_component_index in visited_components:
+                continue
+            component_queue.append(nb_component_index)
+    return next_build_index
+
+def compute_build_step_numbers(mesh : Mesh, starting_face_indices, 
+                               bmesh : bmesh.types.BMesh = None, 
+                               dual_graph=None, 
+                               connected_components=None, 
+                               face_to_component_dict=None):
+    # fetch data if not provided
+    if connected_components is None:
+        connected_components, face_to_component_dict = io.read_connected_components(mesh)
+    # lets gooo
+
+    build_step_dict = {}
+    visited_components = set()
+    next_build_index = 1
+    for starting_face_index in starting_face_indices:
+        next_build_index = build_order_bfs(mesh, face_to_component_dict[starting_face_index], next_build_index, visited_components, build_step_dict, 
+                                           bmesh, dual_graph, connected_components, face_to_component_dict)
+    # some mesh pieces might not be selected. they have to be collected here
+    for component_id in connected_components.keys():
+        if component_id in visited_components:
+            continue
+        next_build_index = build_order_bfs(mesh, component_id, next_build_index, visited_components, build_step_dict, 
+                                           bmesh, dual_graph, connected_components, face_to_component_dict)
+    # sanity check and return
+    assert next_build_index == len(connected_components.keys()) + 1
+    return build_step_dict
+
 
 class CutGraphSaveData():
     """ Stores all data required to save and load a cutgraph """

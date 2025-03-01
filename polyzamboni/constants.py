@@ -7,6 +7,8 @@ CUTGRAPH_ID_PROPERTY_NAME = "polyzamboni_cutgraph_id"
 BUILD_ORDER_PROPERTY_NAME = "polyzamboni_build_order"
 GLUE_FLAP_PROPERTY_NAME = "polyzamboni_glue_flaps"
 
+# what in the cursed enums did i do here?!
+
 PERFECT_REGION = 0
 BAD_GLUE_FLAPS_REGION = 1
 OVERLAPPING_REGION = 2
