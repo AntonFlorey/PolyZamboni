@@ -2,9 +2,10 @@ import bpy
 import gpu
 import numpy as np
 from gpu_extras.batch import batch_for_shader
+
 from . import globals
 from . import cutgraph
-from .constants import PERFECT_REGION, BAD_GLUE_FLAPS_REGION, OVERLAPPING_REGION, NOT_FOLDABLE_REGION, GLUE_FLAP_NO_OVERLAPS, GLUE_FLAP_WITH_OVERLAPS, GLUE_FLAP_TO_LARGE
+from . import drawing_backend
 
 # colors 
 BLUE = (  0 / 255,  84 / 255, 159 / 255, 1.0)
@@ -169,10 +170,10 @@ def show_auto_completed_cuts(cuts_as_line_array, dotted_line_length = 0.1):
 #################################
 
 quality_color_mapping = {
-    PERFECT_REGION : POLYZAMBONI_GREEN,
-    BAD_GLUE_FLAPS_REGION : POLYZAMBONI_YELLOW,
-    OVERLAPPING_REGION : POLYZAMBONI_ORANGE,
-    NOT_FOLDABLE_REGION : POLYZAMBONI_RED
+    drawing_backend.ComponentQuality.PERFECT_REGION : POLYZAMBONI_GREEN,
+    drawing_backend.ComponentQuality.BAD_GLUE_FLAPS_REGION : POLYZAMBONI_YELLOW,
+    drawing_backend.ComponentQuality.OVERLAPPING_REGION : POLYZAMBONI_ORANGE,
+    drawing_backend.ComponentQuality.NOT_FOLDABLE_REGION : POLYZAMBONI_RED
 }
 
 def hide_region_quality_triangles():
@@ -197,9 +198,9 @@ def show_region_quality_triangles(vertex_positions, regions_by_quality):
 #################################
 
 flap_quality_color_mapping = {
-    GLUE_FLAP_NO_OVERLAPS : PETROL,
-    GLUE_FLAP_TO_LARGE : POLYZAMBONI_LILA,
-    GLUE_FLAP_WITH_OVERLAPS : BORDEAUX,
+    drawing_backend.GlueFlapQuality.GLUE_FLAP_NO_OVERLAPS : PETROL,
+    drawing_backend.GlueFlapQuality.GLUE_FLAP_TO_LARGE : POLYZAMBONI_LILA,
+    drawing_backend.GlueFlapQuality.GLUE_FLAP_WITH_OVERLAPS : BORDEAUX,
 }
 
 def hide_glue_flaps():

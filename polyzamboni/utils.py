@@ -7,6 +7,18 @@ import bmesh
 import numpy as np
 import networkx as nx
 
+def compute_mesh_height(mesh : bpy.types.Mesh):
+    mesh_top = max([v.co[2] for v in mesh.vertices])
+    mesh_bot = min([v.co[2] for v in mesh.vertices])
+    mesh_height = mesh_top - mesh_bot
+    return mesh_height
+
+def compute_bmesh_height(bm : bmesh.types.BMesh):
+    mesh_top = max([v.co[2] for v in bm.verts])
+    mesh_bot = min([v.co[2] for v in bm.verts])
+    mesh_height = mesh_top - mesh_bot
+    return mesh_height
+
 def mesh_edge_is_cut(mesh_edge_index, edge_constraints, use_auto_cuts):
     if mesh_edge_index in edge_constraints:
         if edge_constraints[mesh_edge_index] == "cut" or (use_auto_cuts and edge_constraints[mesh_edge_index] == "auto"):

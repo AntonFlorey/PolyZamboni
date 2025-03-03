@@ -14,7 +14,7 @@ from . import io
 from . import utils
 from .geometry import triangulate_3d_polygon, signed_point_dist_to_line, face_corner_convex_3d, solve_for_weird_intersection_point
 from .utils import mesh_edge_is_cut, find_bmesh_edge_of_halfedge
-from .glueflaps import component_has_overlapping_glue_flaps, flap_is_overlapping
+from .glueflaps import component_has_overlapping_glue_flaps, flap_is_overlapping, compute_3d_glue_flap_triangles_inside_face
 
 class ComponentQuality(Enum):
     PERFECT_REGION = 0
@@ -144,7 +144,7 @@ def compute_and_update_connected_component_triangle_lists_for_drawing(mesh : Mes
     if connected_components is None:
         connected_components = io.read_all_component_render_data(mesh)
 
-    outdated_render_flags = io.read_outdated_render_data_flags(mesh)
+    outdated_render_flags = io.read_outdated_render_data(mesh)
     verts_per_component, triangles_per_component = io.read_all_component_render_data(mesh)
     if verts_per_component is None:
         verts_per_component, triangles_per_component = {}, {}
@@ -155,12 +155,12 @@ def compute_and_update_connected_component_triangle_lists_for_drawing(mesh : Mes
     triangles_per_component = {}
     all_vertex_positions = []
 
-    min_edge_len = min(e.calc_length() for e in mesh.edges) # i hope this does not take too long
+    min_edge_len = min(e.calc_length() for e in bmesh.edges) # i hope this does not take too long
     small_dist = 0.05 * min_edge_len
 
     for component_id, faces_in_component in connected_components.items():
         # only compute render data if it is missing or marked to be recomputed
-        if outdated_render_flags[component_id] or component_id not in verts_per_component.keys():
+        if component_id in outdated_render_flags or component_id not in verts_per_component.keys():
             component_cut_dist = 0.25 * min([min([e.calc_length() for e in bmesh.faces[f_index].edges]) for f_index in faces_in_component])
             component_triangles = []
             component_vertex_positions = []
@@ -172,7 +172,7 @@ def compute_and_update_connected_component_triangle_lists_for_drawing(mesh : Mes
                 component_triangles += curr_triangle_ids
             verts_per_component[component_id] = component_vertex_positions
             triangles_per_component[component_id] = component_triangles
-            outdated_render_flags[component_id] = False
+            outdated_render_flags.remove(component_id)
             if io.component_render_data_exists(mesh):
                 io.write_render_data_of_one_component(mesh, component_id, component_vertex_positions, component_triangles)
 
@@ -180,11 +180,14 @@ def compute_and_update_connected_component_triangle_lists_for_drawing(mesh : Mes
         all_vertex_positions += [world_matrix @ (v + face_offset * bmesh.faces[f_index].normal) for (v, f_index) in verts_per_component[component_id]]
         triangles_per_component[component_id] = [(vertex_id_offset + tri[0], vertex_id_offset + tri[1], vertex_id_offset + tri[2]) for tri in triangles_per_component[component_id]]
 
-    io.write_outdated_render_data_flags(mesh, outdated_render_flags)
+    io.write_outdated_render_data(mesh, outdated_render_flags)
     return all_vertex_positions, triangles_per_component
 
 def get_triangle_list_per_cluster_quality(mesh : Mesh, bmesh : BMesh, face_offset, edge_constraints, use_auto_cuts, world_matrix,
                                           connected_components = None):
+    if connected_components is None:
+        connected_components = io.read_connected_component_sets(mesh)
+        assert connected_components is not None
     all_v_positions, tris_per_component = compute_and_update_connected_component_triangle_lists_for_drawing(mesh, bmesh, face_offset, edge_constraints, use_auto_cuts, world_matrix, connected_components)
     cyclic_components = io.read_components_with_cycles_set(mesh)
     components_with_overlaps = io.read_components_with_overlaps(mesh)
@@ -209,7 +212,7 @@ def get_triangle_list_per_cluster_quality(mesh : Mesh, bmesh : BMesh, face_offse
         quality_dict[ComponentQuality.PERFECT_REGION] += triangles
     return all_v_positions, quality_dict
 
-def get_lines_array_per_glue_flap_quality(mesh : Mesh, bmesh : BMesh, face_offset, edge_constraints, use_auto_cuts, world_matrix,
+def get_lines_array_per_glue_flap_quality(mesh : Mesh, bmesh : BMesh, face_offset, world_matrix, flap_angle, flap_height,
                                           connected_components = None,
                                           face_to_component_dict = None):
     glue_flaps_dict = io.read_glueflap_halfedge_dict(mesh)
@@ -233,7 +236,7 @@ def get_lines_array_per_glue_flap_quality(mesh : Mesh, bmesh : BMesh, face_offse
 
         if component_id_of_opp_halfedge in cyclic_components:
             continue # there is no valid unfolding of the opposite component
-        flap_triangles_3d = opp_unfolding.compute_3d_glue_flap_triangles_inside_face(opp_face.index, self.halfedge_to_edge[halfedge], self.flap_angle, self.flap_height)
+        flap_triangles_3d = compute_3d_glue_flap_triangles_inside_face(mesh, face_of_opp_halfedge.index, utils.find_bmesh_edge_of_halfedge(bmesh, halfedge), flap_angle, flap_height)
         flap_line_array = []
         if len(flap_triangles_3d) == 1:
             tri = flap_triangles_3d[0]

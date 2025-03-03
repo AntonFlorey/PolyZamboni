@@ -4,15 +4,15 @@ import numpy as np
 import os
 import threading
 from collections import deque
-from bpy.props import StringProperty, EnumProperty, FloatProperty, IntProperty, BoolProperty, FloatVectorProperty, PointerProperty
+from bpy.props import StringProperty, PointerProperty
 from bpy_extras.io_utils import ExportHelper
 from .properties import GeneralExportSettings, LineExportSettings, TextureExportSettings
 from .drawing import *
 from . import globals
 from . import cutgraph
-from .constants import CUTGRAPH_ID_PROPERTY_NAME, CUT_CONSTRAINTS_PROP_NAME, LOCKED_EDGES_PROP_NAME
+from . import operators_backend
 from . import exporters
-from .printprepper import fit_components_on_pages
+from . import printprepper
 from .geometry import compute_planarity_score, triangulate_3d_polygon
 from .autozamboni import greedy_auto_cuts
 from .callbacks import save_data_of_object

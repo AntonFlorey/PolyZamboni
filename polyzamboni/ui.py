@@ -1,6 +1,5 @@
 import bpy
 from bpy.types import Panel
-from .constants import CUTGRAPH_ID_PROPERTY_NAME
 from .operators import ZamboniCutgraphEditingModeOperator
 
 class MainPanel(bpy.types.Panel):
