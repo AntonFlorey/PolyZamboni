@@ -22,19 +22,13 @@ def compute_all_face_triangulation_indices(bm : BMesh):
         triangulation_indices_per_face[face.index] = tri_ids
     return triangulation_indices_per_face
 
-def compute_tree_traversal(mesh : Mesh, face_set : set, dual_graph : nx.Graph,
-                           edge_constraints = None):
+def compute_tree_traversal(face_set : set, dual_graph : nx.Graph, edge_constraints, use_auto_cuts):
     """ The given faces must be a tree in the dual graph with cuts applied """
 
-    zamboni_props : ZamboniGeneralMeshProps = mesh.polyzamboni_general_mesh_props
-    if edge_constraints is None:
-        edge_constraints = io.read_edge_constraints_dict(mesh)
-        assert edge_constraints is not None
-    
     def f_in_faceset(f):
         return f in face_set
     def edge_is_not_cut(v1, v2):
-        return not utils.mesh_edge_is_cut(dual_graph.edges[(v1, v2)]["edge_index"], edge_constraints, zamboni_props.use_auto_cuts)
+        return not utils.mesh_edge_is_cut(dual_graph.edges[(v1, v2)]["edge_index"], edge_constraints, use_auto_cuts)
     
     subgraph_with_cuts_applied = nx.subgraph_view(dual_graph, filter_node=f_in_faceset, filter_edge = edge_is_not_cut)
     assert nx.connected.is_connected(subgraph_with_cuts_applied)
@@ -82,22 +76,11 @@ def compute_local_coordinate_system_with_all_transitions_to_it(bmesh : BMesh, fa
         inner_affine_transforms[bmesh.edges.get([face_vertices_ccw[i], face_vertices_ccw[j]]).index] = transition
     return local_2d_coord_system, inner_affine_transforms
 
-def compute_2d_unfolded_triangles_of_component(mesh : Mesh, bmesh : BMesh, face_list, pred_dict, skip_intersection_test=False,
-                                               face_triangulation_indices_dict = None, 
-                                               inner_transform_data_per_face = None,
-                                               local_2d_coord_system_per_face = None):
-    # try to read data that is missing
-    if face_triangulation_indices_dict is None:
-        face_triangulation_indices_dict = io.read_triangulation_indices_per_face(mesh)
-        assert face_triangulation_indices_dict is not None
-    if inner_transform_data_per_face is None:
-        inner_transform_data_per_face = io.read_inner_face_affine_transforms(mesh)
-        assert inner_transform_data_per_face is not None
-    if local_2d_coord_system_per_face is None:
-        local_2d_coord_system_per_face = io.read_local_coordinate_systems_per_face(mesh)
-        assert local_2d_coord_system_per_face is not None
-
-    #yeet
+def compute_2d_unfolded_triangles_of_component(bmesh : BMesh, face_list, pred_dict,
+                                               face_triangulation_indices_dict, 
+                                               inner_transform_data_per_face,
+                                               local_2d_coord_system_per_face,
+                                               skip_intersection_test=False):
     unfolded_triangulated_faces = {}
     affine_transform_to_root_coord_system_per_face = {}
     intersection_occured = False
@@ -143,33 +126,30 @@ def compute_2d_unfolded_triangles_of_component(mesh : Mesh, bmesh : BMesh, face_
 
     return unfolded_triangulated_faces, affine_transform_to_root_coord_system_per_face, intersection_occured
 
+def _get_globally_consistent_2d_coord_in_face(point_on_face_3d, face_index, component_id,
+                                             local_coordinate_systems, affine_transforms_to_root):
+    """ Maps a 3D point on a given face to the unfolded face in 2D """
+    face_cs = local_coordinate_systems[face_index]
+    face_transform_to_root = affine_transforms_to_root[component_id][face_index]
+    return face_transform_to_root * geometry.to_local_coords(point_on_face_3d, *face_cs[face_index])
+
+# this version is more flexible as data can be read from the mesh object on the fly
 def get_globally_consistent_2d_coord_in_face(mesh : Mesh, point_on_face_3d, face_index, component_id,
                                              local_coordinate_systems = None, affine_transforms_to_root = None):
-        """ Maps a 3D point on a given face to the unfolded face in 2D """
-        face_cs = local_coordinate_systems[face_index] if local_coordinate_systems is not None else io.read_local_coordinate_system_of_face(mesh, face_index)
-        face_transform_to_root = affine_transforms_to_root[component_id][face_index] if affine_transforms_to_root is not None else io.read_affine_transform_to_roots_of_face_in_component(mesh, component_id, face_index)
-        return face_transform_to_root * geometry.to_local_coords(point_on_face_3d, *face_cs[face_index])
+    """ Maps a 3D point on a given face to the unfolded face in 2D """
+    face_cs = local_coordinate_systems[face_index] if local_coordinate_systems is not None else io.read_local_coordinate_system_of_face(mesh, face_index)
+    face_transform_to_root = affine_transforms_to_root[component_id][face_index] if affine_transforms_to_root is not None else io.read_affine_transform_to_roots_of_face_in_component(mesh, component_id, face_index)
+    return face_transform_to_root * geometry.to_local_coords(point_on_face_3d, *face_cs[face_index])
 
-def compute_unfolding_data_of_all_components(mesh : Mesh, bm : BMesh,
-                                             dual_graph = None,
-                                             edge_constraints = None,
-                                             connected_components = None,
-                                             cyclic_components = None,
-                                             face_triangulation_indices_dict = None, 
-                                             inner_transform_data_per_face = None,
-                                             local_2d_coord_system_per_face = None):
-    if dual_graph is None:
-        dual_graph = utils.construct_dual_graph_from_bmesh(bm)
-    if edge_constraints is None:
-        edge_constraints = io.read_edge_constraints_dict(mesh)
-        assert edge_constraints is not None
-    if connected_components is None:
-        connected_components = io.read_connected_component_sets(mesh)
-        assert connected_components is not None
-    if cyclic_components is None:
-        cyclic_components = io.read_components_with_cycles_set(mesh)
-        assert cyclic_components is not None
-
+def compute_unfolding_data_of_all_components(bm : BMesh,
+                                             dual_graph,
+                                             edge_constraints,
+                                             connected_components,
+                                             cyclic_components,
+                                             face_triangulation_indices_dict, 
+                                             inner_transform_data_per_face,
+                                             local_2d_coord_system_per_face,
+                                             use_auto_cuts):
     unfolded_triangles_per_face_per_component = {}
     affine_transform_to_root_cood_system_per_face_per_component = {}
     components_with_intersections = set()
@@ -177,11 +157,12 @@ def compute_unfolding_data_of_all_components(mesh : Mesh, bm : BMesh,
     for component_id, component_faces in connected_components.items():
         if component_id in cyclic_components:
             continue
-        tree_traversal, pred_dict = compute_tree_traversal(mesh, component_faces, dual_graph, edge_constraints)
-        unfolded_triangulated_faces, affine_transform_to_root_coord_system_per_face, intersection_occured = compute_2d_unfolded_triangles_of_component(mesh, bm, tree_traversal, pred_dict, False, 
+        tree_traversal, pred_dict = compute_tree_traversal(component_faces, dual_graph, edge_constraints, use_auto_cuts)
+        unfolded_triangulated_faces, affine_transform_to_root_coord_system_per_face, intersection_occured = compute_2d_unfolded_triangles_of_component(bm, tree_traversal, pred_dict, 
                                                                                                                                                        face_triangulation_indices_dict, 
-                                                                                                                                                       inner_transform_data_per_face, 
-                                                                                                                                                       local_2d_coord_system_per_face)
+                                                                                                                                                       inner_transform_data_per_face,
+                                                                                                                                                       local_2d_coord_system_per_face,
+                                                                                                                                                       skip_intersection_test=False)
         unfolded_triangles_per_face_per_component[component_id] = unfolded_triangulated_faces
         affine_transform_to_root_cood_system_per_face_per_component[component_id] = affine_transform_to_root_coord_system_per_face
         if intersection_occured:

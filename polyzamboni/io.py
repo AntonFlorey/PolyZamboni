@@ -102,7 +102,7 @@ def connected_components_exist(mesh : Mesh):
 _all_existence_check_functions.append(connected_components_exist)
 
 def write_connected_components(mesh: Mesh, components_as_sets):
-    mesh["polyzamboni_connected_components_lists"] = {str(component_key) : component_set for component_key, component_set in components_as_sets}
+    mesh["polyzamboni_connected_components_lists"] = {str(component_key) : list(component_set) for component_key, component_set in components_as_sets}
 
 def read_connected_components(mesh : Mesh):
     """ Returns None, None if no connected component props exist """
@@ -159,13 +159,10 @@ def next_free_component_index_exists(mesh : Mesh):
     return "polyzamboni_next_free_component_index" in mesh
 _all_existence_check_functions.append(next_free_component_index_exists)
 
-def get_next_free_component_index(mesh : Mesh):
-    """ This also increments the free component index. """
+def read_next_free_component_index(mesh : Mesh):
     if not next_free_component_index_exists(mesh):
         return None
-    next_free_index = mesh["polyzamboni_next_free_component_index"]
-    mesh["polyzamboni_next_free_component_index"] += 1
-    return next_free_index
+    return mesh["polyzamboni_next_free_component_index"]
 
 def write_next_free_component_index(mesh : Mesh, next_free_index):
     mesh["polyzamboni_next_free_component_index"] = next_free_index
@@ -182,7 +179,7 @@ def components_with_cycles_set_exist(mesh : Mesh):
 _all_existence_check_functions.append(components_with_cycles_set_exist)
 
 def write_components_with_cycles_set(mesh : Mesh, cyclic_components):
-    mesh["polyzamboni_cyclic_components"] = cyclic_components
+    mesh["polyzamboni_cyclic_components"] = list(cyclic_components)
 
 def read_components_with_cycles_set(mesh : Mesh):
     if not components_with_cycles_set_exist(mesh):
@@ -211,7 +208,7 @@ def outdated_render_data_exists(mesh : Mesh):
 _all_existence_check_functions.append(outdated_render_data_exists)
 
 def write_outdated_render_data(mesh : Mesh, outdated_render_data):
-    mesh["polyzamboni_outdated_render_data"] = outdated_render_data
+    mesh["polyzamboni_outdated_render_data"] = list(outdated_render_data)
 
 def read_outdated_render_data(mesh : Mesh):
     if not outdated_render_data_exists(mesh):
@@ -318,7 +315,7 @@ def components_with_overlaps_exist(mesh : Mesh):
 _all_existence_check_functions.append(components_with_overlaps_exist)
 
 def write_components_with_overlaps(mesh : Mesh, components_with_overlaps):
-    mesh["polyzamboni_components_with_overlaps"] = components_with_overlaps
+    mesh["polyzamboni_components_with_overlaps"] = list(components_with_overlaps)
 
 def read_components_with_overlaps(mesh : Mesh):
     if not components_with_overlaps_exist(mesh):
@@ -647,7 +644,6 @@ def glue_flap_collisions_dict_valid(mesh : Mesh):
     return True
 _all_validity_check_functions.append(glue_flap_collisions_dict_valid)
 
-# glue flap triangles 3D per edge per face (maybe we compute them each redraw call)
 
 def remove_all_polyzamboni_data(mesh : Mesh):
     for removal_function in _all_removal_functions:

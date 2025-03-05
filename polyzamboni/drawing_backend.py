@@ -12,7 +12,7 @@ from enum import Enum
 
 from . import io
 from . import utils
-from .geometry import triangulate_3d_polygon, signed_point_dist_to_line, face_corner_convex_3d, solve_for_weird_intersection_point
+from .geometry import triangulate_3d_polygon, face_corner_convex_3d, solve_for_weird_intersection_point
 from .utils import mesh_edge_is_cut, find_bmesh_edge_of_halfedge
 from .glueflaps import component_has_overlapping_glue_flaps, flap_is_overlapping, compute_3d_glue_flap_triangles_inside_face
 
