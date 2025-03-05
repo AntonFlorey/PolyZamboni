@@ -9,8 +9,8 @@ from bmesh.types import BMesh
 import numpy as np
 import networkx as nx
 from collections import deque
+import time
 
-from .properties import ZamboniGeneralMeshProps
 from . import utils
 from . import io
 from . import geometry
@@ -59,12 +59,12 @@ def initialize_precomputable_bmesh_data(mesh: Mesh, bm : BMesh):
     io.write_inner_face_affine_transforms(mesh, facewise_transitions_per_edge)
 
 def initialize_paper_model(mesh : Mesh):
-    zamboni_props : ZamboniGeneralMeshProps = mesh.polyzamboni_general_mesh_props
+    zamboni_props = mesh.polyzamboni_general_mesh_props
     bm = bmesh.new()
     bm.from_mesh(mesh)
-    dual_graph = utils.construct_dual_graph_from_bmesh(bmesh)
+    dual_graph = utils.construct_dual_graph_from_bmesh(bm)
 
-    initialize_precomputable_bmesh_data(bm)
+    initialize_precomputable_bmesh_data(mesh, bm)
 
     # edge_constraints
     io.write_edge_constraints_dict(mesh, {})
@@ -79,22 +79,25 @@ def initialize_paper_model(mesh : Mesh):
 
     # unfoldings
     unfolded_triangles, affine_transform_to_root, components_with_overlaps = unfolding.compute_unfolding_data_of_all_components(mesh, bm, dual_graph, 
-                                                                                                                                     {}, 
-                                                                                                                                     connected_components, 
-                                                                                                                                     cyclic_components,
-                                                                                                                                     io.read_triangulation_indices_per_face(mesh),
-                                                                                                                                     io.read_inner_face_affine_transforms(mesh),
-                                                                                                                                     io.read_local_coordinate_systems_per_face(mesh))
+                                                                                                                                {}, 
+                                                                                                                                connected_components, 
+                                                                                                                                cyclic_components,
+                                                                                                                                io.read_triangulation_indices_per_face(mesh),
+                                                                                                                                io.read_inner_face_affine_transforms(mesh),
+                                                                                                                                io.read_local_coordinate_systems_per_face(mesh))
     io.write_facewise_triangles_per_component(mesh, unfolded_triangles)
     io.write_affine_transforms_to_roots(mesh, affine_transform_to_root)
     io.write_components_with_overlaps(mesh, components_with_overlaps)
 
     # glue flaps
     halfedge_to_face_dict = utils.construct_halfedge_to_face_dict(bm)
-    glueflap_dict, glueflap_geometry, glueflap_collisions, no_overlaps_introduced = _greedy_place_all_flaps(bm, zamboni_props.glue_flap_angle, zamboni_props.glue_flap_height, zamboni_props.use_auto_cuts,
-                                                                                                            halfedge_to_face_dict, face_to_component_dict, affine_transform_to_root, 
-                                                                                                            io.read_inner_face_affine_transforms(mesh), unfolded_triangles,
-                                                                                                            {}, cyclic_components, zamboni_props.prefer_alternating_flaps)                                                                                            )
+    glueflap_dict, glueflap_geometry, glueflap_collisions, _ = _greedy_place_all_flaps(bm, zamboni_props.glue_flap_angle, zamboni_props.glue_flap_height, zamboni_props.use_auto_cuts,
+                                                                                       halfedge_to_face_dict, face_to_component_dict, affine_transform_to_root, 
+                                                                                       io.read_inner_face_affine_transforms(mesh), unfolded_triangles,
+                                                                                       {}, cyclic_components, zamboni_props.prefer_alternating_flaps)
+    io.write_glueflap_halfedge_dict(mesh, glueflap_dict)
+    io.write_glue_flap_2d_triangles_per_edge_per_face(mesh, glueflap_geometry)
+    io.write_glue_flap_collision_dict(mesh, glueflap_collisions)
 
     # render data
     io.write_all_component_render_data(mesh, {c_id : [] for c_id in connected_components.keys()}, {c_id : [] for c_id in connected_components.keys()}) # empty
@@ -109,12 +112,12 @@ def initialize_paper_model(mesh : Mesh):
     bm.free()
 
 def delete_paper_model(mesh : Mesh):
-    zamboni_props : ZamboniGeneralMeshProps = mesh.polyzamboni_general_mesh_props
+    zamboni_props = mesh.polyzamboni_general_mesh_props
     zamboni_props.has_attached_paper_model = False
     io.remove_all_polyzamboni_data(mesh)
 
 def sync_paper_model_with_mesh_geometry(mesh : Mesh):
-    zamboni_props : ZamboniGeneralMeshProps = mesh.polyzamboni_general_mesh_props
+    zamboni_props = mesh.polyzamboni_general_mesh_props
     bm = bmesh.new()
     bm.from_mesh(mesh)
 
@@ -169,97 +172,264 @@ def sync_paper_model_with_mesh_geometry(mesh : Mesh):
 #################################
 
 class DataForEditing():
-    def __init__(self, mesh : Mesh):
+    def __init__(self, bm : BMesh,
+                 use_auto_cuts,
+                 zigzag_flaps,
+                 flap_height,
+                 flap_angle,
+                 edge_constraints,
+                 connected_components,
+                 face_to_component_dict,
+                 next_free_component_index,
+                 cyclic_components,
+                 outdated_components,
+                 build_step_numbers,
+                 overlapping_components,
+                 local_coords_per_face,
+                 inner_affine_transforms,
+                 affine_transforms_to_root,
+                 unfolded_triangles,
+                 triangulation_indices_per_face,
+                 glueflap_dict,
+                 glueflap_geometry,
+                 glueflap_collisions):
         # read all required data from the mesh
-        self.mesh = mesh
-        self.use_auto_cuts = mesh.polyzamboni_general_mesh_props.use_auto_cuts
-        self.edge_constraints = io.read_edge_constraints_dict(mesh)
-        self.connected_components, self.face_to_component_dict = io.read_connected_components(mesh)
-        self.next_free_component_index = io.read_next_free_component_index(mesh)
-        self.cyclic_components = io.read_components_with_cycles_set(mesh)
-        self.outdated_components = io.read_outdated_render_data(mesh)
-        self.build_step_numbers = io.read_build_step_numbers(mesh)
-        self.overlapping_components = io.read_components_with_overlaps(mesh)
-        self.local_coords_per_face = io.read_local_coordinate_system_of_face(mesh)
-        self.inner_affine_transforms = io.read_inner_face_affine_transforms(mesh)
-        self.affine_transforms_to_root = io.read_affine_transforms_to_roots(mesh)
-        self.unfolded_triangles = io.read_facewise_triangles_per_component(mesh)
-        self.triangulation_indices_per_face = io.read_triangulation_indices_per_face(mesh)
-        self.glueflap_dict = io.read_glueflap_halfedge_dict(mesh)
-        self.glueflap_geometry = io.read_glue_flap_2d_triangles_per_edge_per_face(mesh)
-        self.glueflap_collisions = io.read_glue_flap_collisions_dict(mesh)
+        self.bm = bm
+        self.bm.verts.ensure_lookup_table()
+        self.bm.edges.ensure_lookup_table()
+        self.bm.faces.ensure_lookup_table()
+        self.dual_graph = utils.construct_dual_graph_from_bmesh(bm)
+        self.halfedge_to_face_dict = utils.construct_halfedge_to_face_dict(bm)
+        self.use_auto_cuts = use_auto_cuts
+        self.zigzag_flaps = zigzag_flaps
+        self.flap_height = flap_height
+        self.flap_angle = flap_angle 
+        self.edge_constraints = edge_constraints
+        self.connected_components = connected_components
+        self.face_to_component_dict = face_to_component_dict
+        self.next_free_component_index = next_free_component_index
+        self.cyclic_components = cyclic_components
+        self.outdated_components = outdated_components
+        self.build_step_numbers = build_step_numbers
+        self.overlapping_components = overlapping_components
+        self.local_coords_per_face = local_coords_per_face
+        self.inner_affine_transforms = inner_affine_transforms
+        self.affine_transforms_to_root = affine_transforms_to_root
+        self.unfolded_triangles = unfolded_triangles
+        self.triangulation_indices_per_face = triangulation_indices_per_face
+        self.glueflap_dict = glueflap_dict
+        self.glueflap_geometry = glueflap_geometry
+        self.glueflap_collisions = glueflap_collisions
 
-    def write_back_my_data(self):
+    @classmethod 
+    def from_mesh(cls, mesh : Mesh):
+        bm = bmesh.new()
+        bm.from_mesh(mesh)
+        zamobni_props = mesh.polyzamboni_general_mesh_props
+        connected_components, face_to_component_dict = io.read_connected_components(mesh)
+        return cls(bm,
+                   zamobni_props.use_auto_cuts,
+                   zamobni_props.prefer_alternating_flaps,
+                   zamobni_props.glue_flap_height,
+                   zamobni_props.glue_flap_angle,
+                   io.read_edge_constraints_dict(mesh),
+                   connected_components,
+                   face_to_component_dict,
+                   io.read_next_free_component_index(mesh),
+                   io.read_components_with_cycles_set(mesh),
+                   io.read_outdated_render_data(mesh),
+                   io.read_build_step_numbers(mesh),
+                   io.read_components_with_overlaps(mesh),
+                   io.read_local_coordinate_systems_per_face(mesh),
+                   io.read_inner_face_affine_transforms(mesh),
+                   io.read_affine_transforms_to_roots(mesh),
+                   io.read_facewise_triangles_per_component(mesh),
+                   io.read_triangulation_indices_per_face(mesh),
+                   io.read_glueflap_halfedge_dict(mesh),
+                   io.read_glue_flap_2d_triangles_per_edge_per_face(mesh),
+                   io.read_glue_flap_collisions_dict(mesh))
+
+    def write_back_my_data(self, mesh : Mesh):
         # write back all read data (with some exceptions)
-        io.write_edge_constraints_dict(self.mesh, self.edge_constraints)
-        io.write_connected_components(self.mesh, self.connected_components)
-        io.write_next_free_component_index(self.mesh, self.next_free_component_index)
-        io.write_components_with_cycles_set(self.mesh, self.cyclic_components)
-        io.write_outdated_render_data(self.mesh, self.outdated_components)
-        io.write_build_step_numbers(self.mesh, self.build_step_numbers)
-        io.write_components_with_overlaps(self.mesh, self.overlapping_components)
-        io.write_affine_transforms_to_roots(self.mesh, self.affine_transforms_to_root)
-        io.write_facewise_triangles_per_component(self.mesh, self.unfolded_triangles)
-        io.write_glueflap_halfedge_dict(self.mesh, self.glueflap_dict)
-        io.write_glue_flap_2d_triangles_per_edge_per_face(self.mesh, self.glueflap_geometry)
-        io.write_glue_flap_collision_dict(self.mesh, self.glueflap_collisions)
+        io.write_edge_constraints_dict(mesh, self.edge_constraints)
+        io.write_connected_components(mesh, self.connected_components)
+        io.write_next_free_component_index(mesh, self.next_free_component_index)
+        io.write_components_with_cycles_set(mesh, self.cyclic_components)
+        io.write_outdated_render_data(mesh, self.outdated_components)
+        io.write_build_step_numbers(mesh, self.build_step_numbers)
+        io.write_components_with_overlaps(mesh, self.overlapping_components)
+        io.write_affine_transforms_to_roots(mesh, self.affine_transforms_to_root)
+        io.write_facewise_triangles_per_component(mesh, self.unfolded_triangles)
+        io.write_glueflap_halfedge_dict(mesh, self.glueflap_dict)
+        io.write_glue_flap_2d_triangles_per_edge_per_face(mesh, self.glueflap_geometry)
+        io.write_glue_flap_collision_dict(mesh, self.glueflap_collisions)
+        self.bm.free()
 
-def _update_paper_model_around_edges():
-    pass
+def _update_paper_model_around_edges(editing_data : DataForEditing, indices_of_touched_edges):
+    # connected components
+    if len(indices_of_touched_edges) <= 5: #some random number lol
+        for edge_index in indices_of_touched_edges:
+            next_free_id = _update_connected_components_around_edge(editing_data.bm, editing_data.dual_graph, edge_index, editing_data.connected_components, 
+                                                                    editing_data.face_to_component_dict, editing_data.cyclic_components, editing_data.outdated_components, 
+                                                                    editing_data.overlapping_components, editing_data.edge_constraints, editing_data.use_auto_cuts, 
+                                                                    editing_data.next_free_component_index)
+            editing_data.next_free_component_index = next_free_id
+    else:
+        connected_components, cyclic_components, next_free_id = _update_all_connected_components(editing_data.dual_graph, editing_data.edge_constraints, editing_data.use_auto_cuts)
+        _sanitize_all_sets_storing_component_ids(editing_data.connected_components, editing_data.cyclic_components, editing_data.outdated_components, editing_data.overlapping_components)
+        editing_data.connected_components = connected_components
+        editing_data.cyclic_components = cyclic_components
+        editing_data.next_free_component_index = next_free_id
 
-def _cut_edges(editing_data : DataForEditing):
+    # unfoldings
+    _update_unfoldings_along_edges(editing_data.bm, editing_data.dual_graph, indices_of_touched_edges, editing_data.edge_constraints, editing_data.use_auto_cuts, editing_data.connected_components,
+                                   editing_data.face_to_component_dict, editing_data.cyclic_components, editing_data.face_to_component_dict, editing_data.inner_affine_transforms, 
+                                   editing_data.local_coords_per_face, editing_data.unfolded_triangles, editing_data.affine_transforms_to_root, editing_data.overlapping_components)
     
+    # glue flaps
+    _greedy_update_flaps_around_changed_components(editing_data.bm, indices_of_touched_edges, editing_data.flap_angle, editing_data.flap_height, editing_data.use_auto_cuts, editing_data.halfedge_to_face_dict,
+                                                   editing_data.face_to_component_dict, editing_data.connected_components, editing_data.affine_transforms_to_root, editing_data.inner_affine_transforms,
+                                                   editing_data.unfolded_triangles, editing_data.edge_constraints, editing_data.cyclic_components, editing_data.zigzag_flaps, editing_data.glueflap_dict,
+                                                   editing_data.glueflap_geometry, editing_data.glueflap_collisions)
+
+    # render data
+    _mark_components_along_edges_as_outdated(editing_data.bm, editing_data.face_to_component_dict, indices_of_touched_edges, editing_data.outdated_components)
+
+def _update_paper_model(editing_data : DataForEditing):
+    # connected components
+    connected_components, cyclic_components, next_free_id = _update_all_connected_components(editing_data.dual_graph, editing_data.edge_constraints, editing_data.use_auto_cuts)
+    _sanitize_all_sets_storing_component_ids(editing_data.connected_components, editing_data.cyclic_components, editing_data.outdated_components, editing_data.overlapping_components)
+    editing_data.connected_components = connected_components
+    editing_data.cyclic_components = cyclic_components
+    editing_data.next_free_component_index = next_free_id
+
+    # unfoldings
+    uf_geometry, affine_to_root, overlapping_components = unfolding.compute_unfolding_data_of_all_components(editing_data.bm, editing_data.dual_graph, editing_data.edge_constraints, editing_data.connected_components,
+                                                                                                             editing_data.cyclic_components, editing_data.triangulation_indices_per_face, editing_data.inner_affine_transforms,
+                                                                                                             editing_data.local_coords_per_face, editing_data.use_auto_cuts)
+    editing_data.unfolded_triangles = uf_geometry
+    editing_data.affine_transforms_to_root = affine_to_root
+    editing_data.overlapping_components = overlapping_components
+
+    # glue flaps
+    glueflap_dict, glueflap_geometry, glueflap_collisions, _ = _greedy_place_all_flaps(editing_data.bm, editing_data.flap_angle, editing_data.flap_height, editing_data.use_auto_cuts, editing_data.halfedge_to_face_dict,
+                                                                                       editing_data.face_to_component_dict, editing_data.affine_transforms_to_root, editing_data.inner_affine_transforms,
+                                                                                       editing_data.unfolded_triangles, editing_data.edge_constraints, editing_data.cyclic_components, editing_data.zigzag_flaps)     
+    editing_data.glueflap_dict = glueflap_dict
+    editing_data.glueflap_geometry = glueflap_geometry
+    editing_data.glueflap_collisions = glueflap_collisions
+
+    # render data
+    _mark_all_components_as_outdated(editing_data.bm, editing_data.connected_components, editing_data.outdated_components)
+
+def update_paper_model(mesh : Mesh):
+    # read all needed data
+    editing_data = DataForEditing.from_mesh(mesh)
+    _update_paper_model(editing_data)
+    editing_data.write_back_my_data(mesh)
+
+def _write_edge_constraints(editing_data : DataForEditing, indices_of_touched_edges, constraint : str):    
     # add cuts to constraints
+    for edge_index in indices_of_touched_edges:
+        editing_data.edge_constraints[edge_index] = constraint
     
+    # update the paper model
+    _update_paper_model_around_edges(editing_data, indices_of_touched_edges)
+
+def _clear_edge_constraints(editing_data : DataForEditing, indices_of_touched_edges):    
+    # add cuts to constraints
+    for edge_index in indices_of_touched_edges:
+        if edge_index in editing_data.edge_constraints:
+            del editing_data.edge_constraints[edge_index]
     
-    pass
+    # update the paper model
+    _update_paper_model_around_edges(editing_data, indices_of_touched_edges)
 
 def cut_edges(mesh : Mesh, indices_of_edges_to_cut):
     # read all needed data
-    editing_data = DataForEditing(mesh)
+    read_time_start = time.time()
+    editing_data = DataForEditing.from_mesh(mesh)
+    print("reading paper model data took", time.time() - read_time_start, "seconds")
 
     # do the cutting operation
-    _cut_edges(editing_data)
+    working_time_start = time.time()
+    _write_edge_constraints(editing_data, indices_of_edges_to_cut, "cut")
+    print("working on the paper model data took", time.time() - working_time_start, "seconds")
 
     # write back all data
-    editing_data.write_back_my_data()
+    write_time_start = time.time()
+    editing_data.write_back_my_data(mesh)
+    print("writing paper model data took", time.time() - write_time_start, "seconds")
 
-def add_lock_constraint(self, locked_edge_id):
-    self.designer_constraints[locked_edge_id] = "glued"
+def glue_edges(mesh : Mesh, indices_of_edges_to_lock):
+    # read all needed data
+    editing_data = DataForEditing.from_mesh(mesh)
 
-def clear_edge_constraint(self, edge_id):
-    if edge_id in self.designer_constraints.keys():
-        del self.designer_constraints[edge_id]
+    # do the cutting operation
+    _write_edge_constraints(editing_data, indices_of_edges_to_lock, "glued")
 
-def add_cutout_region(self, face_indices):
-    self.mesh.faces.ensure_lookup_table()
-    self.mesh.edges.ensure_lookup_table()
+    # write back all data
+    editing_data.write_back_my_data(mesh)
+
+def clear_edges(mesh : Mesh, indices_of_edges_to_clear):
+    # read all needed data
+    editing_data = DataForEditing.from_mesh(mesh)
+
+    # do the cutting operation
+    _clear_edge_constraints(editing_data, indices_of_edges_to_clear)
+
+    # write back all data
+    editing_data.write_back_my_data(mesh)
+
+def add_cutout_region(mesh : Mesh, face_indices):
+    # read all needed data
+    editing_data = DataForEditing.from_mesh(mesh)
+
     face_set = set(face_indices)
     edges = set()
     for f_id in face_indices:
-        edges = edges.union([e.index for e in self.mesh.faces[f_id].edges])
+        edges = edges.union([e.index for e in editing_data.bm.faces[f_id].edges])
     for e_id in edges:
-        cut_this_edge = self.mesh.edges[e_id].is_boundary
-        for f in self.mesh.edges[e_id].link_faces:
+        cut_this_edge = False
+        for f in editing_data.bm.edges[e_id].link_faces:
             if f.index not in face_set:
                 cut_this_edge = True
                 break
         if cut_this_edge:
-            self.designer_constraints[e_id] = "cut"
+            editing_data.edge_constraints[e_id] = "cut"
         else:
-            self.designer_constraints[e_id] = "glued"
+            editing_data.edge_constraints[e_id] = "glued"
 
-def add_cuts_between_different_materials(self):
+    _update_paper_model_around_edges(editing_data, list(edges))
+
+    editing_data.write_back_my_data(mesh)
+
+def add_cuts_between_different_materials(mesh : Mesh):
+    # read all needed data
+    editing_data = DataForEditing.from_mesh(mesh)
+
     edges_cut = []
-    for mesh_edge in self.mesh.edges:
+    for mesh_edge in editing_data.bm.edges:
         if mesh_edge.is_boundary:
             continue
         face_0 = mesh_edge.link_faces[0]
         face_1 = mesh_edge.link_faces[1]
         if face_0.material_index != face_1.material_index:
-            self.add_cut_constraint(mesh_edge.index)
+            editing_data.edge_constraints[mesh_edge.index] = "cut"
             edges_cut.append(mesh_edge.index)
-    return edges_cut
+    
+    _update_paper_model_around_edges(editing_data, edges_cut)
+
+    editing_data.write_back_my_data(mesh)
+
+def compute_build_step_numbers(mesh : Mesh, selected_start_face_ids):
+    bm = bmesh.new()
+    bm.from_mesh(mesh)
+    dual_graph = utils.construct_dual_graph_from_bmesh(bm)
+    connected_components, face_to_component_dict = io.read_connected_components(mesh)
+    build_numbers_dict = cutgraph.compute_build_step_numbers(mesh, selected_start_face_ids, bm, dual_graph, connected_components, face_to_component_dict)
+    io.write_build_step_numbers(mesh, build_numbers_dict)
+    bm.free()
 
 #################################
 #     Updates after edits       #
@@ -386,7 +556,7 @@ def _update_all_connected_components(dual_graph : nx.Graph, edge_constraints, us
 
 def update_all_connected_components(mesh : Mesh, preserve_old_indices=True):
     """ Most data stored for the new components might still be usable. If this is NOT the case, set preserve_old_indices to False to save some time. """
-    zamboni_props : ZamboniGeneralMeshProps = mesh.polyzamboni_general_mesh_props
+    zamboni_props = mesh.polyzamboni_general_mesh_props
     bm = bmesh.new()
     bm.from_mesh(mesh)
     edge_constraints = io.read_edge_constraints_dict(mesh)
@@ -421,7 +591,7 @@ def _update_connected_components_around_edge(bm : BMesh, dual_graph : nx.Graph, 
     components_are_the_same_pre_update = linked_component_ids[0] == linked_component_ids[1]
     component_union = faces_in_component_one.union(faces_in_component_two)
     def edge_is_not_cut(v1, v2):
-        return not utils.mesh_edge_is_cut(dual_graph.edges[(v1, v2)]["edge_index"], edge_constraints, use_auto_cuts)
+        return not utils.mesh_edge_is_cut(dual_graph.edges[(v1, v2)]["mesh_edge_index"], edge_constraints, use_auto_cuts)
     subgraph_with_cuts_applied = nx.subgraph_view(dual_graph, filter_node=lambda v : (v in component_union), filter_edge = edge_is_not_cut)
     updated_faces_in_component_one = nx.node_connected_component(subgraph_with_cuts_applied, linked_face_ids[0])
     updated_faces_in_component_two = nx.node_connected_component(subgraph_with_cuts_applied, linked_face_ids[1])
@@ -464,7 +634,7 @@ def _update_connected_components_around_edge(bm : BMesh, dual_graph : nx.Graph, 
         return next_free_component_id
 
 def update_connected_components_around_edge(mesh : Mesh, edge_index):
-    zamboni_props : ZamboniGeneralMeshProps = mesh.polyzamboni_general_mesh_props
+    zamboni_props = mesh.polyzamboni_general_mesh_props
     bm = bmesh.new()
     bm.from_mesh(mesh)
     connected_components, face_to_component_dict = io.read_connected_components(mesh)
@@ -499,6 +669,11 @@ def _mark_components_along_edges_as_outdated(bm : BMesh, face_to_component_dict,
     components_to_update = _collect_component_ids_along_edges(bm, face_to_component_dict, touched_edges)
     for c_id in components_to_update:
         outdated_components.add(c_id)
+
+def _mark_all_components_as_outdated(bm : BMesh, connected_components : dict, outdated_components : set):
+    outdated_components.clear()
+    for component_id in connected_components.keys():
+        outdated_components.add(component_id)
 
 def _update_unfoldings_along_edges(bm : BMesh, dual_graph : nx.Graph, touched_edges, edge_constraints, use_auto_cuts, connected_components, face_to_component_dict, cyclic_components,
                                    face_triangulation_indices_dict, inner_transform_data_per_face, local_2d_coord_system_per_face,
@@ -569,9 +744,10 @@ def _add_glue_flap_to_face_edge(flap_triangles, component_index, face_index, edg
     # store glueflap
     glueflap_dict[edge_index] = halfedge
     # store collisions
-    _check_for_flap_collisions(flap_triangles, component_index, edge_index, glueflap_geometry, unfolded_component_geometry, glueflap_collisions)
+    collision_occured = _check_for_flap_collisions(flap_triangles, component_index, edge_index, glueflap_geometry, unfolded_component_geometry, glueflap_collisions)
     # store geometry
     glueflap_geometry[component_index][face_index][edge_index] = flap_triangles
+    return collision_occured
 
 def _remove_flap_from_edge(component_index, face_index, edge_index,
                            glueflap_dict, glueflap_collisions, glueflap_geometry): # output
@@ -681,8 +857,8 @@ def _greedy_place_all_flaps(bm : BMesh, flap_angle, flap_height, use_auto_cuts,
             # add the glue flap
             curr_flap_01 = flap_01
             if not curr_e.is_boundary:
-                connected_component_id_01 = face_to_component_dict[halfedge_to_face_dict[(v0.index, v1.index)]]
-                connected_component_id_10 = face_to_component_dict[halfedge_to_face_dict[(v1.index, v0.index)]]
+                connected_component_id_01 = face_to_component_dict[halfedge_to_face_dict[(v0.index, v1.index)].index]
+                connected_component_id_10 = face_to_component_dict[halfedge_to_face_dict[(v1.index, v0.index)].index]
             if not (curr_e.is_boundary or connected_component_id_01 in cyclic_components or connected_component_id_10 in cyclic_components):
                 preferred_halfedge = (v0.index, v1.index) if (prefer_zigzag and not flap_01) or (not prefer_zigzag and flap_01) else (v1.index, v0.index)
                 used_halfedge, no_new_overlap = _add_one_glue_flap(bm, preferred_halfedge, flap_angle, flap_height, halfedge_to_face_dict, face_to_component_dict, affine_transforms_to_roots,
@@ -719,6 +895,28 @@ def _update_all_flap_geometry(bm : BMesh, flap_angle, flap_height, halfedge_to_f
         _try_to_add_glue_flap(component_index, face_index, bm.edges[edge_id], halfedge, flap_angle, flap_height, affine_transforms_to_roots, inner_face_affine_transforms,
                               True, glueflap_dict, glueflap_collisions, glueflap_geometry, unfolded_component_geometry)
     
+def update_all_flap_geometry(mesh : Mesh):
+    bm = bmesh.new()
+    bm.from_mesh(mesh)
+    zamboni_props = mesh.polyzamboni_general_mesh_props
+    halfedge_to_face_dict = utils.construct_halfedge_to_face_dict(mesh)
+    _, face_to_component_dict = io.read_connected_components(mesh)
+    affine_transforms_to_root = io.read_affine_transforms_to_roots(mesh)
+    inner_face_affine_transforms = io.read_inner_face_affine_transforms(mesh)
+    component_geometry = io.read_facewise_triangles_per_component(mesh)
+    glueflap_geometry = io.read_glue_flap_2d_triangles_per_edge_per_face(mesh)
+    glueflap_dict = io.read_glueflap_halfedge_dict(mesh)
+    glueflap_collisions = io.read_glue_flap_collisions_dict(mesh)
+
+    _update_all_flap_geometry(bm, zamboni_props.glue_flap_angle, zamboni_props.glue_flap_height, halfedge_to_face_dict, face_to_component_dict, affine_transforms_to_root, inner_face_affine_transforms, 
+                              component_geometry, glueflap_dict, glueflap_geometry, glueflap_collisions)
+    
+    io.write_glue_flap_2d_triangles_per_edge_per_face(mesh, glueflap_geometry)
+    io.write_glueflap_halfedge_dict(mesh, glueflap_dict)
+    io.write_glue_flap_collision_dict(mesh, glueflap_collisions)
+
+    bm.free()
+
 def _swap_glue_flap(bm : BMesh, edge_index, flap_angle, flap_height, halfedge_to_face_dict, face_to_component_dict, 
                     affine_transforms_to_roots, inner_face_affine_transforms,unfolded_component_geometry,
                     glueflap_dict, glueflap_geometry, glueflap_collisions):
@@ -741,6 +939,29 @@ def _swap_glue_flap(bm : BMesh, edge_index, flap_angle, flap_height, halfedge_to
     _try_to_add_glue_flap(opp_component_index, opp_face_index, edge_index, opp_halfedge, flap_angle, flap_height, affine_transforms_to_roots, inner_face_affine_transforms,
                           True, glueflap_dict, glueflap_collisions, glueflap_geometry, unfolded_component_geometry)
 
+def flip_glue_flaps(mesh : Mesh, edge_indices):
+    bm = bmesh.new()
+    bm.from_mesh(mesh)
+    zamboni_props = mesh.polyzamboni_general_mesh_props
+    _, face_to_component_dict = io.read_connected_components(mesh)
+    affine_transform_to_root = io.read_affine_transforms_to_roots(mesh)
+    unfolded_triangles = io.read_facewise_triangles_per_component(mesh)
+    inner_face_transforms = io.read_inner_face_affine_transforms(mesh)
+    halfedge_to_face_dict = utils.construct_halfedge_to_face_dict(bm)
+    glueflap_dict = io.read_glueflap_halfedge_dict(mesh)
+    glueflap_geometry = io.read_glue_flap_2d_triangles_per_edge_per_face(mesh)
+    glueflap_collisions = io.read_glue_flap_collisions_dict(mesh)
+
+    for edge_index in edge_indices:
+        _swap_glue_flap(bm, edge_index, zamboni_props.glue_flap_angle, zamboni_props.glue_flap_height, halfedge_to_face_dict, face_to_component_dict, affine_transform_to_root, inner_face_transforms,
+                        unfolded_triangles, glueflap_dict, glueflap_geometry, glueflap_collisions)
+
+    io.write_glueflap_halfedge_dict(mesh, glueflap_dict)
+    io.write_glue_flap_2d_triangles_per_edge_per_face(mesh, glueflap_geometry)
+    io.write_glue_flap_collision_dict(mesh, glueflap_collisions)
+
+    bm.free()
+
 def _greedy_update_flaps_around_changed_components(bm : BMesh, touched_edge_ids, flap_angle, flap_height, use_auto_cuts,
                                                    halfedge_to_face_dict, face_to_component_dict, connected_components,
                                                    affine_transforms_to_roots, inner_face_affine_transforms,
@@ -759,13 +980,18 @@ def _greedy_update_flaps_around_changed_components(bm : BMesh, touched_edge_ids,
         for f_id in linked_face_ids:
             updated_components.add(face_to_component_dict[f_id])
         
+    # remove all geometric glueflap info attached to the components
+    for component_index in updated_components:
+        glueflap_geometry[component_index] = {}
+        glueflap_collisions[component_index] = {}
+
     all_interesting_edge_ids = set()
     for face_set in [connected_components[c_id] for c_id in updated_components]:
         for face_index in face_set:
             for edge in bm.faces[face_index].edges:
                 all_interesting_edge_ids.add(edge.index)
 
-    def remove_flap_from_edge_id_existing(edge_index):
+    def remove_flap_from_edge_if_existing(edge_index):
         if edge_index in glueflap_dict.keys():
             curr_halfedge = glueflap_dict[edge_index]
             curr_face = halfedge_to_face_dict[curr_halfedge]
@@ -786,7 +1012,7 @@ def _greedy_update_flaps_around_changed_components(bm : BMesh, touched_edge_ids,
             continue
         if not utils.mesh_edge_is_cut(edge_id, edge_constraints, use_auto_cuts):
             # remove any existing flap here
-            remove_flap_from_edge_id_existing(edge_id)
+            remove_flap_from_edge_if_existing(edge_id)
             processed_edges.add(edge_id)
             continue
 
@@ -806,11 +1032,11 @@ def _greedy_update_flaps_around_changed_components(bm : BMesh, touched_edge_ids,
             # add the glue flap
             curr_flap_01 = flap_01
             if not curr_e.is_boundary:
-                connected_component_id_01 = face_to_component_dict[halfedge_to_face_dict[(v0.index, v1.index)]]
-                connected_component_id_10 = face_to_component_dict[halfedge_to_face_dict[(v1.index, v0.index)]]
+                connected_component_id_01 = face_to_component_dict[halfedge_to_face_dict[(v0.index, v1.index)].index]
+                connected_component_id_10 = face_to_component_dict[halfedge_to_face_dict[(v1.index, v0.index)].index]
             if not curr_e.is_boundary and (connected_component_id_01 in cyclic_components or connected_component_id_10 in cyclic_components):
                 # remove any flaps attached to this edge
-                remove_flap_from_edge_id_existing(curr_e.index)
+                remove_flap_from_edge_if_existing(curr_e.index)
             elif not curr_e.is_boundary:
                 # add a new glue flap 
                 if curr_e.index not in glueflap_dict.keys():
@@ -821,18 +1047,17 @@ def _greedy_update_flaps_around_changed_components(bm : BMesh, touched_edge_ids,
                     if not no_new_overlap:
                         no_flap_overlaps = False
                 else:
-                    # do nothing or restore old glue flap
+                    # restore old glue flap
                     he_with_flap = glueflap_dict[curr_e.index]
-                    
-                    # ffs surrender!
+                    face_with_flap = halfedge_to_face_dict[he_with_flap]
+                    component_with_flap = face_to_component_dict[face_with_flap]
 
-                    _, face_with_flap, unfold_with_flap = self.get_edge_face_and_unfolding_of_halfedge(he_with_flap)
-                    has_flap_overlaps_to_begin_with = glueflaps._component_has_overlapping_glue_flaps()
-                    if not unfold_with_flap.check_if_edge_has_flap(face_with_flap.index, curr_e):
-                        flap_geometry = unfold_with_flap.compute_2d_glue_flap_triangles(face_with_flap.index, curr_e, self.flap_angle, self.flap_height)
-                        unfold_with_flap.add_glue_flap_to_face_edge(face_with_flap.index, curr_e, flap_geometry)
-                        if not has_flap_overlaps_to_begin_with and unfold_with_flap.has_overlapping_glue_flaps():
+                    if component_with_flap in updated_components:
+                        flap_triangles = glueflaps.compute_2d_glue_flap_triangles(component_with_flap, face_with_flap, curr_e, flap_angle, flap_height, affine_transforms_to_roots, inner_face_affine_transforms)
+                        collision_occured = _add_glue_flap_to_face_edge(flap_triangles, component_with_flap, face_with_flap, curr_e.index, he_with_flap, unfolded_component_geometry, glueflap_dict, glueflap_collisions, glueflap_geometry)
+                        if collision_occured:
                             no_flap_overlaps = False
+                        
                     curr_flap_01 = he_with_flap == (v0.index, v1.index)
 
             # collect next edges
@@ -843,10 +1068,31 @@ def _greedy_update_flaps_around_changed_components(bm : BMesh, touched_edge_ids,
                     continue
                 if nb_e.index not in all_interesting_edge_ids:
                     continue
-                if not self.mesh_edge_is_cut(nb_e):
+                if not utils.mesh_edge_is_cut(nb_e.index, edge_constraints, use_auto_cuts):
                     # print("not visiting edge", nb_e.index)
                     continue
                 dfs_stack.append((v1, nb_v, curr_flap_01))
 
     return no_flap_overlaps
+    
+def recompute_all_glue_flaps(mesh : Mesh):
+    bm = bmesh.new()
+    bm.from_mesh(mesh)
+    zamboni_props = mesh.polyzamboni_general_mesh_props
+    _, face_to_component_dict = io.read_connected_components(mesh)
+    affine_transform_to_root = io.read_affine_transforms_to_roots(mesh)
+    unfolded_triangles = io.read_facewise_triangles_per_component(mesh)
+    cyclic_components = io.read_components_with_cycles_set(mesh)
+    inner_face_transforms = io.read_inner_face_affine_transforms(mesh)
+    edge_constraints = io.read_edge_constraints_dict(mesh)
+    halfedge_to_face_dict = utils.construct_halfedge_to_face_dict(bm)
 
+    glueflap_dict, glueflap_geometry, glueflap_collisions, _ = _greedy_place_all_flaps(bm, zamboni_props.glue_flap_angle, zamboni_props.glue_flap_height, zamboni_props.use_auto_cuts,
+                                                                                                            halfedge_to_face_dict, face_to_component_dict, affine_transform_to_root, 
+                                                                                                            inner_face_transforms, unfolded_triangles, edge_constraints, 
+                                                                                                            cyclic_components, zamboni_props.prefer_alternating_flaps)
+    io.write_glueflap_halfedge_dict(mesh, glueflap_dict)
+    io.write_glue_flap_2d_triangles_per_edge_per_face(mesh, glueflap_geometry)
+    io.write_glue_flap_collision_dict(mesh, glueflap_collisions)
+
+    bm.free()

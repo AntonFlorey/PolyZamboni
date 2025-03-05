@@ -28,10 +28,10 @@ def mesh_edge_is_cut(mesh_edge_index, edge_constraints, use_auto_cuts):
 def get_edge_indices_of_mesh_face(mesh : bpy.types.Mesh, face_index):
     return [loop.edge_index for loop in [mesh.loops[loop_index] for loop_index in mesh.polygons[face_index].loop_indices]]
 
-def find_bmesh_edge_of_halfedge(bmesh : bmesh.types.BMesh, halfedge):
+def find_bmesh_edge_of_halfedge(bm : bmesh.types.BMesh, halfedge):
     """ Returns None in case the edge does not exist """
-    bmesh.verts.ensure_lookup_table()
-    return bmesh.edges.get([bmesh.verts[i] for i in halfedge])
+    bm.verts.ensure_lookup_table()
+    return bm.edges.get([bm.verts[i] for i in halfedge])
 
 def construct_halfedge_to_face_dict(mesh : bmesh.types.BMesh):
     """ Assumes that the given mesh is manifold and has no flipped normals! """
@@ -43,12 +43,12 @@ def construct_halfedge_to_face_dict(mesh : bmesh.types.BMesh):
             halfedge_to_face[(verts_ccw[i], verts_ccw[j])] = face
     return halfedge_to_face
 
-def construct_dual_graph_from_bmesh(bmesh : bmesh.types.BMesh):
+def construct_dual_graph_from_bmesh(bm : bmesh.types.BMesh):
     """ Tries to create a dual graph of the given mesh. Multi-edges are not allowed! Returns None is that case. """
     dual_graph = nx.Graph()
-    for face in bmesh.faces:
+    for face in bm.faces:
         dual_graph.add_node(face.index)
-    for face in bmesh.faces:
+    for face in bm.faces:
         curr_id = face.index
         for nb_id, connecting_edge in [(f.index, e) for e in face.edges for f in e.link_faces if f is not face]:
             if (curr_id, nb_id) in dual_graph.edges and dual_graph.edges[(curr_id, nb_id)]["mesh_edge_index"] != connecting_edge.index:

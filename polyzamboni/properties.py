@@ -2,7 +2,7 @@ import bpy
 from bpy.types import Scene
 import numpy as np
 from .drawing import update_all_polyzamboni_drawings
-from .callbacks import update_flap_angle_callback, update_flap_height_callback, update_auto_cuts_usage_callback
+from .callbacks import update_glueflap_geometry_callback, update_auto_cuts_usage_callback
 
 # For more information about Blender Properties, visit:
 # <https://blender.org/api/blender_python_api_2_78a_release/bpy.types.Property.html>
@@ -59,7 +59,7 @@ class ZamboniGeneralMeshProps(bpy.types.PropertyGroup):
         description="Controls how far the glue flaps extend",
         default=0.15,
         min=0.01,
-        update=update_flap_height_callback
+        update=update_glueflap_geometry_callback
     )
     glue_flap_angle : FloatProperty(
         name="Glue flap angle",
@@ -68,7 +68,7 @@ class ZamboniGeneralMeshProps(bpy.types.PropertyGroup):
         min=np.deg2rad(10),
         max=np.deg2rad(170),
         subtype="ANGLE",
-        update=update_flap_angle_callback
+        update=update_glueflap_geometry_callback
     )
     prefer_alternating_flaps : BoolProperty(
         name="ZigZag Flaps",

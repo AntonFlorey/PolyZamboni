@@ -1,11 +1,13 @@
 import bpy
+import bmesh
 import gpu
 import numpy as np
 from gpu_extras.batch import batch_for_shader
+import time
 
-from . import globals
-from . import cutgraph
 from . import drawing_backend
+from . import io
+from .zambonipolice import check_if_polyzamobni_data_exists_and_fits_to_bmesh
 
 # colors 
 BLUE = (  0 / 255,  84 / 255, 159 / 255, 1.0)
@@ -241,36 +243,52 @@ def update_all_polyzamboni_drawings(self, context):
     # hide everything
     hide_all_drawings()
 
+    ao : bpy.types.Object = context.active_object
     # draw user provided cuts
-    if not draw_settings.drawing_enabled or globals.PZ_CURRENT_CUTGRAPH_ID is None:
+    if not draw_settings.drawing_enabled or ao.type != 'MESH' or not ao.data.polyzamboni_general_mesh_props.has_attached_paper_model:
         for area in bpy.context.screen.areas:
             if area.type == 'VIEW_3D':
                 area.tag_redraw()
         return
     
-    # obtain current cutgraph to draw
-    cutgraph_to_draw : cutgraph.CutGraph = globals.PZ_CUTGRAPHS[globals.PZ_CURRENT_CUTGRAPH_ID]
+    # obtain selected paper model to draw
+    active_mesh = ao.data
+    general_mesh_props = active_mesh.polyzamboni_general_mesh_props
+    bm = bmesh.new()
+    bm.from_mesh(active_mesh)
+    if not check_if_polyzamobni_data_exists_and_fits_to_bmesh(active_mesh, bm):
+        print("Attached paper model data invalid! CAN NOT DRAW D:")
+        for area in bpy.context.screen.areas:
+            if area.type == 'VIEW_3D':
+                area.tag_redraw()
+        return
+    world_matrix = ao.matrix_world
+    edge_constraints = io.read_edge_constraints_dict(active_mesh)
+    connected_components, face_to_component_dict =io.read_connected_components(active_mesh)
 
     # draw user provided cuts
-    show_user_provided_cuts(cutgraph_to_draw.mesh_edge_id_list_to_coordinate_list(cutgraph_to_draw.get_manual_cuts_list(), draw_settings.normal_offset), dotted_line_length=draw_settings.dotted_line_length)
-    show_locked_edges(cutgraph_to_draw.mesh_edge_id_list_to_coordinate_list(cutgraph_to_draw.get_locked_edges_list(), draw_settings.normal_offset), dotted_line_length=draw_settings.dotted_line_length)
+    show_user_provided_cuts(drawing_backend.mesh_edge_id_list_to_coordinate_list(bm, io.read_manual_cut_edges(active_mesh), draw_settings.normal_offset, world_matrix), dotted_line_length=draw_settings.dotted_line_length)
+    show_locked_edges(drawing_backend.mesh_edge_id_list_to_coordinate_list(bm, io.read_locked_edges(active_mesh), draw_settings.normal_offset, world_matrix), dotted_line_length=draw_settings.dotted_line_length)
 
-    if cutgraph_to_draw.use_auto_cuts:
-        show_auto_completed_cuts(cutgraph_to_draw.mesh_edge_id_list_to_coordinate_list(cutgraph_to_draw.get_auto_cuts_list(), draw_settings.normal_offset), dotted_line_length=draw_settings.dotted_line_length)
+    if general_mesh_props.use_auto_cuts:
+        show_auto_completed_cuts(drawing_backend.mesh_edge_id_list_to_coordinate_list(bm, io.read_auto_cut_edges(active_mesh), draw_settings.normal_offset, world_matrix), dotted_line_length=draw_settings.dotted_line_length)
 
     if draw_settings.color_faces_by_quality:
-        all_v_positions, quality_dict = cutgraph_to_draw.get_triangle_list_per_cluster_quality(draw_settings.normal_offset)
+        region_fetch_time_start = time.time()
+        all_v_positions, quality_dict = drawing_backend.get_triangle_list_per_cluster_quality(active_mesh, bm, draw_settings.normal_offset, edge_constraints, general_mesh_props.use_auto_cuts, 
+                                                                                              world_matrix, connected_components)
+        print("time to fetch new regions:", time.time() - region_fetch_time_start, "seconds")
         show_region_quality_triangles(all_v_positions, quality_dict)
 
     if draw_settings.show_glue_flaps:
-        glue_flap_quality_dict = cutgraph_to_draw.get_lines_array_per_glue_flap_quality(draw_settings.normal_offset)
+        glue_flap_quality_dict = drawing_backend.get_lines_array_per_glue_flap_quality(active_mesh, bm, draw_settings.normal_offset, world_matrix, general_mesh_props.glue_flap_angle, 
+                                                                                       general_mesh_props.glue_flap_height, connected_components, face_to_component_dict)
         show_glue_flaps(glue_flap_quality_dict)
 
     # Trigger a redraw of all screen areas
     for area in bpy.context.screen.areas:
         if area.type == 'VIEW_3D':
             area.tag_redraw()
-
 
 def draw_errors():
     print("drawing not implemented yet")

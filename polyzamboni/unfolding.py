@@ -9,11 +9,9 @@ from bpy.types import Mesh
 from bmesh.types import BMesh, BMFace
 from itertools import product
 
-from .properties import ZamboniGeneralMeshProps
 from . import io
 from . import geometry
 from . import utils
-
 
 def compute_all_face_triangulation_indices(bm : BMesh):
     triangulation_indices_per_face = {}

@@ -6,16 +6,35 @@ import threading
 from collections import deque
 from bpy.props import StringProperty, PointerProperty
 from bpy_extras.io_utils import ExportHelper
-from .properties import GeneralExportSettings, LineExportSettings, TextureExportSettings
+from .properties import GeneralExportSettings, LineExportSettings, TextureExportSettings, ZamboniGeneralMeshProps
 from .drawing import *
-from . import globals
 from . import cutgraph
-from . import operators_backend
 from . import exporters
 from . import printprepper
 from .geometry import compute_planarity_score, triangulate_3d_polygon
 from .autozamboni import greedy_auto_cuts
-from .callbacks import save_data_of_object
+from . import printprepper
+from . import operators_backend
+from .zambonipolice import check_if_build_step_numbers_exist_and_make_sense, all_components_have_unfoldings
+
+def _active_object_is_mesh(context : bpy.types.Context):
+    active_object = context.active_object
+    is_mesh = active_object is not None and active_object.type == 'MESH' and (context.mode == 'EDIT_MESH' or active_object.select_get())
+    return is_mesh
+
+def _active_object_is_mesh_with_paper_model(context : bpy.types.Context):
+    if not _active_object_is_mesh(context):
+        return False
+    active_mesh = context.active_object.data
+    mesh_props : ZamboniGeneralMeshProps = active_mesh.polyzamboni_general_mesh_props
+    return mesh_props.has_attached_paper_model
+
+def _active_object_is_mesh_with_valid_paper_model(context : bpy.types.Context):
+    if not _active_object_is_mesh(context):
+        return False
+    active_mesh = context.active_object.data
+    mesh_props : ZamboniGeneralMeshProps = active_mesh.polyzamboni_general_mesh_props
+    return mesh_props.has_attached_paper_model and mesh_props.attached_paper_model_data_valid
 
 class InitializeCuttingOperator(bpy.types.Operator):
     """Start the unfolding process for this mesh"""
@@ -35,53 +54,49 @@ class InitializeCuttingOperator(bpy.types.Operator):
             returnto=context.mode
             bpy.ops.object.mode_set(mode="OBJECT")
         ao = bpy.context.active_object
-        mesh : bmesh.types.BMesh = bmesh.new()
-        mesh.from_mesh(ao.data)
+        active_mesh = ao.data
+        mesh_props : ZamboniGeneralMeshProps = active_mesh.polyzamboni_general_mesh_props
+        bm : bmesh.types.BMesh = bmesh.new()
+        bm.from_mesh(ao.data)
         if returnto:
             bpy.ops.object.mode_set(mode=self.weird_mode_table[returnto] if returnto in self.weird_mode_table else returnto)
-        self.selected_mesh_is_manifold = np.all([edge.is_manifold or edge.is_boundary for edge in mesh.edges] + [v.is_manifold for v in mesh.verts])
-        self.normals_are_okay = np.all([edge.is_contiguous or edge.is_boundary for edge in mesh.edges])
+        self.selected_mesh_is_manifold = np.all([edge.is_manifold or edge.is_boundary for edge in bm.edges] + [v.is_manifold for v in bm.verts])
+        self.normals_are_okay = np.all([edge.is_contiguous or edge.is_boundary for edge in bm.edges])
         self.double_connected_face_pair_present = False
         self.non_triangulatable_faces_present = False
-        self.max_planarity_score = max([compute_planarity_score([np.array(v.co) for v in face.verts]) for face in mesh.faces])
+        self.max_planarity_score = max([compute_planarity_score([np.array(v.co) for v in face.verts]) for face in bm.faces])
 
         if not self.selected_mesh_is_manifold:
             wm = context.window_manager
+            bm.free()
             return wm.invoke_props_dialog(self, title="Something went wrong D:", confirm_text="Okay")
         
         if not self.normals_are_okay:
             wm = context.window_manager
+            bm.free()
             return wm.invoke_props_dialog(self, title="Something went wrong D:", confirm_text="Okay")
 
-        face_pair_set = set()
-        for edge in mesh.edges:
-            if edge.is_boundary:
-                continue
-            assert len(edge.link_faces) == 2
-            if tuple(sorted([f.index for f in edge.link_faces])) in face_pair_set:
-                self.double_connected_face_pair_present = True
-                break
-            face_pair_set.add(tuple(sorted([f.index for f in edge.link_faces])))
-        ao.polyzamboni_object_prop.multi_touching_faces_present = self.double_connected_face_pair_present
+        self.double_connected_face_pair_present = len(operators_backend.get_indices_of_multi_touching_faces(bm)) > 0
+        mesh_props.multi_touching_faces_present = self.double_connected_face_pair_present
         if self.double_connected_face_pair_present:
             wm = context.window_manager
+            bm.free()
             return wm.invoke_props_dialog(self, title="Something went wrong D:", confirm_text="Okay")
 
         # check all face triangulations
-        for face in mesh.faces:
-            _, tri_ids = triangulate_3d_polygon([v.co for v in face.verts], face.normal)
-            if len(tri_ids) != len(face.verts) - 2:
-                self.non_triangulatable_faces_present = True
-                break
-        ao.polyzamboni_object_prop.faces_which_cant_be_triangulated_are_present = self.non_triangulatable_faces_present
+        self.non_triangulatable_faces_present = len(operators_backend.get_indices_of_not_triangulatable_faces(bm)) > 0
+        mesh_props.faces_which_cant_be_triangulated_are_present = self.non_triangulatable_faces_present
         if self.non_triangulatable_faces_present:
             wm = context.window_manager
+            bm.free()
             return wm.invoke_props_dialog(self, title="Something went wrong D:", confirm_text="Okay")
 
         if self.max_planarity_score > 0.1:
             wm = context.window_manager
+            bm.free()
             return wm.invoke_props_dialog(self, title="Warning!", confirm_text="Okay")
 
+        bm.free()
         return self.execute(context)
     
     def draw(self, context):
@@ -107,24 +122,16 @@ class InitializeCuttingOperator(bpy.types.Operator):
             returnto=context.mode
             bpy.ops.object.mode_set(mode="OBJECT")
         ao = bpy.context.active_object
-        ao_pz_settings = ao.polyzamboni_object_prop
-        new_cutgraph = cutgraph.CutGraph(ao, ao_pz_settings.glue_flap_angle, 
-                                         ao_pz_settings.glue_flap_height, 
-                                         ao_pz_settings.prefer_alternating_flaps,
-                                         ao_pz_settings.apply_auto_cuts_to_previev)
+        active_mesh = ao.data
         if returnto:
             bpy.ops.object.mode_set(mode=self.weird_mode_table[returnto] if returnto in self.weird_mode_table else returnto)
-        globals.add_cutgraph(ao, new_cutgraph)
-        globals.PZ_CURRENT_CUTGRAPH_ID = ao[CUTGRAPH_ID_PROPERTY_NAME]
+        operators_backend.initialize_paper_model(active_mesh)
         update_all_polyzamboni_drawings(None, context)
         return { 'FINISHED' }
 
     @classmethod
-    def poll(cls, context):
-        active_object = context.active_object
-        is_mesh = active_object is not None and active_object.type == 'MESH' and (context.mode == 'EDIT_MESH' or active_object.select_get())
-
-        return is_mesh and CUTGRAPH_ID_PROPERTY_NAME not in active_object
+    def poll(cls, context : bpy.types.Context):
+        return _active_object_is_mesh(context)
 
 class SelectMultiTouchingFacesOperator(bpy.types.Operator):
     """Select all face pairs that touch at more than one edge"""
@@ -133,39 +140,30 @@ class SelectMultiTouchingFacesOperator(bpy.types.Operator):
     bl_idname  = "polyzamboni.multi_touching_face_selection_op"
 
     def execute(self, context):
-        ao = context.active_object
         bpy.ops.object.mode_set(mode="EDIT")
-        mesh : bmesh.types.BMesh = bmesh.from_edit_mesh(ao.data)
+        ao = bpy.context.active_object
+        active_mesh = ao.data
+        mesh_props : ZamboniGeneralMeshProps = active_mesh.polyzamboni_general_mesh_props
+        bm : bmesh.types.BMesh = bmesh.from_edit_mesh(active_mesh)
 
-        face_pair_set = set()
-        faces_to_select = set()
-        for edge in mesh.edges:
-            if edge.is_boundary:
-                continue
-            assert len(edge.link_faces) == 2
-            if tuple(sorted([f.index for f in edge.link_faces])) in face_pair_set:
-                for f in edge.link_faces:
-                    faces_to_select.add(f.index)
-            face_pair_set.add(tuple(sorted([f.index for f in edge.link_faces])))
+        face_indices_to_select = operators_backend.get_indices_of_multi_touching_faces(bm)
 
-        if len(faces_to_select) == 0:
-            ao.polyzamboni_object_prop.multi_touching_faces_present = False
+        if len(face_indices_to_select) == 0:
+            mesh_props.multi_touching_faces_present = False
 
         # deselect all faces
-        for face in mesh.faces:
+        for face in bm.faces:
             face.select_set(False)
-        mesh.faces.ensure_lookup_table()
-        for face_index in faces_to_select:
-            mesh.faces[face_index].select_set(True)
+        bm.faces.ensure_lookup_table()
+        for face_index in face_indices_to_select:
+            bm.faces[face_index].select_set(True)
 
         bmesh.update_edit_mesh(ao.data)
         return {'FINISHED'}
 
     @classmethod
     def poll(cls, context):
-        active_object = context.active_object
-        is_mesh = active_object is not None and active_object.type == 'MESH' and (context.mode == 'EDIT_MESH' or active_object.select_get())
-        return is_mesh
+        return _active_object_is_mesh(context)
 
 class SelectNonTriangulatableFacesOperator(bpy.types.Operator):
     """Select all faces that can not be triangulated by PolyZamboni"""
@@ -174,44 +172,38 @@ class SelectNonTriangulatableFacesOperator(bpy.types.Operator):
     bl_idname  = "polyzamboni.no_tri_face_selection_op"
 
     def execute(self, context):
-        ao = context.active_object
         bpy.ops.object.mode_set(mode="EDIT")
-        mesh : bmesh.types.BMesh = bmesh.from_edit_mesh(ao.data)
+        ao = bpy.context.active_object
+        active_mesh = ao.data
+        mesh_props : ZamboniGeneralMeshProps = active_mesh.polyzamboni_general_mesh_props
+        bm : bmesh.types.BMesh = bmesh.from_edit_mesh(active_mesh)
         
-        faces_to_select = set()
-        for face in mesh.faces:
-            _, tri_ids = triangulate_3d_polygon([v.co for v in face.verts], face.normal)
-            if len(tri_ids) != len(face.verts) - 2:
-                faces_to_select.add(face.index)
+        face_indices_to_select = operators_backend.get_indices_of_not_triangulatable_faces(bm)
 
-        if len(faces_to_select) == 0:
-            ao.polyzamboni_object_prop.faces_which_cant_be_triangulated_are_present = False
+        if len(face_indices_to_select) == 0:
+            mesh_props.faces_which_cant_be_triangulated_are_present = False
 
         # deselect all faces
-        for face in mesh.faces:
+        for face in bm.faces:
             face.select_set(False)
-        mesh.faces.ensure_lookup_table()
-        for face_index in faces_to_select:
-            mesh.faces[face_index].select_set(True)
+        bm.faces.ensure_lookup_table()
+        for face_index in face_indices_to_select:
+            bm.faces[face_index].select_set(True)
 
         bmesh.update_edit_mesh(ao.data)
         return {'FINISHED'}
 
     @classmethod
-    def poll(cls, context):
-        active_object = context.active_object
-        is_mesh = active_object is not None and active_object.type == 'MESH' and (context.mode == 'EDIT_MESH' or active_object.select_get())
-        return is_mesh
+    def poll(cls, context : bpy.types.Context):
+        return _active_object_is_mesh(context)
 
 class RemoveAllPolyzamboniDataOperator(bpy.types.Operator):
     """Remove all attached Polyzamboni Data"""
-    bl_label = "Remove Unfolding"
+    bl_label = "Remove Paper Model"
     bl_idname = "polyzamboni.remove_all_op"
 
     def execute(self, context):
-        ao = context.active_object
-        print("deleting all cut info from object:", ao.name)
-        globals.remove_cutgraph(ao)
+        operators_backend.delete_paper_model(context.active_object.data)
         update_all_polyzamboni_drawings(None, context)
         return { 'FINISHED' }
     
@@ -223,33 +215,7 @@ class RemoveAllPolyzamboniDataOperator(bpy.types.Operator):
         active_object = context.active_object
         is_mesh = active_object is not None and active_object.type == 'MESH' and (context.mode == 'EDIT_MESH' or active_object.select_get())
 
-        return is_mesh and CUTGRAPH_ID_PROPERTY_NAME in active_object
-
-class ResetAllCutsOperator(bpy.types.Operator):
-    """Restart the unfolding process for this mesh"""
-    bl_label = "Reset Unfolding"
-    bl_idname  = "polyzamboni.cut_reset_op"
-    
-    def execute(self, context):
-        # get the currently selected object
-        ao = bpy.context.active_object
-        ao[CUT_CONSTRAINTS_PROP_NAME] = []
-        ao[LOCKED_EDGES_PROP_NAME] = []
-        ao_pz_settings = ao.polyzamboni_object_prop
-        new_cutgraph = cutgraph.CutGraph(ao, np.deg2rad(ao_pz_settings.glue_flap_angle), ao_pz_settings.glue_flap_height, ao_pz_settings.prefer_alternating_flaps)
-        globals.reset_cutgraph(ao, new_cutgraph)
-        update_all_polyzamboni_drawings(None, context)
-        return { 'FINISHED' }
-
-    def invoke(self, context, event):
-        return context.window_manager.invoke_confirm(self, event, message="Sure? This will delete all cuts.", confirm_text="Reset")
-
-    @classmethod
-    def poll(cls, context):
-        active_object = context.active_object
-        is_mesh = active_object is not None and active_object.type == 'MESH' and (context.mode == 'EDIT_MESH' or active_object.select_get())
-
-        return is_mesh and CUTGRAPH_ID_PROPERTY_NAME in active_object
+        return is_mesh
 
 class SyncMeshOperator(bpy.types.Operator):
     """Transfer mesh changes to the cutgraph. Topology changes will likely break everything!"""
@@ -268,11 +234,9 @@ class SyncMeshOperator(bpy.types.Operator):
         if(context.mode != 'OBJECT'):
             returnto=context.mode
             bpy.ops.object.mode_set(mode="OBJECT")
-        ao = bpy.context.active_object
-        curr_cutgraph : cutgraph.CutGraph = globals.PZ_CUTGRAPHS[ao[CUTGRAPH_ID_PROPERTY_NAME]]
-        curr_cutgraph.construct_dual_graph_from_mesh(ao)
-        curr_cutgraph.unfold_all_connected_components()
-        curr_cutgraph.update_all_flap_geometry()
+
+        operators_backend.sync_paper_model_with_mesh_geometry(context.active_object.data)
+
         if returnto:
             bpy.ops.object.mode_set(mode=self.weird_mode_table[returnto] if returnto in self.weird_mode_table else returnto)
         update_all_polyzamboni_drawings(None, context)
@@ -280,10 +244,7 @@ class SyncMeshOperator(bpy.types.Operator):
     
     @classmethod
     def poll(cls, context):
-        active_object = context.active_object
-        is_mesh = active_object is not None and active_object.type == 'MESH' and (context.mode == 'EDIT_MESH' or active_object.select_get())
-
-        return is_mesh and CUTGRAPH_ID_PROPERTY_NAME in active_object
+        return _active_object_is_mesh_with_paper_model(context)
 
 class SeparateAllMaterialsOperator(bpy.types.Operator):
     """ Adds cuts to all edges between faces with a different material. """
@@ -291,49 +252,27 @@ class SeparateAllMaterialsOperator(bpy.types.Operator):
     bl_idname = "polyzamboni.material_separation_op"
 
     def execute(self, context):
-        ao = bpy.context.active_object
-        active_cutgraph : cutgraph.CutGraph = globals.PZ_CUTGRAPHS[ao[CUTGRAPH_ID_PROPERTY_NAME]]
-        selected_edges = active_cutgraph.add_cuts_between_different_materials()
-        active_cutgraph.compute_all_connected_components()
-        active_cutgraph.update_unfoldings_along_edges(selected_edges)
-        active_cutgraph.greedy_update_flaps_around_changed_components(selected_edges)
+        operators_backend.add_cuts_between_different_materials(bpy.context.active_object.data)
         update_all_polyzamboni_drawings(None, context)
-        ZamboniCutgraphEditingModeOperator.add_undo_step(active_cutgraph.create_save_data())
         return { 'FINISHED' }
     
     @classmethod
     def poll(cls, context):
-        active_object = context.active_object
-        is_mesh = active_object is not None and active_object.type == 'MESH' and (context.mode == 'EDIT_MESH' or active_object.select_get())
-
-        return is_mesh and CUTGRAPH_ID_PROPERTY_NAME in active_object and ZamboniCutgraphEditingModeOperator._cutgraph_editing_mode_active
+        return _active_object_is_mesh_with_valid_paper_model(context)
 
 class RecomputeFlapsOperator(bpy.types.Operator):
     """ Applies the current flap settings and recomputes all glue flaps """
     bl_label = "Recompute Flaps"
     bl_idname = "polyzamboni.flaps_recompute_op"
 
-    def execute(self, context):
-        ao = bpy.context.active_object
-        ao_zamboni_settings = ao.polyzamboni_object_prop
-        curr_cutgraph : cutgraph.CutGraph = globals.PZ_CUTGRAPHS[ao[CUTGRAPH_ID_PROPERTY_NAME]]
-        curr_cutgraph.flap_height = ao_zamboni_settings.glue_flap_height
-        curr_cutgraph.flap_angle =  ao_zamboni_settings.glue_flap_angle
-        curr_cutgraph.prefer_zigzag = ao_zamboni_settings.prefer_alternating_flaps
-        # if ao_zamboni_settings.lock_glue_flaps:
-        #     curr_cutgraph.update_all_flap_geometry() # recompute flap geometry
-        # else:
-        curr_cutgraph.greedy_place_all_flaps() # replace flaps
+    def execute(self, context : bpy.types.Context):
+        operators_backend.recompute_all_glue_flaps(context.active_object.data)
         update_all_polyzamboni_drawings(None, context)
-        ZamboniCutgraphEditingModeOperator.add_undo_step(curr_cutgraph.create_save_data())
         return { 'FINISHED' }
     
     @classmethod
     def poll(cls, context):
-        active_object = context.active_object
-        is_mesh = active_object is not None and active_object.type == 'MESH' and (context.mode == 'EDIT_MESH' or active_object.select_get())
-
-        return is_mesh and CUTGRAPH_ID_PROPERTY_NAME in active_object and ZamboniCutgraphEditingModeOperator._cutgraph_editing_mode_active
+        return _active_object_is_mesh_with_valid_paper_model(context)
 
 class FlipGlueFlapsOperator(bpy.types.Operator):
     """ Flip all glue flaps attached to the selected edges """
@@ -344,27 +283,14 @@ class FlipGlueFlapsOperator(bpy.types.Operator):
         ao = context.active_object
         ao_mesh = ao.data
         ao_bmesh = bmesh.from_edit_mesh(ao_mesh)
-        active_cutgraph_index = ao[CUTGRAPH_ID_PROPERTY_NAME]
-        if active_cutgraph_index < len(globals.PZ_CUTGRAPHS):
-            active_cutgraph : cutgraph.CutGraph = globals.PZ_CUTGRAPHS[active_cutgraph_index]
-        else:
-            print("huch?!")
-            print("cutgraph", active_cutgraph_index, "not in", globals.PZ_CUTGRAPHS)
-
         selected_edges = [e.index for e in ao_bmesh.edges if e.select] 
-
-        for edge_index in selected_edges:
-            active_cutgraph.swap_glue_flap(edge_index)
-
+        operators_backend.flip_glue_flaps(ao_mesh, selected_edges)
         update_all_polyzamboni_drawings(None, context)
-        ZamboniCutgraphEditingModeOperator.add_undo_step(active_cutgraph.create_save_data())
         return { 'FINISHED' }
     
     @classmethod
     def poll(cls, context):
-        active_object = context.active_object
-        is_mesh = active_object is not None and active_object.type == 'MESH' 
-        return is_mesh and context.mode == 'EDIT_MESH' and CUTGRAPH_ID_PROPERTY_NAME in active_object and ZamboniCutgraphEditingModeOperator._cutgraph_editing_mode_active
+        return _active_object_is_mesh_with_valid_paper_model(context) and context.mode == 'EDIT_MESH'
 
 class ComputeBuildStepsOperator(bpy.types.Operator):
     """ Starting at the selected face, compute a polyzamboni build order of the current mesh """
@@ -375,23 +301,13 @@ class ComputeBuildStepsOperator(bpy.types.Operator):
         ao = context.active_object
         ao_mesh = ao.data
         ao_bmesh = bmesh.from_edit_mesh(ao_mesh)
-        active_cutgraph_index = ao[CUTGRAPH_ID_PROPERTY_NAME]
-        if active_cutgraph_index < len(globals.PZ_CUTGRAPHS):
-            active_cutgraph : cutgraph.CutGraph = globals.PZ_CUTGRAPHS[active_cutgraph_index]
-        else:
-            print("huch?!")
-            print("cutgraph", active_cutgraph_index, "not in", globals.PZ_CUTGRAPHS)
-
         selected_faces = [f.index for f in ao_bmesh.faces if f.select]
-        active_cutgraph.generate_bfs_build_oder(selected_faces)
-
+        operators_backend.compute_build_step_numbers(ao_mesh, selected_faces)
         return { 'FINISHED' }
 
     @classmethod
     def poll(cls, context):
-        active_object = context.active_object
-        is_mesh = active_object is not None and active_object.type == 'MESH' 
-        return is_mesh and context.mode == 'EDIT_MESH' and CUTGRAPH_ID_PROPERTY_NAME in active_object
+        return _active_object_is_mesh_with_valid_paper_model(context) and context.mode == 'EDIT_MESH'
 
 class ZamboniGlueFlapDesignOperator(bpy.types.Operator):
     """ Control the placement of glue flaps """
@@ -414,96 +330,11 @@ class ZamboniGlueFlapDesignOperator(bpy.types.Operator):
             return {"FINISHED"}
         elif self.design_actions == "RECOMPUTE_FLAPS":
             bpy.ops.polyzamboni.flaps_recompute_op()
-        save_data_of_object(context.active_object)
         return {"FINISHED"}
 
     @classmethod
     def poll(cls, context):
-        active_object = context.active_object
-        is_mesh = active_object is not None and active_object.type == 'MESH' 
-        return is_mesh and context.mode == 'EDIT_MESH' and CUTGRAPH_ID_PROPERTY_NAME in active_object and ZamboniCutgraphEditingModeOperator._cutgraph_editing_mode_active
-
-class ZamboniCutgraphEditingModeOperator(bpy.types.Operator):
-    """  Cut editing modal operator """
-    bl_label = "PolyZamboni Edit Mode"
-    bl_description = "Enter the edit mode of PolyZamboni (Alt+Y)"
-    bl_idname = "polyzamboni.cutgraph_editing_modal_operator"
-
-    _undo_stack = deque()
-    _max_undo_stack_size = 20
-    _cutgraph_editing_mode_active = False
-
-    @classmethod
-    def add_undo_step(cls, cutgraph_save_data):
-        cls._undo_stack.append(cutgraph_save_data)
-        if len(cls._undo_stack) > cls._max_undo_stack_size:
-            cls._undo_stack.popleft()
-
-    def invoke(self, context, event):
-        if context.object:
-            bpy.ops.object.mode_set(mode="EDIT")
-            ao = context.active_object
-            self.active_cutgraph : cutgraph.CutGraph = globals.PZ_CUTGRAPHS[ao[CUTGRAPH_ID_PROPERTY_NAME]]
-            self.initial_cutgraph_state = self.active_cutgraph.create_save_data()
-            self.__class__._undo_stack = deque([self.initial_cutgraph_state])
-            self.__class__._cutgraph_editing_mode_active = True
-            for region in context.area.regions:
-                if region.active_panel_category == 'PolyZamboni':
-                    region.tag_redraw()
-            self._cancel_at_next_event = False
-            self._finish_at_next_event = False
-            context.window_manager.modal_handler_add(self)
-            return {"RUNNING_MODAL"}
-        else:
-            self.report({'WARNING'}, "No active object, could not invoke cut edit mode")
-            return {'CANCELLED'}
-
-    def modal(self, context, event):
-        if self._cancel_at_next_event:
-            self.active_cutgraph.load_from_save_data(self.initial_cutgraph_state)
-            update_all_polyzamboni_drawings(None, bpy.context)
-            print("cancelling cutgraph editing")
-            self.__class__._cutgraph_editing_mode_active = False
-            for region in context.area.regions:
-                if region.active_panel_category == 'PolyZamboni':
-                    region.tag_redraw()
-            return {'CANCELLED'}
-        if self._finish_at_next_event:
-            print("finishing cutgraph editing")
-            self.__class__._cutgraph_editing_mode_active = False
-            for region in context.area.regions:
-                if region.active_panel_category == 'PolyZamboni':
-                    region.tag_redraw()
-            return {'FINISHED'}
-        if event.type == "ESC" and event.value == "PRESS":
-            self._cancel_at_next_event = True
-            bpy.ops.object.mode_set(mode="OBJECT")
-            return {'PASS_THROUGH'}
-        elif not event.alt and event.type == "TAB" and event.value == "PRESS":
-            self._finish_at_next_event = True
-            return {'PASS_THROUGH'}
-        if event.type == "Y" and event.alt and event.value == "PRESS":
-            self._finish_at_next_event = True
-            bpy.ops.object.mode_set(mode="OBJECT")
-            return {'RUNNING_MODAL'}
-
-        if event.ctrl and event.type == "Z" and event.value == "PRESS":
-            if len(self.__class__._undo_stack) > 1:
-                self.__class__._undo_stack.pop()
-                self.active_cutgraph.load_from_save_data(self.__class__._undo_stack[-1])
-                update_all_polyzamboni_drawings(self, context)
-            return {"RUNNING_MODAL"}
-
-        return {'PASS_THROUGH'}
-    
-    def cancel(self, context):
-        print("cancelled cut editing op")
-
-    @classmethod
-    def poll(cls, context):
-        active_object = context.active_object
-        is_mesh = active_object is not None and active_object.type == 'MESH' 
-        return is_mesh and CUTGRAPH_ID_PROPERTY_NAME in active_object
+        return _active_object_is_mesh_with_valid_paper_model(context) and context.mode == 'EDIT_MESH'
 
 class ZamboniCutDesignOperator(bpy.types.Operator):
     """ Add or remove cuts """
@@ -527,53 +358,22 @@ class ZamboniCutDesignOperator(bpy.types.Operator):
         ao = context.active_object
         ao_mesh = ao.data
         ao_bmesh = bmesh.from_edit_mesh(ao_mesh)
-        active_cutgraph_index = ao[CUTGRAPH_ID_PROPERTY_NAME]
-        if active_cutgraph_index < len(globals.PZ_CUTGRAPHS):
-            active_cutgraph : cutgraph.CutGraph = globals.PZ_CUTGRAPHS[active_cutgraph_index]
-        else:
-            print("huch?!")
-            print("cutgraph", active_cutgraph_index, "not in", globals.PZ_CUTGRAPHS)
-
         selected_edges = [e.index for e in ao_bmesh.edges if e.select] 
-
         if self.design_actions == "ADD_CUT":
-            for e_index in selected_edges:
-                active_cutgraph.add_cut_constraint(e_index)
-                if len(selected_edges) <= 3:
-                    active_cutgraph.update_connected_components_around_edge(e_index)
+            operators_backend.cut_edges(ao_mesh, selected_edges)
         elif self.design_actions == "GLUE_EDGE":
-            for e_index in selected_edges:
-                active_cutgraph.add_lock_constraint(e_index)
-                if len(selected_edges) <= 3:
-                    active_cutgraph.update_connected_components_around_edge(e_index)
+            operators_backend.glue_edges(ao_mesh, selected_edges)
         elif self.design_actions == "RESET_EDGE":
-            for e_index in selected_edges:  
-                active_cutgraph.clear_edge_constraint(e_index)
-                if len(selected_edges) <= 3:
-                    active_cutgraph.update_connected_components_around_edge(e_index)
+            operators_backend.clear_edges(ao_mesh, selected_edges)
         elif self.design_actions == "REGION_CUTOUT":
             selected_faces = [f.index for f in ao_bmesh.faces if f.select]
-            active_cutgraph.add_cutout_region(selected_faces)
-        # elif self.design_actions == "FLIP_FLAPS":
-        #     for e_index in selected_edges:
-        #         active_cutgraph.swap_glue_flap(e_index)
-        #     update_all_polyzamboni_drawings(None, context)
-        #     return {"FINISHED"}
-
-        if self.design_actions == "REGION_CUTOUT" or len(selected_edges) > 3:
-            active_cutgraph.compute_all_connected_components()
-        active_cutgraph.update_unfoldings_along_edges(selected_edges)
-        active_cutgraph.greedy_update_flaps_around_changed_components(selected_edges)
+            operators_backend.add_cutout_region(ao_mesh, selected_faces)
         update_all_polyzamboni_drawings(None, context)
-        save_data_of_object(ao)
-        ZamboniCutgraphEditingModeOperator.add_undo_step(active_cutgraph.create_save_data())
         return {"FINISHED"}
 
     @classmethod
     def poll(cls, context):
-        active_object = context.active_object
-        is_mesh = active_object is not None and active_object.type == 'MESH' 
-        return is_mesh and context.mode == 'EDIT_MESH' and CUTGRAPH_ID_PROPERTY_NAME in active_object and ZamboniCutgraphEditingModeOperator._cutgraph_editing_mode_active
+        return _active_object_is_mesh_with_valid_paper_model(context) and context.mode == 'EDIT_MESH'
 
 class AutoCutsOperator(bpy.types.Operator):
     """ Automatically generate cuts """
@@ -632,13 +432,7 @@ class AutoCutsOperator(bpy.types.Operator):
     def execute(self, context):
         print("execute called")
         ao = context.active_object
-        active_cutgraph_index = ao[CUTGRAPH_ID_PROPERTY_NAME]
-        if active_cutgraph_index < len(globals.PZ_CUTGRAPHS):
-            self.active_cutgraph : cutgraph.CutGraph = globals.PZ_CUTGRAPHS[active_cutgraph_index]
-        else:
-            print("huch?!")
-            print("cutgraph", active_cutgraph_index, "not in", globals.PZ_CUTGRAPHS)
-        
+        ao_mesh = ao.data
         # progress bar setup
         self._running = True
         wm = context.window_manager
@@ -649,7 +443,7 @@ class AutoCutsOperator(bpy.types.Operator):
 
         if self.cutting_algorithm == "GREEDY":
             def compute_and_report_progress():
-                for progress in greedy_auto_cuts(self.active_cutgraph, self.quality_level, self.loop_alignment, self.max_pieces_per_component):
+                for progress in greedy_auto_cuts(ao_mesh, self.quality_level, self.loop_alignment, self.max_pieces_per_component):
                     wm.polyzamboni_auto_cuts_progress = progress
                 print("im done computing!")
                 self._running = False
@@ -667,7 +461,6 @@ class AutoCutsOperator(bpy.types.Operator):
             if not self._running:
                 print("finished")
                 update_all_polyzamboni_drawings(None, context)
-                ZamboniCutgraphEditingModeOperator.add_undo_step(self.active_cutgraph.create_save_data())
                 return {'FINISHED'}
         return {'RUNNING_MODAL'}
     
@@ -678,10 +471,8 @@ class AutoCutsOperator(bpy.types.Operator):
         wm.progress_end()
 
     @classmethod
-    def poll(cls, context):
-        active_object = context.active_object
-        is_mesh = active_object is not None and active_object.type == 'MESH' 
-        return is_mesh and CUTGRAPH_ID_PROPERTY_NAME in active_object and ZamboniCutgraphEditingModeOperator._cutgraph_editing_mode_active
+    def poll(cls, context : bpy.types.Context):
+        return _active_object_is_mesh_with_valid_paper_model(context) and context.mode == 'EDIT_MESH'
 
 class ZamboniCutEditingPieMenu(bpy.types.Menu):
     """This is a custom pie menu for all Zamboni cut design operators"""
@@ -871,10 +662,10 @@ class PolyZamboniExportPDFOperator(bpy.types.Operator, ExportHelper):
         # do stuff
         bpy.ops.polyzamboni.mesh_sync_op() # sync mesh changes before exporting
         ao = context.active_object
-        self.active_cutgraph : cutgraph.CutGraph = globals.PZ_CUTGRAPHS[ao[CUTGRAPH_ID_PROPERTY_NAME]]
-        self.build_steps_valid = self.active_cutgraph.check_if_build_steps_are_present_and_valid()
-        self.max_comp_with, self.max_comp_height = self.active_cutgraph.compute_max_print_component_dimensions()
-        self.mesh_height = self.active_cutgraph.compute_mesh_height()
+        active_mesh = ao.data
+        self.build_steps_valid = check_if_build_step_numbers_exist_and_make_sense(active_mesh)
+        self.max_comp_with, self.max_comp_height = printprepper.compute_max_print_component_dimensions(ao)
+        self.mesh_height = utils.compute_mesh_height(active_mesh)
         if self.mesh_height == 0:
             print("POLYZAMBONI WARNING: Mesh has zero height!")
             self.mesh_height = 1 # to prevent crashes
@@ -900,21 +691,20 @@ class PolyZamboniExportPDFOperator(bpy.types.Operator, ExportHelper):
         print("executed polyzamboni export operator")
         # first, check if the selected model can be unfolded
         ao = context.active_object
-        active_cutgraph : cutgraph.CutGraph = globals.PZ_CUTGRAPHS[ao[CUTGRAPH_ID_PROPERTY_NAME]]
-        if not active_cutgraph.all_components_have_unfoldings():
+        ao_mesh = ao.data
+        if not all_components_have_unfoldings(ao_mesh):
             print("POLYZAMBONI WARNING: You exported a mesh that is not fully foldable yet!")
 
         # prepare everything
-        component_print_info = active_cutgraph.create_print_data_for_all_components(ao, active_cutgraph.compute_scaling_factor_for_target_model_height(100 * self.curr_len_scale * self.general_settings.target_model_height))
-        page_arrangement = fit_components_on_pages(component_print_info, 
-                                                   exporters.paper_sizes[self.general_settings.paper_size], 
-                                                   100 * self.curr_len_scale * self.general_settings.page_margin, 
-                                                   100 * self.curr_len_scale * self.general_settings.space_between_components, 
-                                                   self.general_settings.one_material_per_page)
+        component_print_info = printprepper.create_print_data_for_all_components(ao, printprepper.compute_scaling_factor_for_target_model_height(ao_mesh, 100 * self.curr_len_scale * self.general_settings.target_model_height))
+        page_arrangement = printprepper.fit_components_on_pages(component_print_info,
+                                                                exporters.paper_sizes[self.general_settings.paper_size], 
+                                                                100 * self.curr_len_scale * self.general_settings.page_margin, 
+                                                                100 * self.curr_len_scale * self.general_settings.space_between_components, 
+                                                                self.general_settings.one_material_per_page)
 
         # initialize exporter
         pdf_exporter = create_exporter_for_operator(self, "pdf")
-
         filename, extension = os.path.splitext(self.filepath)
         
         # export file
@@ -924,10 +714,7 @@ class PolyZamboniExportPDFOperator(bpy.types.Operator, ExportHelper):
 
     @classmethod
     def poll(cls, context):
-        active_object = context.active_object
-        is_mesh = active_object is not None and active_object.type == 'MESH' and (context.mode == 'EDIT_MESH' or active_object.select_get())
-
-        return is_mesh and CUTGRAPH_ID_PROPERTY_NAME in active_object
+        return _active_object_is_mesh_with_valid_paper_model(context)
 
 class PolyZamboniExportSVGOperator(bpy.types.Operator, ExportHelper):
     """Export Unfolding of active object as svg"""
@@ -952,10 +739,10 @@ class PolyZamboniExportSVGOperator(bpy.types.Operator, ExportHelper):
         # do stuff
         bpy.ops.polyzamboni.mesh_sync_op() # sync mesh changes before exporting
         ao = context.active_object
-        self.active_cutgraph : cutgraph.CutGraph = globals.PZ_CUTGRAPHS[ao[CUTGRAPH_ID_PROPERTY_NAME]]
-        self.build_steps_valid = self.active_cutgraph.check_if_build_steps_are_present_and_valid()
-        self.max_comp_with, self.max_comp_height = self.active_cutgraph.compute_max_print_component_dimensions()
-        self.mesh_height = self.active_cutgraph.compute_mesh_height()
+        active_mesh = ao.data
+        self.build_steps_valid = check_if_build_step_numbers_exist_and_make_sense(active_mesh)
+        self.max_comp_with, self.max_comp_height = printprepper.compute_max_print_component_dimensions(ao)
+        self.mesh_height = utils.compute_mesh_height(active_mesh)
         if self.mesh_height == 0:
             print("POLYZAMBONI WARNING: Mesh has zero height!")
             self.mesh_height = 1 # to prevent crashes
@@ -981,21 +768,20 @@ class PolyZamboniExportSVGOperator(bpy.types.Operator, ExportHelper):
         print("executed polyzamboni export operator")
         # first, check if the selected model can be unfolded
         ao = context.active_object
-        active_cutgraph : cutgraph.CutGraph = globals.PZ_CUTGRAPHS[ao[CUTGRAPH_ID_PROPERTY_NAME]]
-        if not active_cutgraph.all_components_have_unfoldings():
+        ao_mesh = ao.data
+        if not all_components_have_unfoldings(ao_mesh):
             print("POLYZAMBONI WARNING: You exported a mesh that is not fully foldable yet!")
 
         # prepare everything
-        component_print_info = active_cutgraph.create_print_data_for_all_components(ao, active_cutgraph.compute_scaling_factor_for_target_model_height(100 * self.curr_len_scale * self.general_settings.target_model_height))
-        page_arrangement = fit_components_on_pages(component_print_info, 
-                                                   exporters.paper_sizes[self.general_settings.paper_size], 
-                                                   100 * self.curr_len_scale * self.general_settings.page_margin, 
-                                                   100 * self.curr_len_scale * self.general_settings.space_between_components, 
-                                                   self.general_settings.one_material_per_page)
+        component_print_info = printprepper.create_print_data_for_all_components(ao, printprepper.compute_scaling_factor_for_target_model_height(ao_mesh, 100 * self.curr_len_scale * self.general_settings.target_model_height))
+        page_arrangement = printprepper.fit_components_on_pages(component_print_info,
+                                                                exporters.paper_sizes[self.general_settings.paper_size], 
+                                                                100 * self.curr_len_scale * self.general_settings.page_margin, 
+                                                                100 * self.curr_len_scale * self.general_settings.space_between_components, 
+                                                                self.general_settings.one_material_per_page)
 
         # initialize exporter
         svg_exporter = create_exporter_for_operator(self, "svg")
-
         filename, extension = os.path.splitext(self.filepath)
         
         # export file
@@ -1005,10 +791,7 @@ class PolyZamboniExportSVGOperator(bpy.types.Operator, ExportHelper):
 
     @classmethod
     def poll(cls, context):
-        active_object = context.active_object
-        is_mesh = active_object is not None and active_object.type == 'MESH' and (context.mode == 'EDIT_MESH' or active_object.select_get())
-
-        return is_mesh and CUTGRAPH_ID_PROPERTY_NAME in active_object
+        return _active_object_is_mesh_with_valid_paper_model(context)
 
 polyzamboni_keymaps = []
 
@@ -1022,7 +805,6 @@ def register():
     bpy.utils.register_class(InitializeCuttingOperator)
     bpy.utils.register_class(ZamboniCutDesignOperator)
     bpy.utils.register_class(ZamboniCutEditingPieMenu)
-    bpy.utils.register_class(ResetAllCutsOperator)
     bpy.utils.register_class(SyncMeshOperator)
     bpy.utils.register_class(RecomputeFlapsOperator)
     bpy.utils.register_class(SeparateAllMaterialsOperator)
@@ -1034,7 +816,6 @@ def register():
     bpy.utils.register_class(RemoveAllPolyzamboniDataOperator)
     bpy.utils.register_class(ComputeBuildStepsOperator)
     bpy.utils.register_class(AutoCutsOperator)
-    bpy.utils.register_class(ZamboniCutgraphEditingModeOperator)
     bpy.utils.register_class(SelectMultiTouchingFacesOperator)
     bpy.utils.register_class(SelectNonTriangulatableFacesOperator)
 
@@ -1052,15 +833,11 @@ def register():
         keymap_item = keymap.keymap_items.new("wm.call_menu_pie", "X", "PRESS", alt=True)
         keymap_item.properties.name = "POLYZAMBONI_MT_GLUE_FLAP_EDITING_PIE_MENU"
         polyzamboni_keymaps.append((keymap, keymap_item))
-        # keymap for entering polyzamboni edit mode
-        keymap_item = keymap.keymap_items.new("polyzamboni.cutgraph_editing_modal_operator", "Y", "PRESS", alt=True)
-        polyzamboni_keymaps.append((keymap, keymap_item))
 
 def unregister():
     bpy.utils.unregister_class(InitializeCuttingOperator)
     bpy.utils.unregister_class(ZamboniCutDesignOperator)
     bpy.utils.unregister_class(ZamboniCutEditingPieMenu)
-    bpy.utils.unregister_class(ResetAllCutsOperator)
     bpy.utils.unregister_class(SyncMeshOperator)
     bpy.utils.unregister_class(RecomputeFlapsOperator)
     bpy.utils.unregister_class(SeparateAllMaterialsOperator)
@@ -1072,7 +849,6 @@ def unregister():
     bpy.utils.unregister_class(RemoveAllPolyzamboniDataOperator)
     bpy.utils.unregister_class(ComputeBuildStepsOperator)
     bpy.utils.unregister_class(AutoCutsOperator)
-    bpy.utils.unregister_class(ZamboniCutgraphEditingModeOperator)
     bpy.utils.unregister_class(SelectMultiTouchingFacesOperator)
     bpy.utils.unregister_class(SelectNonTriangulatableFacesOperator)
 

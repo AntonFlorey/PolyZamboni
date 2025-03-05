@@ -1,6 +1,5 @@
 import bpy
-from bpy.types import Panel
-from .operators import ZamboniCutgraphEditingModeOperator
+from .properties import ZamboniGeneralMeshProps
 
 class MainPanel(bpy.types.Panel):
     bl_label = "Poly Zamboni"
@@ -11,99 +10,98 @@ class MainPanel(bpy.types.Panel):
 
     def draw(self, context: bpy.types.Context):
         layout = self.layout
+        ao = context.active_object
         row = layout.row()
 
         row.label(text="thanks for using me!", icon="FUND")
 
-        if context.active_object is not None and CUTGRAPH_ID_PROPERTY_NAME not in context.active_object:
-            row = layout.row()
-            col1 = row.column()
-            col2 = row.column()
-            col1.operator("polyzamboni.cut_initialization_op")
-            col2.label(icon="SHADERFX")
+        if ao is not None and ao.type == 'MESH':
+            active_mesh = ao.data
+            zamboni_props : ZamboniGeneralMeshProps = active_mesh.polyzamboni_general_mesh_props
 
-            if context.active_object.polyzamboni_object_prop.multi_touching_faces_present:
+            if not zamboni_props.has_attached_paper_model:
                 row = layout.row()
                 col1 = row.column()
                 col2 = row.column()
-                col1.operator("polyzamboni.multi_touching_face_selection_op")
-                col2.label(icon="ERROR")
-            if context.active_object.polyzamboni_object_prop.faces_which_cant_be_triangulated_are_present:
-                row = layout.row()
-                col1 = row.column()
-                col2 = row.column()
-                col1.operator("polyzamboni.no_tri_face_selection_op")
-                col2.label(icon="ERROR")
-    
-        else:
-            row = layout.row()
-            col1 = row.column()
-            col2 = row.column()
-            col1.operator("polyzamboni.remove_all_op")
-            col2.label(icon="TRASH")
-            row = layout.row()
-            col1 = row.column()
-            col2 = row.column()
-            col1.operator("polyzamboni.mesh_sync_op")
-            col2.label(icon="FILE_REFRESH")
-
-            ao = context.active_object
-            zamboni_object_settings = ao.polyzamboni_object_prop
-            row = layout.row()
-            col1 = row.column()
-            col2 = row.column()
-            col1.operator("polyzamboni.build_order_op")
-            col2.label(icon="MOD_BUILD")
-
-            row = layout.row()
-            col1 = row.column()
-            col2 = row.column()
-            col1.prop(zamboni_object_settings, "apply_auto_cuts_to_previev")
-            col2.label(icon="LIGHT_DATA")
-
-            # cutgraph editing
-            in_polyzamboni_edit_mode = ZamboniCutgraphEditingModeOperator._cutgraph_editing_mode_active
-            editing_box = layout.box()
-            if in_polyzamboni_edit_mode:
-                editing_box.label(text="PolyZamboni Editing Tools")
-                editing_box.row().label(text="Leave (TAB, Alt+Y) or cancel (ESC)")
-                row = editing_box.row()
-                row.label(text="Press Alt+C to edit cuts")
-                row.active = in_polyzamboni_edit_mode
-                row = editing_box.row()
-                row.label(text="Press Alt+X to edit glue flaps")
-                row.active = in_polyzamboni_edit_mode
-                row = editing_box.row()
-                col1 = row.column()
-                col2 = row.column()
-                col1.operator("polyzamboni.material_separation_op")
-                col2.label(icon="MATERIAL")
-                row = editing_box.row()
-                col1 = row.column()
-                col2 = row.column()
-                if context.window_manager.polyzamboni_auto_cuts_running:
-                    col1.progress(text="running...", factor=context.window_manager.polyzamboni_auto_cuts_progress)
-                    col2.label(icon="SETTINGS")
-                else:
-                    col1.operator("polyzamboni.auto_cuts_op")
-                    col2.label(icon="FILE_SCRIPT")
-                row = editing_box.row()
-                col1 = row.column()
-                col2 = row.column()
-                col1.operator("polyzamboni.flaps_recompute_op")
-                col2.prop(zamboni_object_settings, "prefer_alternating_flaps", icon="RIGID_BODY", icon_only=True)
+                col1.operator("polyzamboni.cut_initialization_op")
+                col2.label(icon="SHADERFX")
+                if zamboni_props.multi_touching_faces_present:
+                    row = layout.row()
+                    col1 = row.column()
+                    col2 = row.column()
+                    col1.operator("polyzamboni.multi_touching_face_selection_op")
+                    col2.label(icon="ERROR")
+                if zamboni_props.faces_which_cant_be_triangulated_are_present:
+                    row = layout.row()
+                    col1 = row.column()
+                    col2 = row.column()
+                    col1.operator("polyzamboni.no_tri_face_selection_op")
+                    col2.label(icon="ERROR")
             else:
-                editing_box.row().operator("polyzamboni.cutgraph_editing_modal_operator")
+                row = layout.row()
+                col1 = row.column()
+                col2 = row.column()
+                col1.operator("polyzamboni.remove_all_op")
+                col2.label(icon="TRASH")
+                row = layout.row()
+                col1 = row.column()
+                col2 = row.column()
+                col1.operator("polyzamboni.mesh_sync_op")
+                col2.label(icon="FILE_REFRESH")
 
-            # layout.row().label(text="Export")
-            row = layout.row()
-            col1 = row.column(align=True).column_flow(columns=2, align=True)
-            col11 = col1.column(align=True)
-            col12 = col1.column(align=True)
-            col3 = row.column()
-            col11.operator("polyzamboni.export_operator_pdf")
-            col12.operator("polyzamboni.export_operator_svg")
-            col3.label(icon="FILE_IMAGE")
+                row = layout.row()
+                col1 = row.column()
+                col2 = row.column()
+                col1.operator("polyzamboni.build_order_op")
+                col2.label(icon="MOD_BUILD")
+
+                row = layout.row()
+                col1 = row.column()
+                col2 = row.column()
+                col1.prop(zamboni_props, "use_auto_cuts")
+                col2.label(icon="LIGHT_DATA")
+
+                # cutgraph editing
+                in_edit_mode = context.mode == 'EDIT_MESH'
+                editing_box = layout.box()
+                if in_edit_mode:
+                    editing_box.label(text="PolyZamboni Editing Tools")
+                    # editing_box.row().label(text="Leave (TAB, Alt+Y) or cancel (ESC)")
+                    row = editing_box.row()
+                    row.label(text="Press Alt+C to edit cuts")
+                    row = editing_box.row()
+                    row.label(text="Press Alt+X to edit glue flaps")
+                    row = editing_box.row()
+                    col1 = row.column()
+                    col2 = row.column()
+                    col1.operator("polyzamboni.material_separation_op")
+                    col2.label(icon="MATERIAL")
+                    row = editing_box.row()
+                    col1 = row.column()
+                    col2 = row.column()
+                    if context.window_manager.polyzamboni_auto_cuts_running:
+                        col1.progress(text="running...", factor=context.window_manager.polyzamboni_auto_cuts_progress)
+                        col2.label(icon="SETTINGS")
+                    else:
+                        col1.operator("polyzamboni.auto_cuts_op")
+                        col2.label(icon="FILE_SCRIPT")
+                    row = editing_box.row()
+                    col1 = row.column()
+                    col2 = row.column()
+                    col1.operator("polyzamboni.flaps_recompute_op")
+                    col2.prop(zamboni_props, "prefer_alternating_flaps", icon="RIGID_BODY", icon_only=True)
+                else:
+                    editing_box.row().operator("polyzamboni.cutgraph_editing_modal_operator")
+
+                # layout.row().label(text="Export")
+                row = layout.row()
+                col1 = row.column(align=True).column_flow(columns=2, align=True)
+                col11 = col1.column(align=True)
+                col12 = col1.column(align=True)
+                col3 = row.column()
+                col11.operator("polyzamboni.export_operator_pdf")
+                col12.operator("polyzamboni.export_operator_svg")
+                col3.label(icon="FILE_IMAGE")
 
 class GlueFlapSettingsPanel(bpy.types.Panel):
     bl_label = "Glue Flap Settings"
@@ -116,22 +114,24 @@ class GlueFlapSettingsPanel(bpy.types.Panel):
 
     def draw(self, context : bpy.types.Context):
         layout = self.layout
-        if context.active_object is not None and CUTGRAPH_ID_PROPERTY_NAME not in context.active_object:
-            layout.label(text="No Cutgraph selected", icon="GHOST_DISABLED")
-        else:
-            ao = context.active_object
-            zamboni_object_settings = ao.polyzamboni_object_prop
-            row = layout.row()
-            col1 = row.column()
-            col2 = row.column()
-            col1.prop(zamboni_object_settings, "glue_flap_height", icon="DRIVER_DISTANCE")
-            col2.label(icon="DRIVER_DISTANCE")
-            row = layout.row()
-            col1 = row.column()
-            col2 = row.column()
-            col1.prop(zamboni_object_settings, "glue_flap_angle", icon="DRIVER_ROTATIONAL_DIFFERENCE")
-            col2.label(icon="DRIVER_ROTATIONAL_DIFFERENCE")
-            pass
+        ao = context.active_object
+        if ao is not None and ao.type == 'MESH':
+            active_mesh = ao.data
+            zamboni_props : ZamboniGeneralMeshProps = active_mesh.polyzamboni_general_mesh_props
+            
+            if zamboni_props.has_attached_paper_model:
+                row = layout.row()
+                col1 = row.column()
+                col2 = row.column()
+                col1.prop(zamboni_props, "glue_flap_height", icon="DRIVER_DISTANCE")
+                col2.label(icon="DRIVER_DISTANCE")
+                row = layout.row()
+                col1 = row.column()
+                col2 = row.column()
+                col1.prop(zamboni_props, "glue_flap_angle", icon="DRIVER_ROTATIONAL_DIFFERENCE")
+                col2.label(icon="DRIVER_ROTATIONAL_DIFFERENCE")
+            else: 
+                layout.label(text="No Cutgraph selected", icon="GHOST_DISABLED")
 
 class DrawSettingsPanel(bpy.types.Panel):
     bl_label = "Render Settings"

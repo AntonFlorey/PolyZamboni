@@ -2,23 +2,18 @@
 Functions in this file are responsible for computing connected components or provide cutgraph utility.
 """
 
-import bpy
 from bpy.types import Mesh
 import bmesh
-from bmesh.types import BMesh
-import numpy as np
 import networkx as nx
 from collections import deque
 
 from . import io
 from . import utils
-from .geometry import triangulate_3d_polygon
-from .properties import ZamboniGeneralMeshProps
 
 def compute_all_connected_components(dual_graph : nx.Graph, edge_constraints, use_auto_cuts):
     """ Returns connected components as sets and a dict from face indices to component ids. """
     # do stuff
-    dual_graph_with_cuts_applied = nx.subgraph_view(dual_graph, filter_edge = lambda v1, v2 : not utils.mesh_edge_is_cut(dual_graph.edges[(v1, v2)]["edge_index"], edge_constraints, use_auto_cuts))
+    dual_graph_with_cuts_applied = nx.subgraph_view(dual_graph, filter_edge = lambda v1, v2 : not utils.mesh_edge_is_cut(dual_graph.edges[(v1, v2)]["mesh_edge_index"], edge_constraints, use_auto_cuts))
     all_components = list(nx.connected_components(dual_graph_with_cuts_applied))
 
     face_to_component_dict = {}
@@ -102,7 +97,7 @@ def connected_component_contains_cycles(component_id, dual_graph : nx.Graph, edg
     def f_in_faceset(f):
         return f in face_set
     def edge_is_not_cut(v1, v2):
-        return not utils.mesh_edge_is_cut(dual_graph.edges[(v1, v2)]["edge_index"], edge_constraints, use_auto_cuts)
+        return not utils.mesh_edge_is_cut(dual_graph.edges[(v1, v2)]["mesh_edge_index"], edge_constraints, use_auto_cuts)
     
     subgraph_with_cuts_applied = nx.subgraph_view(dual_graph, filter_node=f_in_faceset, filter_edge = edge_is_not_cut)
     return not nx.is_tree(subgraph_with_cuts_applied)

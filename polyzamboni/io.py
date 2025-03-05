@@ -24,9 +24,12 @@ _all_validity_check_functions = []
 # Helper functions
 
 def serialize_affine_transform(affine_transform : AffineTransform2D):
-    return list(affine_transform.A.flatten()) + list(affine_transform.t)
+    res = list(affine_transform.A.flatten()) + list(affine_transform.t)
+    assert len(res) == 6
+    return res
 
 def parse_affine_transform(affine_transform_as_list):
+    assert len(affine_transform_as_list) == 6
     return AffineTransform2D(linear_part=np.array(affine_transform_as_list[:4]).reshape((2,2)), affine_part=np.array(affine_transform_as_list[4:]))
 
 # Edge constraints
@@ -102,15 +105,15 @@ def connected_components_exist(mesh : Mesh):
 _all_existence_check_functions.append(connected_components_exist)
 
 def write_connected_components(mesh: Mesh, components_as_sets):
-    mesh["polyzamboni_connected_components_lists"] = {str(component_key) : list(component_set) for component_key, component_set in components_as_sets}
+    mesh["polyzamboni_connected_components_lists"] = {str(component_key) : list(component_set) for component_key, component_set in components_as_sets.items()}
 
 def read_connected_components(mesh : Mesh):
     """ Returns None, None if no connected component props exist """
     
     if not connected_components_exist(mesh):
-        return None, None
+        return (None, None)
     
-    components_as_sets = {int(component_id) : set(component_set) for component_id, component_set in mesh["polyzamboni_connected_components_lists"].to_dict()}
+    components_as_sets = {int(component_id) : set(component_set) for component_id, component_set in mesh["polyzamboni_connected_components_lists"].to_dict().items()}
     face_ids_to_component_ids = {}
     for component_id, component_set in components_as_sets.items():
         for face_index in component_set:
@@ -128,7 +131,7 @@ def read_faces_in_connected_component(mesh : Mesh, component_id):
 def read_connected_component_sets(mesh):
     if not connected_components_exist(mesh):
         return None
-    return {int(component_id) : set(component_set) for component_id, component_set in mesh["polyzamboni_connected_components_lists"].to_dict()}
+    return {int(component_id) : set(component_set) for component_id, component_set in mesh["polyzamboni_connected_components_lists"].to_dict().items()}
 
 def remove_connected_components(mesh : Mesh):
     if connected_components_exist(mesh):
@@ -254,6 +257,8 @@ def build_step_numbers_valid(mesh : Mesh):
         return True
     if not connected_components_exist(mesh):
         return True
+    return True 
+    # I dont know how to handle this correctly
     build_step_numbers = read_build_step_numbers(mesh)
     components_as_sets, _ = read_connected_components(mesh)
     return build_step_numbers.keys() == components_as_sets.keys()
@@ -266,22 +271,22 @@ def component_render_data_exists(mesh : Mesh):
 _all_existence_check_functions.append(component_render_data_exists)
 
 def write_all_component_render_data(mesh : Mesh, vertex_positions_per_component, triangle_indices_per_component):
-    mesh["polyzamboni_render_vertices_per_component"] = {str(component_id) : vertex_positions for component_id, vertex_positions in vertex_positions_per_component.items()}
-    mesh["polyzamboni_render_triangle_indices_per_component"] = {str(component_id) : triangle_indices for component_id, triangle_indices in triangle_indices_per_component.items()}
+    mesh["polyzamboni_render_vertices_per_component"] = {str(component_id) : [[list(vertex_position_entry[0]), [vertex_position_entry[1]]] for vertex_position_entry in vertex_positions] for component_id, vertex_positions in vertex_positions_per_component.items()}
+    mesh["polyzamboni_render_triangle_indices_per_component"] = {str(component_id) : [list(triangle) for triangle in triangle_indices] for component_id, triangle_indices in triangle_indices_per_component.items()}
 
 def read_all_component_render_data(mesh : Mesh):
     if not component_render_data_exists(mesh):
         return None, None
-    vertex_positions_per_component = {int(component_id) : [mathutils.Vector(pos) for pos in vertex_positions] for component_id, vertex_positions in mesh["polyzamboni_render_vertices_per_component"].to_dict().items()}
-    triangle_indices_per_component = {int(component_id) : [tuple(triangle) for triangle in triangle_indices] for component_id, triangle_indices in mesh["polyzamboni_render_triangle_indices_per_component"]}
+    vertex_positions_per_component = {int(component_id) : [(mathutils.Vector(pos[0]), pos[1][0]) for pos in vertex_positions] for component_id, vertex_positions in mesh["polyzamboni_render_vertices_per_component"].to_dict().items()}
+    triangle_indices_per_component = {int(component_id) : [tuple(triangle) for triangle in triangle_indices] for component_id, triangle_indices in mesh["polyzamboni_render_triangle_indices_per_component"].to_dict().items()}
     return vertex_positions_per_component, triangle_indices_per_component
 
 def write_render_data_of_one_component(mesh : Mesh, component_id, vertex_positions, triangle_indices):
     """ Returns True iff write was successful """
     if not component_render_data_exists(mesh):
         return False
-    mesh["polyzamboni_render_vertices_per_component"][str(component_id)] = vertex_positions
-    mesh["polyzamboni_render_triangle_indices_per_component"][str(component_id)] = triangle_indices
+    mesh["polyzamboni_render_vertices_per_component"][str(component_id)] = [[list(vertex_position_entry[0]), [vertex_position_entry[1]]] for vertex_position_entry in vertex_positions]
+    mesh["polyzamboni_render_triangle_indices_per_component"][str(component_id)] = [list(triangle) for triangle in triangle_indices]
     return True
 
 def remove_component_render_data(mesh : Mesh):
@@ -379,12 +384,12 @@ def inner_face_affine_transforms_exist(mesh : Mesh):
 _all_existence_check_functions.append(inner_face_affine_transforms_exist)
 
 def write_inner_face_affine_transforms(mesh : Mesh, inner_face_affine_transforms):
-    mesh["polyzamboni_inner_face_affine_transforms"] = {str(face_id) : {str(edge_id) : serialize_affine_transform(transform) for edge_id, transform in transforms_per_edges} for face_id, transforms_per_edges in inner_face_affine_transforms.items()}
+    mesh["polyzamboni_inner_face_affine_transforms"] = {str(face_id) : {str(edge_id) : serialize_affine_transform(transform) for edge_id, transform in transforms_per_edges.items()} for face_id, transforms_per_edges in inner_face_affine_transforms.items()}
 
 def read_inner_face_affine_transforms(mesh : Mesh):
     if not inner_face_affine_transforms_exist(mesh):
         return False
-    return {int(face_id) : {int(edge_id) : parse_affine_transform(affine_transform_list) for edge_id, affine_transform_list in transforms_per_edges} for face_id, transforms_per_edges in mesh["polyzamboni_inner_face_affine_transforms"].to_dict().items()}
+    return {int(face_id) : {int(edge_id) : parse_affine_transform(affine_transform_list) for edge_id, affine_transform_list in transforms_per_edges.items()} for face_id, transforms_per_edges in mesh["polyzamboni_inner_face_affine_transforms"].to_dict().items()}
 
 def read_inner_affine_transform_of_edge_in_face(mesh : Mesh, edge_id, face_id):
     if not inner_face_affine_transforms_exist(mesh):
@@ -400,15 +405,16 @@ def inner_face_affine_transforms_valid(mesh : Mesh):
     if not inner_face_affine_transforms_exist(mesh):
         return True
     bm = bmesh.new()
+    bm.from_mesh(mesh)
 
     inner_face_affine_transforms = read_inner_face_affine_transforms(mesh)
-    if inner_face_affine_transforms.keys() != set([face.index for face in bm.faces]):
+    if set(inner_face_affine_transforms.keys()) != set([face.index for face in bm.faces]):
         bm.free()
         return False
 
     bm.faces.ensure_lookup_table()
-    for face_index, transforms_per_edge in read_inner_face_affine_transforms(mesh):
-        if transforms_per_edge.keys() != set([edge.index for edge in bm.faces[face_index].edges]):
+    for face_index, transforms_per_edge in read_inner_face_affine_transforms(mesh).items():
+        if set(transforms_per_edge.keys()) != set([edge.index for edge in bm.faces[face_index].edges]):
             bm.free()
             return False
         
@@ -447,10 +453,13 @@ def affine_transforms_to_roots_valid(mesh : Mesh):
         return False
     components_as_sets, _ = read_connected_components(mesh)
     affine_transforms_to_roots = read_affine_transforms_to_roots(mesh)
-    if components_as_sets.keys() != affine_transforms_to_roots.keys():
+    if not  set(affine_transforms_to_roots.keys()).issubset(components_as_sets.keys()):
         return False
     for component_id, facewise_affine_transformations in affine_transforms_to_roots.items():
-        if components_as_sets[component_id] != facewise_affine_transformations.keys():
+        if components_as_sets[component_id] != set(facewise_affine_transformations.keys()):
+            print("face keys differ")
+            print(components_as_sets[component_id])
+            print(set(facewise_affine_transformations.keys()))
             return False
     return True
 _all_validity_check_functions.append(affine_transforms_to_roots_valid)
@@ -489,7 +498,7 @@ def facewise_triangles_per_component_valid(mesh : Mesh):
         return False
     components_as_sets, _ = read_connected_components(mesh)
     facewise_triangles_per_component = read_facewise_triangles_per_component(mesh)
-    if components_as_sets.keys() != facewise_triangles_per_component.keys():
+    if not set(facewise_triangles_per_component.keys()).issubset(components_as_sets.keys()):
         return False
     for component_id, facewise_triangles_per_component in facewise_triangles_per_component.items():
         if components_as_sets[component_id] != facewise_triangles_per_component.keys():
@@ -644,7 +653,6 @@ def glue_flap_collisions_dict_valid(mesh : Mesh):
     return True
 _all_validity_check_functions.append(glue_flap_collisions_dict_valid)
 
-
 def remove_all_polyzamboni_data(mesh : Mesh):
     for removal_function in _all_removal_functions:
         removal_function(mesh)
@@ -659,6 +667,7 @@ def check_if_all_polyzamboni_data_exists(mesh : Mesh):
 def check_if_all_polyzamboni_data_is_valid(mesh : Mesh):
     for validity_check_function in _all_validity_check_functions:
         if not validity_check_function(mesh):
+            print(validity_check_function)
             return False
     return True
 

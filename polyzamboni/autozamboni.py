@@ -1,9 +1,12 @@
+from bpy.types import Mesh
 import bmesh
 import numpy as np
 import time
+import copy
 
-from .cutgraph import CutGraph, ConnectedComponent
-from .unfolding import Unfolding, test_if_two_touching_unfolded_components_overlap
+from .unfolding import test_if_two_touching_unfolded_components_overlap
+from . import operators_backend
+from .properties import ZamboniGeneralMeshProps
 
 axis_dict = {
     "X" : np.array([1.0, 0.0, 0.0]),
@@ -11,7 +14,7 @@ axis_dict = {
     "Z" : np.array([0.0, 0.0, 1.0])
 }
 
-def greedy_auto_cuts(cutgraph : CutGraph, quality_level="NO_OVERLAPS_ALLOWED", target_loop_axis="Z", max_faces_per_component=10):
+def greedy_auto_cuts(mesh : Mesh, quality_level="NO_OVERLAPS_ALLOWED", target_loop_axis="Z", max_faces_per_component=10):
     """ Generates auto-cuts by first cutting all edges and then removing as many cuts as possible. 
     
     Parameters
@@ -28,18 +31,17 @@ def greedy_auto_cuts(cutgraph : CutGraph, quality_level="NO_OVERLAPS_ALLOWED", t
     # timers 
     algo_start_time = time.time()
     init_time = 0
-    component_computation_time = 0
-    unfoldings_time = 0
-    flaps_time = 0
-    undo_time = 0
-
     init_start_time = time.time()
+
+    # read all paper model data
+    edit_data = operators_backend.DataForEditing.from_mesh(mesh)
+
     # First, add auto cuts to all free edges
     free_edges = []
-    for edge in cutgraph.mesh.edges:
-        if edge.index in cutgraph.designer_constraints.keys() and cutgraph.designer_constraints[edge.index] != "auto":
+    for edge in edit_data.bm.edges:
+        if edge.index in edit_data.edge_constraints.keys() and edit_data.edge_constraints[edge.index] != "auto":
             continue
-        cutgraph.designer_constraints[edge.index] = "auto"
+        edit_data.edge_constraints[edge.index] = "auto"
         free_edges.append(edge)
 
     # sort all edges to process by their alignment to the target-loop-axis
@@ -51,11 +53,10 @@ def greedy_auto_cuts(cutgraph : CutGraph, quality_level="NO_OVERLAPS_ALLOWED", t
     sorted_autocut_edges = sorted(free_edges, key=edge_alignment_to_axis_vec, reverse=True)
 
     # recompute components, unfoldings, flaps
-    use_auto_cuts_given_settings = cutgraph.use_auto_cuts
-    cutgraph.use_auto_cuts = True
-    cutgraph.compute_all_connected_components()
-    cutgraph.update_unfoldings_along_edges([e.index for e in sorted_autocut_edges])
-    cutgraph.greedy_update_flaps_around_changed_components([e.index for e in sorted_autocut_edges])
+    edit_data.use_auto_cuts = True
+    zamboni_props : ZamboniGeneralMeshProps = mesh.polyzamboni_general_mesh_props
+    zamboni_props.use_auto_cuts = True
+    operators_backend._update_paper_model(edit_data)
     init_time = time.time() - init_start_time
 
     # Try to remove auto cuts
@@ -65,82 +66,73 @@ def greedy_auto_cuts(cutgraph : CutGraph, quality_level="NO_OVERLAPS_ALLOWED", t
         yield auto_cut_progress
         # boundary edges do not have to be cut
         if edge.is_boundary:
-            cutgraph.clear_edge_constraint(edge.index)
+            operators_backend._clear_edge_constraints(edit_data, [edge.index])
             continue
         # look ahead to see if we can remove the cut
         
         # get connected component
         linked_face_ids = [f.index for f in edge.link_faces]
         assert len(linked_face_ids) == 2
-        linked_component_ids = [cutgraph.vertex_to_component_dict[mesh_f] for mesh_f in linked_face_ids]
+        linked_component_ids = [edit_data.face_to_component_dict[f_index] for f_index in linked_face_ids]
         # check for cyclic components
         if linked_component_ids[0] == linked_component_ids[1]:
             continue
-        connected_component_1 : ConnectedComponent = cutgraph.connected_components[linked_component_ids[0]]
-        connected_component_2 : ConnectedComponent = cutgraph.connected_components[linked_component_ids[1]]
-        component_union = connected_component_1._face_index_set.union(connected_component_2._face_index_set)
+        faces_in_component_1 : set = edit_data.connected_components[linked_component_ids[0]]
+        faces_in_component_2 : set = edit_data.connected_components[linked_component_ids[1]]
+        component_union = faces_in_component_1.union(faces_in_component_2)
         if len(component_union) > max_faces_per_component:
             continue # component would be to large!
         # check for overlapping mesh pieces
         halfedge_1 = tuple(edge.verts)
         halfedge_2 = tuple(reversed(halfedge_1))
-        cutgraph.ensure_halfedge_to_face_table()
-        face_index_1 = cutgraph.halfedge_to_face[tuple([v.index for v in halfedge_1])].index
-        face_index_2 = cutgraph.halfedge_to_face[tuple([v.index for v in halfedge_2])].index
-        unfolding_1 : Unfolding = cutgraph.connected_components[cutgraph.vertex_to_component_dict[face_index_1]]._unfolding
-        unfolding_2 : Unfolding = cutgraph.connected_components[cutgraph.vertex_to_component_dict[face_index_2]]._unfolding
-        if len(unfolding_1.triangulated_faces_2d.keys()) < len(unfolding_2.triangulated_faces_2d.keys()):
-            merging_produces_overlaps = test_if_two_touching_unfolded_components_overlap(unfolding_1, unfolding_2, face_index_1, face_index_2, halfedge_1, halfedge_2)
+        face_index_1 = edit_data.halfedge_to_face_dict[tuple([v.index for v in halfedge_1])].index
+        face_index_2 = edit_data.halfedge_to_face_dict[tuple([v.index for v in halfedge_2])].index
+        component_index_1 = edit_data.face_to_component_dict[face_index_1]
+        component_index_2 = edit_data.face_to_component_dict[face_index_2]
+        if len(edit_data.unfolded_triangles[component_index_1].keys()) < len(edit_data.unfolded_triangles[component_index_2].keys()):
+            merging_produces_overlaps = test_if_two_touching_unfolded_components_overlap(mesh, component_index_1, component_index_2, face_index_1, face_index_2, halfedge_1, halfedge_2,
+                                                                                         edit_data.local_coords_per_face, edit_data.affine_transforms_to_root, edit_data.unfolded_triangles)
         else:
-            merging_produces_overlaps = test_if_two_touching_unfolded_components_overlap(unfolding_2, unfolding_1, face_index_2, face_index_1, halfedge_2, halfedge_1)
+            merging_produces_overlaps = test_if_two_touching_unfolded_components_overlap(mesh,component_index_2, component_index_1, face_index_2, face_index_1, halfedge_2, halfedge_1,
+                                                                                         edit_data.local_coords_per_face, edit_data.affine_transforms_to_root, edit_data.unfolded_triangles)
         if merging_produces_overlaps and not quality_level == "ALL_OVERLAPS_ALLOWED":
             continue # no mesh overlaps allowed
 
+
         # remove the auto cut
-        cutgraph.clear_edge_constraint(edge.index)
-        component_start_time = time.time()
-        cutgraph.update_connected_components_around_edge(edge.index)
-        component_computation_time += time.time() - component_start_time
-        unfolding_start_time = time.time()
-        cutgraph.update_unfoldings_along_edges([edge.index], skip_intersection_test=(not merging_produces_overlaps))
-        unfoldings_time += time.time() - unfolding_start_time
-        flaps_start_time = time.time()
-        flaps_success = cutgraph.greedy_update_flaps_around_changed_components([edge.index])
-        flaps_time += time.time() - flaps_start_time
+        assert edge.index in edit_data.edge_constraints.keys()
+        del edit_data.edge_constraints[edge.index]
+
+        # update the paper model
+        next_free_id = operators_backend._update_connected_components_around_edge(edit_data.bm, edit_data.dual_graph, edge.index, edit_data.connected_components, 
+                                                                                  edit_data.face_to_component_dict, edit_data.cyclic_components, edit_data.outdated_components, 
+                                                                                  edit_data.overlapping_components, edit_data.edge_constraints, edit_data.use_auto_cuts, 
+                                                                                  edit_data.next_free_component_index)
+        edit_data.next_free_component_index = next_free_id
+        # unfoldings
+        operators_backend._update_unfoldings_along_edges(edit_data.bm, edit_data.dual_graph, [edge.index], edit_data.edge_constraints, edit_data.use_auto_cuts, 
+                                                         edit_data.connected_components, edit_data.face_to_component_dict, edit_data.cyclic_components, edit_data.face_to_component_dict, 
+                                                         edit_data.inner_affine_transforms, edit_data.local_coords_per_face, edit_data.unfolded_triangles, edit_data.affine_transforms_to_root, 
+                                                         edit_data.overlapping_components)
+        # glue flaps
+        no_flap_overlaps = operators_backend._greedy_update_flaps_around_changed_components(edit_data.bm, [edge.index], edit_data.flap_angle, edit_data.flap_height, edit_data.use_auto_cuts, 
+                                                                                            edit_data.halfedge_to_face_dict, edit_data.face_to_component_dict, edit_data.connected_components, 
+                                                                                            edit_data.affine_transforms_to_root, edit_data.inner_affine_transforms,edit_data.unfolded_triangles, 
+                                                                                            edit_data.edge_constraints, edit_data.cyclic_components, edit_data.zigzag_flaps, edit_data.glueflap_dict,
+                                                                                            edit_data.glueflap_geometry, edit_data.glueflap_collisions)
         # check for overlapping glue flaps
-        if not flaps_success and quality_level == "NO_OVERLAPS_ALLOWED":
+        if not no_flap_overlaps and quality_level == "NO_OVERLAPS_ALLOWED":
             # oh no, revert the decision
-            undo_start_time = time.time()
-            cutgraph.designer_constraints[edge.index] = "auto"
-            component_start_time = time.time()
-            cutgraph.update_connected_components_around_edge(edge.index)
-            component_computation_time += time.time() - component_start_time
-            unfolding_start_time = time.time()
-            cutgraph.update_unfoldings_along_edges([edge.index], skip_intersection_test=(not merging_produces_overlaps))
-            unfoldings_time += time.time() - unfolding_start_time
-            flaps_start_time = time.time()
-            cutgraph.greedy_update_flaps_around_changed_components([edge.index])
-            flaps_time += time.time() - flaps_start_time
-            undo_time += time.time() - undo_start_time
+            operators_backend._write_edge_constraints(edit_data, [edge.index], "auto")
 
-    # compactify
-    cutgraph.compactify_components()
-
-    # restore input settings
-    if not use_auto_cuts_given_settings:
-        cutgraph.use_auto_cuts = use_auto_cuts_given_settings
-        cutgraph.compute_all_connected_components()
-        cutgraph.unfold_all_connected_components()
-        cutgraph.greedy_place_all_flaps()
+    # write the result back to the mesh
+    edit_data.write_back_my_data(mesh)
 
     # timings
     total_time = time.time() - algo_start_time
     print("Greedy Auto Cuts total time:", total_time)
-    print("Init time: {:.2f}s ({:.1f}%)".format(init_time, 100 * init_time / total_time))
-    print("Components time: {:.2f}s ({:.1f}%)".format(component_computation_time, 100 * component_computation_time / total_time))
-    print("Unfoldings time: {:.2f}s ({:.1f}%)".format(unfoldings_time, 100 * unfoldings_time / total_time))
-    print("Flaps time: {:.2f}s ({:.1f}%)".format(flaps_time, 100 * flaps_time / total_time))
-    print("Undo time: {:.2f}s ({:.1f}%)".format(undo_time, 100 * undo_time / total_time))
+    if total_time > 0:
+        print("Init time: {:.2f}s ({:.1f}%)".format(init_time, 100 * init_time / total_time))
 
     yield 1.0
     

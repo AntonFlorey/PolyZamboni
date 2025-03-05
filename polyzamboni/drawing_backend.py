@@ -152,8 +152,8 @@ def compute_and_update_connected_component_triangle_lists_for_drawing(mesh : Mes
 
     bmesh.faces.ensure_lookup_table()
 
-    triangles_per_component = {}
-    all_vertex_positions = []
+    render_ready_triangles_per_component = {}
+    render_ready_vertex_positions = []
 
     min_edge_len = min(e.calc_length() for e in bmesh.edges) # i hope this does not take too long
     small_dist = 0.05 * min_edge_len
@@ -176,12 +176,12 @@ def compute_and_update_connected_component_triangle_lists_for_drawing(mesh : Mes
             if io.component_render_data_exists(mesh):
                 io.write_render_data_of_one_component(mesh, component_id, component_vertex_positions, component_triangles)
 
-        vertex_id_offset = len(all_vertex_positions)
-        all_vertex_positions += [world_matrix @ (v + face_offset * bmesh.faces[f_index].normal) for (v, f_index) in verts_per_component[component_id]]
-        triangles_per_component[component_id] = [(vertex_id_offset + tri[0], vertex_id_offset + tri[1], vertex_id_offset + tri[2]) for tri in triangles_per_component[component_id]]
+        vertex_id_offset = len(render_ready_vertex_positions)
+        render_ready_vertex_positions += [world_matrix @ (v + face_offset * bmesh.faces[f_index].normal) for (v, f_index) in verts_per_component[component_id]]
+        render_ready_triangles_per_component[component_id] = [(vertex_id_offset + tri[0], vertex_id_offset + tri[1], vertex_id_offset + tri[2]) for tri in triangles_per_component[component_id]]
 
     io.write_outdated_render_data(mesh, outdated_render_flags)
-    return all_vertex_positions, triangles_per_component
+    return render_ready_vertex_positions, render_ready_triangles_per_component
 
 def get_triangle_list_per_cluster_quality(mesh : Mesh, bmesh : BMesh, face_offset, edge_constraints, use_auto_cuts, world_matrix,
                                           connected_components = None):

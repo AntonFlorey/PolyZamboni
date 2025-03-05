@@ -6,8 +6,8 @@ from bpy.types import Mesh
 from bmesh.types import BMesh
 
 from . import io
-from .properties import ZamboniGeneralMeshProps
 from .cutgraph import compute_all_connected_components
+from . import utils
 
 def check_if_polyzamobni_data_exists_and_fits_to_bmesh(mesh : Mesh, bmesh : BMesh):
     if not io.check_if_all_polyzamboni_data_exists(mesh):
@@ -36,32 +36,11 @@ def check_if_polyzamobni_data_exists_and_fits_to_bmesh(mesh : Mesh, bmesh : BMes
         return False
     
     # Recompute connected components and make sure they match with the stored ones (maybe I can omit this for now ;)
-    zamoboni_props : ZamboniGeneralMeshProps = mesh.polyzamboni_general_mesh_props
-    connected_components_of_bmesh, _ = compute_all_connected_components(mesh, zamoboni_props.use_auto_cuts, design_constraints, bmesh)
-    if set(connected_components.values()) != set(connected_components_of_bmesh.values()):
+    zamoboni_props = mesh.polyzamboni_general_mesh_props
+    connected_components_of_bmesh, _ = compute_all_connected_components(utils.construct_dual_graph_from_bmesh(bmesh), design_constraints, zamoboni_props.use_auto_cuts)
+    if frozenset([frozenset(face_set) for face_set in connected_components.values()]) != frozenset([frozenset(face_set) for face_set in connected_components_of_bmesh.values()]):
         return False
 
-    return True
-
-def check_if_glue_flaps_exist_and_are_valid(self):
-    if not hasattr(self, "glue_flaps"):
-        return False
-    # every cut edge needs a glue flap
-    for dual_graph_edge in self.dualgraph.edges:
-        c_1 = self.vertex_to_component_dict[dual_graph_edge[0]]
-        c_2 = self.vertex_to_component_dict[dual_graph_edge[1]]
-        if c_1 is not None and c_2 is not None and self.edge_is_cut(*dual_graph_edge):
-            if self.dualgraph.edges[dual_graph_edge]["edge_index"] not in self.glue_flaps.keys():
-                return False
-    # every glue flap needs a cut edge between 
-    self.ensure_halfedge_to_face_table()
-    self.mesh.edges.ensure_lookup_table()
-    for edge_index in self.glue_flaps.keys():
-        if not self.mesh_edge_is_cut(self.mesh.edges[edge_index]):
-            return False
-        for adj_face in self.mesh.edges[edge_index].link_faces:
-            if self.connected_components[self.vertex_to_component_dict[adj_face.index]]._unfolding is None:
-                return False
     return True
 
 def all_components_have_unfoldings(mesh : Mesh):
@@ -77,5 +56,6 @@ def check_if_build_step_numbers_exist_and_make_sense(mesh : Mesh):
     # check content
     build_step_numbers = io.read_build_step_numbers(mesh)
     connected_components = io.read_connected_component_sets(mesh)
-    return set(build_step_numbers.values()) == set(range(1, len(connected_components.keys()) + 1))
+
+    return set(connected_components.keys()).issubset(build_step_numbers.keys()) and set(build_step_numbers.values()) == set(range(1, len(connected_components.keys()) + 1))
     
