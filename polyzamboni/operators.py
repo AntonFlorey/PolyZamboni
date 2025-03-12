@@ -8,13 +8,13 @@ from bpy.props import StringProperty, PointerProperty
 from bpy_extras.io_utils import ExportHelper
 from .properties import GeneralExportSettings, LineExportSettings, TextureExportSettings, ZamboniGeneralMeshProps
 from .drawing import *
-from . import cutgraph
 from . import exporters
 from . import printprepper
 from .geometry import compute_planarity_score, triangulate_3d_polygon
 from .autozamboni import greedy_auto_cuts
 from . import printprepper
 from . import operators_backend
+from . import utils
 from .zambonipolice import check_if_build_step_numbers_exist_and_make_sense, all_components_have_unfoldings
 
 def _active_object_is_mesh(context : bpy.types.Context):
@@ -28,13 +28,6 @@ def _active_object_is_mesh_with_paper_model(context : bpy.types.Context):
     active_mesh = context.active_object.data
     mesh_props : ZamboniGeneralMeshProps = active_mesh.polyzamboni_general_mesh_props
     return mesh_props.has_attached_paper_model
-
-def _active_object_is_mesh_with_valid_paper_model(context : bpy.types.Context):
-    if not _active_object_is_mesh(context):
-        return False
-    active_mesh = context.active_object.data
-    mesh_props : ZamboniGeneralMeshProps = active_mesh.polyzamboni_general_mesh_props
-    return mesh_props.has_attached_paper_model and mesh_props.attached_paper_model_data_valid
 
 class InitializeCuttingOperator(bpy.types.Operator):
     """Start the unfolding process for this mesh"""
@@ -258,7 +251,7 @@ class SeparateAllMaterialsOperator(bpy.types.Operator):
     
     @classmethod
     def poll(cls, context):
-        return _active_object_is_mesh_with_valid_paper_model(context)
+        return _active_object_is_mesh_with_paper_model(context)
 
 class RecomputeFlapsOperator(bpy.types.Operator):
     """ Applies the current flap settings and recomputes all glue flaps """
@@ -272,7 +265,7 @@ class RecomputeFlapsOperator(bpy.types.Operator):
     
     @classmethod
     def poll(cls, context):
-        return _active_object_is_mesh_with_valid_paper_model(context)
+        return _active_object_is_mesh_with_paper_model(context)
 
 class FlipGlueFlapsOperator(bpy.types.Operator):
     """ Flip all glue flaps attached to the selected edges """
@@ -290,7 +283,7 @@ class FlipGlueFlapsOperator(bpy.types.Operator):
     
     @classmethod
     def poll(cls, context):
-        return _active_object_is_mesh_with_valid_paper_model(context) and context.mode == 'EDIT_MESH'
+        return _active_object_is_mesh_with_paper_model(context) and context.mode == 'EDIT_MESH'
 
 class ComputeBuildStepsOperator(bpy.types.Operator):
     """ Starting at the selected face, compute a polyzamboni build order of the current mesh """
@@ -307,7 +300,7 @@ class ComputeBuildStepsOperator(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        return _active_object_is_mesh_with_valid_paper_model(context) and context.mode == 'EDIT_MESH'
+        return _active_object_is_mesh_with_paper_model(context) and context.mode == 'EDIT_MESH'
 
 class ZamboniGlueFlapDesignOperator(bpy.types.Operator):
     """ Control the placement of glue flaps """
@@ -334,7 +327,7 @@ class ZamboniGlueFlapDesignOperator(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        return _active_object_is_mesh_with_valid_paper_model(context) and context.mode == 'EDIT_MESH'
+        return _active_object_is_mesh_with_paper_model(context) and context.mode == 'EDIT_MESH'
 
 class ZamboniCutDesignOperator(bpy.types.Operator):
     """ Add or remove cuts """
@@ -373,7 +366,7 @@ class ZamboniCutDesignOperator(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        return _active_object_is_mesh_with_valid_paper_model(context) and context.mode == 'EDIT_MESH'
+        return _active_object_is_mesh_with_paper_model(context) and context.mode == 'EDIT_MESH'
 
 class AutoCutsOperator(bpy.types.Operator):
     """ Automatically generate cuts """
@@ -472,7 +465,7 @@ class AutoCutsOperator(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context : bpy.types.Context):
-        return _active_object_is_mesh_with_valid_paper_model(context) and context.mode == 'EDIT_MESH'
+        return _active_object_is_mesh_with_paper_model(context) and context.mode == 'EDIT_MESH'
 
 class ZamboniCutEditingPieMenu(bpy.types.Menu):
     """This is a custom pie menu for all Zamboni cut design operators"""
@@ -714,7 +707,7 @@ class PolyZamboniExportPDFOperator(bpy.types.Operator, ExportHelper):
 
     @classmethod
     def poll(cls, context):
-        return _active_object_is_mesh_with_valid_paper_model(context)
+        return _active_object_is_mesh_with_paper_model(context)
 
 class PolyZamboniExportSVGOperator(bpy.types.Operator, ExportHelper):
     """Export Unfolding of active object as svg"""
@@ -791,7 +784,7 @@ class PolyZamboniExportSVGOperator(bpy.types.Operator, ExportHelper):
 
     @classmethod
     def poll(cls, context):
-        return _active_object_is_mesh_with_valid_paper_model(context)
+        return _active_object_is_mesh_with_paper_model(context)
 
 polyzamboni_keymaps = []
 

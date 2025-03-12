@@ -95,7 +95,7 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
     """ 
     This exporter makes use of the matplotlib package. 
     
-    If anyone reads this, feel free to write your own exporter that does not require this package to be installed 
+    If anyone reads this, feel free to write your own exporter that does not require this package to be installed.
     """
 
     supported_formats = ["pdf", "svg"]

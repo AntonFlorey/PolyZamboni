@@ -2,7 +2,7 @@ import bpy
 from bpy.types import Scene
 import numpy as np
 from .drawing import update_all_polyzamboni_drawings
-from .callbacks import update_glueflap_geometry_callback, update_auto_cuts_usage_callback
+from .callbacks import update_glueflap_geometry_callback
 
 # For more information about Blender Properties, visit:
 # <https://blender.org/api/blender_python_api_2_78a_release/bpy.types.Property.html>
@@ -49,11 +49,6 @@ class ZamboniGeneralMeshProps(bpy.types.PropertyGroup):
         description="Is true if the mesh has a paper model attached to it",
         default=False
     )
-    attached_paper_model_data_valid : BoolProperty(
-        name="Attached paper model data valid",
-        description="Is true if the attached paper model data and the mesh data is in sync.",
-        default=True
-    )
     glue_flap_height : FloatProperty(
         name="Glue flap height",
         description="Controls how far the glue flaps extend",
@@ -79,12 +74,6 @@ class ZamboniGeneralMeshProps(bpy.types.PropertyGroup):
         name="Lock Flap Positions",
         description="Determines if glue flaps are allowed to be relocated when applying new settings",
         default=False
-    )
-    use_auto_cuts : BoolProperty(
-        name="Use Auto Cuts",
-        description="If set to False, all automatically generated cuts will be ignored ",
-        default=True,
-        update=update_auto_cuts_usage_callback
     )
     multi_touching_faces_present : BoolProperty(
         name="Multi touching faces present",

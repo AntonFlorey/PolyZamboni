@@ -147,6 +147,10 @@ def connected_components_valid(mesh : Mesh):
     components_as_sets = {int(component_id) : set(component_set) for component_id, component_set in mesh["polyzamboni_connected_components_lists"].to_dict().items()}
     faces_in_components = set()
 
+    # make sure the component indices are compact
+    if set(components_as_sets.keys()) != set(range(len(components_as_sets.keys()))):
+        return False
+
     for component_set in components_as_sets.values():
         for face_index in component_set:
             if face_index >= num_faces or face_index in faces_in_components:
@@ -156,24 +160,6 @@ def connected_components_valid(mesh : Mesh):
         return False
     return True
 _all_validity_check_functions.append(connected_components_valid)
-
-# next free component index
-def next_free_component_index_exists(mesh : Mesh):
-    return "polyzamboni_next_free_component_index" in mesh
-_all_existence_check_functions.append(next_free_component_index_exists)
-
-def read_next_free_component_index(mesh : Mesh):
-    if not next_free_component_index_exists(mesh):
-        return None
-    return mesh["polyzamboni_next_free_component_index"]
-
-def write_next_free_component_index(mesh : Mesh, next_free_index):
-    mesh["polyzamboni_next_free_component_index"] = next_free_index
-
-def remove_next_free_component_index(mesh : Mesh):
-    if next_free_component_index_exists(mesh):
-        del mesh["polyzamboni_next_free_component_index"]
-_all_removal_functions.append(remove_next_free_component_index)
 
 # components with cycles
 
@@ -300,9 +286,8 @@ def component_render_data_valid(mesh : Mesh):
         return True
     if not connected_components_exist(mesh):
         return False
-    vertex_positions, triangle_indices = read_all_component_render_data(mesh)    
-    components_as_sets, _ = read_connected_components(mesh)
-    if not (vertex_positions.keys() == triangle_indices.keys() and components_as_sets.keys() == vertex_positions.keys()):
+    vertex_positions, triangle_indices = read_all_component_render_data(mesh)
+    if not vertex_positions.keys() == triangle_indices.keys():
         return False
     for component_id in vertex_positions.keys():
         num_verts = len(vertex_positions[component_id])
@@ -573,52 +558,44 @@ def glueflap_halfedge_dict_valid(mesh : Mesh):
     return True
 _all_validity_check_functions.append(glueflap_halfedge_dict_valid)
 
-# component-wise glue flap triangles 2D per edge per face
+# component-wise glue flap triangles 2D per edge
 
-def glue_flap_2d_triangles_per_edge_per_face_exist(mesh : Mesh):
+def glue_flap_geometry_per_edge_per_component_exist(mesh : Mesh):
     return "polyzamboni_glue_flap_triangles_2d" in mesh
-_all_existence_check_functions.append(glue_flap_2d_triangles_per_edge_per_face_exist)
+_all_existence_check_functions.append(glue_flap_geometry_per_edge_per_component_exist)
 
-def write_glue_flap_2d_triangles_per_edge_per_face(mesh : Mesh, glue_flap_triangles_2d):
-    mesh["polyzamboni_glue_flap_triangles_2d"] = {str(c_id) : {str(f_id) : {str(e_id) : tris for e_id, tris in tris_per_edge} for f_id, tris_per_edge in tris_per_edge_per_face.items()} for c_id, tris_per_edge_per_face in glue_flap_triangles_2d.items()}
+def write_glue_flap_geometry_per_edge_per_component(mesh : Mesh, glue_flap_triangles_2d):
+    mesh["polyzamboni_glue_flap_triangles_2d"] = {str(c_id) : {str(e_id) : tris for e_id, tris in tris_per_edge.items()} for c_id, tris_per_edge in glue_flap_triangles_2d.items()}
 
-def read_glue_flap_2d_triangles_per_edge_per_face(mesh : Mesh):
-    if not glue_flap_2d_triangles_per_edge_per_face_exist(mesh):
+def read_glue_flap_geometry_per_edge_per_component(mesh : Mesh):
+    if not glue_flap_geometry_per_edge_per_component_exist(mesh):
         return None
-    return {int(c_id) : {int(f_id) : {int(e_id) : [tuple([np.array(pos) for pos in tri]) for tri in tris] for e_id, tris in tris_per_edge} for f_id, tris_per_edge in tris_per_edge_per_face.items()} for c_id, tris_per_edge_per_face in mesh["polyzamboni_glue_flap_triangles_2d"].to_dict().items()}
+    return {int(c_id) : {int(e_id) : [tuple([np.array(pos) for pos in tri]) for tri in tris] for e_id, tris in tris_per_edge.items()} for c_id, tris_per_edge in mesh["polyzamboni_glue_flap_triangles_2d"].to_dict().items()}
 
 def read_glue_flap_2d_triangles_of_component(mesh : Mesh, component_id):
-    if not glue_flap_2d_triangles_per_edge_per_face_exist(mesh):
+    if not glue_flap_geometry_per_edge_per_component_exist(mesh):
         return None
     if str(component_id) not in mesh["polyzamboni_glue_flap_triangles_2d"]:
         return None
-    return {str(f_id) : {str(e_id) : tris for e_id, tris in tris_per_edge} for f_id, tris_per_edge in mesh["polyzamboni_glue_flap_triangles_2d"][str(component_id)].to_dict().items()}
+    return {str(e_id) : tris for e_id, tris in mesh["polyzamboni_glue_flap_triangles_2d"][str(component_id)].to_dict().items()} 
 
-def remove_glue_flap_2d_triangles_per_edge_per_face(mesh : Mesh):
-    if glue_flap_2d_triangles_per_edge_per_face_exist(mesh):
+def remove_glue_flap_geometry_per_edge_per_component(mesh : Mesh):
+    if glue_flap_geometry_per_edge_per_component_exist(mesh):
         del mesh["polyzamboni_glue_flap_triangles_2d"]
-_all_removal_functions.append(remove_glue_flap_2d_triangles_per_edge_per_face)
+_all_removal_functions.append(remove_glue_flap_geometry_per_edge_per_component)
 
-def glue_flap_2d_triangles_per_edge_per_face_valid(mesh : Mesh):
-    if not glue_flap_2d_triangles_per_edge_per_face_exist(mesh):
+def glue_flap_geometry_per_edge_per_component_valid(mesh : Mesh):
+    if not glue_flap_geometry_per_edge_per_component_exist(mesh):
         return True
     if not connected_components_exist(mesh):
         return False
-    glue_flap_triangles_2d = read_glue_flap_2d_triangles_per_edge_per_face(mesh)
-    connected_component_sets, face_to_component_dict = read_connected_components(mesh)
-
-    for c_id, face_to_glue_flap_triangles_dict in glue_flap_triangles_2d.items():
+    glue_flap_triangles_2d = read_glue_flap_geometry_per_edge_per_component(mesh)
+    connected_component_sets = read_connected_component_sets(mesh)
+    for c_id in glue_flap_triangles_2d.keys():
         if c_id not in connected_component_sets.keys():
             return False
-        for face_id, edge_to_glue_flap_triangles_dict in face_to_glue_flap_triangles_dict.items():
-            if face_to_component_dict[face_id] != c_id:
-                return False
-            edge_ids = set(utils.get_edge_indices_of_mesh_face(mesh, face_id))
-            for edge_id in edge_to_glue_flap_triangles_dict.keys():
-                if edge_id not in edge_ids:
-                    return False
     return True
-_all_validity_check_functions.append(glue_flap_2d_triangles_per_edge_per_face_valid)
+_all_validity_check_functions.append(glue_flap_geometry_per_edge_per_component_valid)
 
 # colliding glue flap edge id per glue flap edge id 
 

@@ -19,9 +19,9 @@ def compute_bmesh_height(bm : bmesh.types.BMesh):
     mesh_height = mesh_top - mesh_bot
     return mesh_height
 
-def mesh_edge_is_cut(mesh_edge_index, edge_constraints, use_auto_cuts):
+def mesh_edge_is_cut(mesh_edge_index, edge_constraints):
     if mesh_edge_index in edge_constraints:
-        if edge_constraints[mesh_edge_index] == "cut" or (use_auto_cuts and edge_constraints[mesh_edge_index] == "auto"):
+        if edge_constraints[mesh_edge_index] == "cut" or edge_constraints[mesh_edge_index] == "auto":
             return True
     return False
 

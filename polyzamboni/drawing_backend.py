@@ -2,13 +2,13 @@
 Functions in this file provide all data necessary for rendering feedback.
 """
 
-import bpy
 from bpy.types import Mesh
 from bmesh.types import BMesh
 import numpy as np
 import mathutils
 import math
 from enum import Enum
+import time
 
 from . import io
 from . import utils
@@ -107,7 +107,7 @@ def __get_corner_points_one_edge_cut(corner_pos, prev_pos, next_pos, normal : ma
         else:
             return [mathutils.Vector(solve_for_weird_intersection_point(corner_pos, prev_pos, next_pos, normal, offset_dist, cut_dist))]
 
-def compute_polygon_outline_for_face_drawing(bmesh : BMesh, face_index, large_dist, small_dist, edge_constraints, use_auto_cuts):
+def compute_polygon_outline_for_face_drawing(bmesh : BMesh, face_index, large_dist, small_dist, edge_constraints):
     face = bmesh.faces[face_index]
     face_normal = face.normal
     verts = list(face.verts)
@@ -118,13 +118,13 @@ def compute_polygon_outline_for_face_drawing(bmesh : BMesh, face_index, large_di
         next_v = verts[(v_id + 1) % len(verts)]
 
         # v_on_cutting_edge_or_boundary = curr_v.is_boundary or np.any([self.mesh_edge_is_cut(e) for e in curr_v.link_edges])
-        v_on_cutting_edge = np.any([mesh_edge_is_cut(e.index, edge_constraints, use_auto_cuts) for e in curr_v.link_edges])
+        v_on_cutting_edge = np.any([mesh_edge_is_cut(e.index, edge_constraints) for e in curr_v.link_edges])
 
         e_to_curr = find_bmesh_edge_of_halfedge(bmesh, (prev_v.index, curr_v.index))
         e_from_curr = find_bmesh_edge_of_halfedge(bmesh, (curr_v.index, next_v.index))
 
-        e_prev_curr_is_cutting = mesh_edge_is_cut(e_to_curr.index, edge_constraints, use_auto_cuts)
-        e_curr_to_next_is_cutting = mesh_edge_is_cut(e_from_curr.index, edge_constraints, use_auto_cuts)
+        e_prev_curr_is_cutting = mesh_edge_is_cut(e_to_curr.index, edge_constraints)
+        e_curr_to_next_is_cutting = mesh_edge_is_cut(e_from_curr.index, edge_constraints)
 
         if not v_on_cutting_edge and not e_prev_curr_is_cutting and not e_curr_to_next_is_cutting:
             cool_vertices += __get_corner_points_all_interior_or_cut(curr_v.co, prev_v.co, next_v.co, face_normal, small_dist)
@@ -139,16 +139,21 @@ def compute_polygon_outline_for_face_drawing(bmesh : BMesh, face_index, large_di
 
     return cool_vertices
 
-def compute_and_update_connected_component_triangle_lists_for_drawing(mesh : Mesh, bmesh : BMesh, face_offset, edge_constraints, use_auto_cuts, world_matrix,
+def compute_and_update_connected_component_triangle_lists_for_drawing(mesh : Mesh, bmesh : BMesh, face_offset, edge_constraints, world_matrix,
                                                                       connected_components = None):
     if connected_components is None:
         connected_components = io.read_all_component_render_data(mesh)
+
+    write_time = 0
+    compute_time = 0
 
     outdated_render_flags = io.read_outdated_render_data(mesh)
     verts_per_component, triangles_per_component = io.read_all_component_render_data(mesh)
     if verts_per_component is None:
         verts_per_component, triangles_per_component = {}, {}
+        start_time = time.time()
         io.write_all_component_render_data(mesh, verts_per_component, triangles_per_component) # to make sure we can later update 
+        write_time += time.time() - start_time
 
     bmesh.faces.ensure_lookup_table()
 
@@ -165,30 +170,39 @@ def compute_and_update_connected_component_triangle_lists_for_drawing(mesh : Mes
             component_triangles = []
             component_vertex_positions = []
             for face_index in faces_in_component:
-                polygon_outline = compute_polygon_outline_for_face_drawing(bmesh, face_index, component_cut_dist, small_dist, edge_constraints, use_auto_cuts)
+                start_time = time.time()
+                polygon_outline = compute_polygon_outline_for_face_drawing(bmesh, face_index, component_cut_dist, small_dist, edge_constraints)
                 curr_offset = len(component_vertex_positions)
                 _, curr_triangle_ids = triangulate_3d_polygon(polygon_outline, bmesh.faces[face_index].normal, list(range(curr_offset, curr_offset + len(polygon_outline))))
+                compute_time += time.time() - start_time
                 component_vertex_positions += [(v, face_index) for v in polygon_outline]
                 component_triangles += curr_triangle_ids
             verts_per_component[component_id] = component_vertex_positions
             triangles_per_component[component_id] = component_triangles
             outdated_render_flags.remove(component_id)
             if io.component_render_data_exists(mesh):
+                start_time = time.time()
                 io.write_render_data_of_one_component(mesh, component_id, component_vertex_positions, component_triangles)
-
+                write_time += time.time() - start_time
+    
         vertex_id_offset = len(render_ready_vertex_positions)
         render_ready_vertex_positions += [world_matrix @ (v + face_offset * bmesh.faces[f_index].normal) for (v, f_index) in verts_per_component[component_id]]
         render_ready_triangles_per_component[component_id] = [(vertex_id_offset + tri[0], vertex_id_offset + tri[1], vertex_id_offset + tri[2]) for tri in triangles_per_component[component_id]]
-
+    start_time = time.time()
     io.write_outdated_render_data(mesh, outdated_render_flags)
+    write_time += time.time() - start_time
+    print("time used for writing render data:", write_time, "seconds")
+    print("time used for render data computation:", compute_time, "seconds")
     return render_ready_vertex_positions, render_ready_triangles_per_component
 
-def get_triangle_list_per_cluster_quality(mesh : Mesh, bmesh : BMesh, face_offset, edge_constraints, use_auto_cuts, world_matrix,
+def get_triangle_list_per_cluster_quality(mesh : Mesh, bmesh : BMesh, face_offset, edge_constraints, world_matrix,
                                           connected_components = None):
     if connected_components is None:
         connected_components = io.read_connected_component_sets(mesh)
         assert connected_components is not None
-    all_v_positions, tris_per_component = compute_and_update_connected_component_triangle_lists_for_drawing(mesh, bmesh, face_offset, edge_constraints, use_auto_cuts, world_matrix, connected_components)
+    start_time = time.time()
+    all_v_positions, tris_per_component = compute_and_update_connected_component_triangle_lists_for_drawing(mesh, bmesh, face_offset, edge_constraints, world_matrix, connected_components)
+    print("time to compute or fetch triangles:", time.time() - start_time, "seconds")
     cyclic_components = io.read_components_with_cycles_set(mesh)
     components_with_overlaps = io.read_components_with_overlaps(mesh)
     glue_flap_collisions = io.read_glue_flap_collisions_dict(mesh)
@@ -230,7 +244,7 @@ def get_lines_array_per_glue_flap_quality(mesh : Mesh, bmesh : BMesh, face_offse
         }
     for edge_index, halfedge in glue_flaps_dict.items():
         opp_halfedge = (halfedge[1], halfedge[0])
-        component_id_of_halfedge = face_to_component_dict[halfedge_to_face_dict[halfedge]]
+        component_id_of_halfedge = face_to_component_dict[halfedge_to_face_dict[halfedge].index]
         face_of_opp_halfedge = halfedge_to_face_dict[opp_halfedge]
         component_id_of_opp_halfedge = face_to_component_dict[face_of_opp_halfedge.index]
 

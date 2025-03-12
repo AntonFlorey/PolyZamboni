@@ -55,11 +55,12 @@ class MainPanel(bpy.types.Panel):
                 col1.operator("polyzamboni.build_order_op")
                 col2.label(icon="MOD_BUILD")
 
-                row = layout.row()
-                col1 = row.column()
-                col2 = row.column()
-                col1.prop(zamboni_props, "use_auto_cuts")
-                col2.label(icon="LIGHT_DATA")
+                # TODO AUTO CUTS REMOVAL
+                # row = layout.row()
+                # col1 = row.column()
+                # col2 = row.column()
+                # col1.prop(zamboni_props, "use_auto_cuts")
+                # col2.label(icon="LIGHT_DATA")
 
                 # cutgraph editing
                 in_edit_mode = context.mode == 'EDIT_MESH'
@@ -90,8 +91,8 @@ class MainPanel(bpy.types.Panel):
                     col2 = row.column()
                     col1.operator("polyzamboni.flaps_recompute_op")
                     col2.prop(zamboni_props, "prefer_alternating_flaps", icon="RIGID_BODY", icon_only=True)
-                else:
-                    editing_box.row().operator("polyzamboni.cutgraph_editing_modal_operator")
+                # else:
+                #     editing_box.row().operator("polyzamboni.cutgraph_editing_modal_operator")
 
                 # layout.row().label(text="Export")
                 row = layout.row()

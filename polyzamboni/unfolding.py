@@ -124,13 +124,6 @@ def compute_2d_unfolded_triangles_of_component(bmesh : BMesh, face_list, pred_di
 
     return unfolded_triangulated_faces, affine_transform_to_root_coord_system_per_face, intersection_occured
 
-def _get_globally_consistent_2d_coord_in_face(point_on_face_3d, face_index, component_id,
-                                             local_coordinate_systems, affine_transforms_to_root):
-    """ Maps a 3D point on a given face to the unfolded face in 2D """
-    face_cs = local_coordinate_systems[face_index]
-    face_transform_to_root = affine_transforms_to_root[component_id][face_index]
-    return face_transform_to_root * geometry.to_local_coords(point_on_face_3d, *face_cs[face_index])
-
 # this version is more flexible as data can be read from the mesh object on the fly
 def get_globally_consistent_2d_coord_in_face(mesh : Mesh, point_on_face_3d, face_index, component_id,
                                              local_coordinate_systems = None, affine_transforms_to_root = None):

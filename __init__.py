@@ -30,7 +30,6 @@ def register():
     # Other stuff later
     operators.register()
     ui.register()
-    bpy.app.handlers.save_pre.append(callbacks.compactify_before_saving)
     bpy.app.handlers.load_post.append(callbacks.post_load_handler)
     bpy.app.handlers.undo_post.append(callbacks.redraw_callback)
 
@@ -39,8 +38,6 @@ def unregister():
     operators.unregister()
     ui.unregister()
     properties.unregister()
-    if callbacks.compactify_before_saving in bpy.app.handlers.save_pre:
-        bpy.app.handlers.save_pre.remove(callbacks.compactify_before_saving)
     if callbacks.post_load_handler in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.remove(callbacks.post_load_handler)
     if callbacks.redraw_callback in bpy.app.handlers.undo_post:
