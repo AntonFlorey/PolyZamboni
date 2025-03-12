@@ -31,6 +31,7 @@ def register():
     operators.register()
     ui.register()
     bpy.app.handlers.load_post.append(callbacks.post_load_handler)
+    bpy.app.handlers.load_pre.append(callbacks.pre_load_handler)
     bpy.app.handlers.undo_post.append(callbacks.redraw_callback)
 
 def unregister():
@@ -42,6 +43,8 @@ def unregister():
         bpy.app.handlers.load_post.remove(callbacks.post_load_handler)
     if callbacks.redraw_callback in bpy.app.handlers.undo_post:
         bpy.app.handlers.undo_post.remove(callbacks.redraw_callback)
+    if callbacks.pre_load_handler in bpy.app.handlers.load_pre:
+        bpy.app.handlers.load_pre.remove(callbacks.pre_load_handler)
 
 if __name__ == "__main__":
     register()

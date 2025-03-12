@@ -144,16 +144,11 @@ def compute_and_update_connected_component_triangle_lists_for_drawing(mesh : Mes
     if connected_components is None:
         connected_components = io.read_all_component_render_data(mesh)
 
-    write_time = 0
-    compute_time = 0
-
     outdated_render_flags = io.read_outdated_render_data(mesh)
     verts_per_component, triangles_per_component = io.read_all_component_render_data(mesh)
     if verts_per_component is None:
         verts_per_component, triangles_per_component = {}, {}
-        start_time = time.time()
         io.write_all_component_render_data(mesh, verts_per_component, triangles_per_component) # to make sure we can later update 
-        write_time += time.time() - start_time
 
     bmesh.faces.ensure_lookup_table()
 
@@ -170,29 +165,20 @@ def compute_and_update_connected_component_triangle_lists_for_drawing(mesh : Mes
             component_triangles = []
             component_vertex_positions = []
             for face_index in faces_in_component:
-                start_time = time.time()
                 polygon_outline = compute_polygon_outline_for_face_drawing(bmesh, face_index, component_cut_dist, small_dist, edge_constraints)
                 curr_offset = len(component_vertex_positions)
                 _, curr_triangle_ids = triangulate_3d_polygon(polygon_outline, bmesh.faces[face_index].normal, list(range(curr_offset, curr_offset + len(polygon_outline))))
-                compute_time += time.time() - start_time
                 component_vertex_positions += [(v, face_index) for v in polygon_outline]
                 component_triangles += curr_triangle_ids
             verts_per_component[component_id] = component_vertex_positions
             triangles_per_component[component_id] = component_triangles
-            outdated_render_flags.remove(component_id)
+            outdated_render_flags.discard(component_id)
             if io.component_render_data_exists(mesh):
-                start_time = time.time()
                 io.write_render_data_of_one_component(mesh, component_id, component_vertex_positions, component_triangles)
-                write_time += time.time() - start_time
-    
         vertex_id_offset = len(render_ready_vertex_positions)
         render_ready_vertex_positions += [world_matrix @ (v + face_offset * bmesh.faces[f_index].normal) for (v, f_index) in verts_per_component[component_id]]
         render_ready_triangles_per_component[component_id] = [(vertex_id_offset + tri[0], vertex_id_offset + tri[1], vertex_id_offset + tri[2]) for tri in triangles_per_component[component_id]]
-    start_time = time.time()
     io.write_outdated_render_data(mesh, outdated_render_flags)
-    write_time += time.time() - start_time
-    print("time used for writing render data:", write_time, "seconds")
-    print("time used for render data computation:", compute_time, "seconds")
     return render_ready_vertex_positions, render_ready_triangles_per_component
 
 def get_triangle_list_per_cluster_quality(mesh : Mesh, bmesh : BMesh, face_offset, edge_constraints, world_matrix,

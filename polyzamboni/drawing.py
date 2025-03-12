@@ -272,10 +272,10 @@ def update_all_polyzamboni_drawings(self, context):
     show_auto_completed_cuts(drawing_backend.mesh_edge_id_list_to_coordinate_list(bm, io.read_auto_cut_edges(active_mesh), draw_settings.normal_offset, world_matrix), dotted_line_length=draw_settings.dotted_line_length)
 
     if draw_settings.color_faces_by_quality:
-        region_fetch_time_start = time.time()
+        # region_fetch_time_start = time.time()
         all_v_positions, quality_dict = drawing_backend.get_triangle_list_per_cluster_quality(active_mesh, bm, draw_settings.normal_offset, edge_constraints, 
                                                                                               world_matrix, connected_components)
-        print("time to fetch new regions:", time.time() - region_fetch_time_start, "seconds")
+        # print("time to fetch new regions:", time.time() - region_fetch_time_start, "seconds")
         show_region_quality_triangles(all_v_positions, quality_dict)
 
     if draw_settings.show_glue_flaps:

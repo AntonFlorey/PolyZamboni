@@ -604,12 +604,12 @@ def glue_flap_collision_dict_exists(mesh : Mesh):
 _all_existence_check_functions.append(glue_flap_collision_dict_exists)
 
 def write_glue_flap_collision_dict(mesh : Mesh, glue_flap_collisions):
-    mesh["polyzamboni_glue_flap_collisions"] = {str(c_id) : {str(edge_id) : collides_with_edge_id for edge_id, collides_with_edge_id in collision_dict.items()} for c_id, collision_dict in glue_flap_collisions.items()}
+    mesh["polyzamboni_glue_flap_collisions"] = {str(c_id) : {str(edge_id) : list(collides_with_edge_ids) for edge_id, collides_with_edge_ids in collision_dict.items()} for c_id, collision_dict in glue_flap_collisions.items()}
 
 def read_glue_flap_collisions_dict(mesh : Mesh):
     if not glue_flap_collision_dict_exists(mesh):
         return None
-    return {int(c_id) : {int(edge_id) : collides_with_edge_id for edge_id, collides_with_edge_id in collision_dict.items()} for c_id, collision_dict in mesh["polyzamboni_glue_flap_collisions"].to_dict().items()}
+    return {int(c_id) : {int(edge_id) : set(collides_with_edge_ids) for edge_id, collides_with_edge_ids in collision_dict.items()} for c_id, collision_dict in mesh["polyzamboni_glue_flap_collisions"].to_dict().items()}
 
 def remove_glue_flap_collisions_dict(mesh : Mesh):
     if glue_flap_collision_dict_exists(mesh):

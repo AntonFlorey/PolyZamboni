@@ -59,8 +59,10 @@ def sync_paper_model_with_mesh_geometry(mesh : Mesh):
 #################################
 
 def cut_edges(mesh : Mesh, indices_of_edges_to_cut):
+    start_time = time.time()
     with PaperModel.from_existing(mesh) as papermodel:
         papermodel.cut_edges(indices_of_edges_to_cut)
+    print("Cut operation took:", time.time() - start_time, "seconds in total.")
 
 def glue_edges(mesh : Mesh, indices_of_edges_to_lock):
     with PaperModel.from_existing(mesh) as papermodel:

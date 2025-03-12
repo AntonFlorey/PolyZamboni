@@ -2,11 +2,9 @@ import os
 import bpy
 from bpy.types import Object, Mesh
 import bmesh
-from bmesh.types import BMesh
 import numpy as np
 
 from .geometry import AffineTransform2D, signed_point_dist_to_line
-from .properties import ZamboniGeneralMeshProps
 from . import glueflaps
 from . import unfolding
 from . import utils
@@ -150,21 +148,19 @@ class PagePartitionNode():
         self.child_two = None
 
 def compute_max_print_component_dimensions(obj : Object):
-    
     mesh : Mesh = obj.data
     bm = bmesh.new()
-    bm.from_object(obj)
+    bm.from_mesh(obj.data)
     bm.edges.ensure_lookup_table()
     bm.faces.ensure_lookup_table()
 
     # read all polyzamboni data needed
-    zamboni_props : ZamboniGeneralMeshProps = mesh.polyzamboni_general_mesh_props
     edge_constraints = io.read_edge_constraints_dict(mesh)
     connected_components = io.read_connected_component_sets(mesh)
     cyclic_components = io.read_components_with_cycles_set(mesh)
     local_coordinate_systems = io.read_local_coordinate_systems_per_face(mesh)
     affine_transforms_to_root = io.read_affine_transforms_to_roots(mesh)
-    glue_flap_triangles = io.read_glue_flap_2d_triangles_per_edge_per_face(mesh)
+    glue_flap_triangles = io.read_glue_flap_geometry_per_edge_per_component(mesh)
 
     max_height = -np.inf
     max_width = -np.inf
@@ -187,21 +183,21 @@ def compute_max_print_component_dimensions(obj : Object):
                 # compute edge coords in unfolding space
                 vertex_coords_3d = [v.co for v in curr_edge.verts]    
                 vertex_coords_unfolded = [get_unfolded_vertex_coord(co_3d, face_index) for co_3d in vertex_coords_3d]
-                if curr_edge.is_boundary or utils.mesh_edge_is_cut(curr_edge.index, edge_constraints, zamboni_props.use_auto_cuts):
-                    if glueflaps.check_if_edge_has_flap_geometry_attached_to_it(mesh, c_id, curr_face.index, curr_edge, glue_flap_triangles):
+                if curr_edge.is_boundary or utils.mesh_edge_is_cut(curr_edge.index, edge_constraints):
+                    if glueflaps.check_if_edge_has_flap_geometry_attached_to_it(mesh, c_id, curr_edge, glue_flap_triangles):
                         # this is a fold edge of a glue flap
                         curr_component_print_data.add_fold_edges_at_flaps(FoldEdgeAtGlueFlapData(tuple(vertex_coords_unfolded), curr_edge.is_convex, curr_edge.calc_face_angle(), curr_edge.index))
                     else:
                         # this is a cut edge
                         curr_component_print_data.add_cut_edge(CutEdgeData(tuple(vertex_coords_unfolded), curr_edge.index))
 
-            # collect edges for glue flaps
-            for flap_triangles in glue_flap_triangles[c_id][face_index].values():
-                assert len(flap_triangles) > 0
-                curr_component_print_data.add_glue_flap_edge(GlueFlapEdgeData((flap_triangles[0][0],flap_triangles[0][1])))
-                curr_component_print_data.add_glue_flap_edge(GlueFlapEdgeData((flap_triangles[0][1],flap_triangles[0][2])))
-                if len(flap_triangles) == 2:
-                    curr_component_print_data.add_glue_flap_edge(GlueFlapEdgeData((flap_triangles[1][1],flap_triangles[1][2])))
+        # collect edges for glue flaps
+        for flap_triangles in glue_flap_triangles[c_id].values():
+            assert len(flap_triangles) > 0
+            curr_component_print_data.add_glue_flap_edge(GlueFlapEdgeData((flap_triangles[0][0],flap_triangles[0][1])))
+            curr_component_print_data.add_glue_flap_edge(GlueFlapEdgeData((flap_triangles[0][1],flap_triangles[0][2])))
+            if len(flap_triangles) == 2:
+                curr_component_print_data.add_glue_flap_edge(GlueFlapEdgeData((flap_triangles[1][1],flap_triangles[1][2])))
         
         # align vertically 
         curr_component_print_data.align_vertically_via_pca()
@@ -220,15 +216,13 @@ def compute_scaling_factor_for_target_model_height(mesh, target_height):
     return target_height / mesh_height
 
 def create_print_data_for_all_components(obj : Object, scaling_factor):
-    
     mesh : Mesh = obj.data
     bm = bmesh.new()
-    bm.from_object(obj)
+    bm.from_mesh(obj.data)
     bm.edges.ensure_lookup_table()
     bm.faces.ensure_lookup_table()
 
     # read all polyzamboni data needed
-    zamboni_props : ZamboniGeneralMeshProps = mesh.polyzamboni_general_mesh_props
     edge_constraints = io.read_edge_constraints_dict(mesh)
     connected_components = io.read_connected_component_sets(mesh)
     cyclic_components = io.read_components_with_cycles_set(mesh)
@@ -236,7 +230,7 @@ def create_print_data_for_all_components(obj : Object, scaling_factor):
     affine_transforms_to_root = io.read_affine_transforms_to_roots(mesh)
     face_triangulations = io.read_triangulation_indices_per_face(mesh)
     unfolded_face_triangles = io.read_facewise_triangles_per_component(mesh)
-    glue_flap_triangles = io.read_glue_flap_2d_triangles_per_edge_per_face(mesh)
+    glue_flap_triangles = io.read_glue_flap_geometry_per_edge_per_component(mesh)
     build_step_numbers = io.read_build_step_numbers(mesh)
 
     all_print_data = [] 
@@ -277,9 +271,9 @@ def create_print_data_for_all_components(obj : Object, scaling_factor):
                 vertex_coords_3d = [v.co for v in edge_to_correct_halfedge_map[curr_edge.index]]    
                 vertex_coords_unfolded = [scaling_factor * get_unfolded_vertex_coord(co_3d, face_index) for co_3d in vertex_coords_3d]
                 dist_cog_edge_sum += signed_point_dist_to_line(face_cog, vertex_coords_unfolded[0], vertex_coords_unfolded[1])
-                if curr_edge.is_boundary or utils.mesh_edge_is_cut(curr_edge.index, edge_constraints, zamboni_props.use_auto_cuts):
+                if curr_edge.is_boundary or utils.mesh_edge_is_cut(curr_edge.index, edge_constraints):
                     # check if this edge has a glue flap attached to it
-                    if glueflaps.check_if_edge_has_flap_geometry_attached_to_it(mesh, c_id, curr_face.index, curr_edge, glue_flap_triangles):
+                    if glueflaps.check_if_edge_has_flap_geometry_attached_to_it(mesh, c_id, curr_edge, glue_flap_triangles):
                         # this is a fold edge of a glue flap
                         curr_component_print_data.add_fold_edges_at_flaps(FoldEdgeAtGlueFlapData(tuple(vertex_coords_unfolded), curr_edge.is_convex, curr_edge.calc_face_angle(), curr_edge.index))
                     else:
@@ -330,13 +324,13 @@ def create_print_data_for_all_components(obj : Object, scaling_factor):
             for tri_coords, tri_uv in zip(triangles_in_unfolding_space, triangle_uvs):
                 curr_component_print_data.add_texured_triangle(ColoredTriangleData(tri_coords, tri_uv, text_path, color))
 
-            # collect edges for glue flaps
-            for flap_triangles in glue_flap_triangles[c_id][face_index].values():
-                assert len(flap_triangles) > 0
-                curr_component_print_data.add_glue_flap_edge(GlueFlapEdgeData((scaling_factor * flap_triangles[0][0],scaling_factor * flap_triangles[0][1])))
-                curr_component_print_data.add_glue_flap_edge(GlueFlapEdgeData((scaling_factor * flap_triangles[0][1],scaling_factor * flap_triangles[0][2])))
-                if len(flap_triangles) == 2:
-                    curr_component_print_data.add_glue_flap_edge(GlueFlapEdgeData((scaling_factor * flap_triangles[1][1],scaling_factor * flap_triangles[1][2])))
+        # collect edges for glue flaps
+        for flap_triangles in glue_flap_triangles[c_id].values():
+            assert len(flap_triangles) > 0
+            curr_component_print_data.add_glue_flap_edge(GlueFlapEdgeData((scaling_factor * flap_triangles[0][0],scaling_factor * flap_triangles[0][1])))
+            curr_component_print_data.add_glue_flap_edge(GlueFlapEdgeData((scaling_factor * flap_triangles[0][1],scaling_factor * flap_triangles[0][2])))
+            if len(flap_triangles) == 2:
+                curr_component_print_data.add_glue_flap_edge(GlueFlapEdgeData((scaling_factor * flap_triangles[1][1],scaling_factor * flap_triangles[1][2])))
 
         face_with_step_number = list(sorted(curr_connected_component_faces, key=lambda face_index : face_cog_scores[face_index], reverse=True))[0] # sorting in the end is a bit meh but whatever
         step_number_pos = np.mean([scaling_factor * get_unfolded_vertex_coord(v.co, face_with_step_number) for v in bm.faces[face_with_step_number].verts], axis=0)

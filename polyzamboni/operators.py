@@ -438,7 +438,6 @@ class AutoCutsOperator(bpy.types.Operator):
             def compute_and_report_progress():
                 for progress in greedy_auto_cuts(ao_mesh, self.quality_level, self.loop_alignment, self.max_pieces_per_component):
                     wm.polyzamboni_auto_cuts_progress = progress
-                print("im done computing!")
                 self._running = False
                 wm.polyzamboni_auto_cuts_running = False
             threading.Thread(target=compute_and_report_progress).start()
@@ -452,7 +451,6 @@ class AutoCutsOperator(bpy.types.Operator):
                 if region.active_panel_category == 'PolyZamboni':
                     region.tag_redraw()
             if not self._running:
-                print("finished")
                 update_all_polyzamboni_drawings(None, context)
                 return {'FINISHED'}
         return {'RUNNING_MODAL'}
@@ -653,7 +651,6 @@ class PolyZamboniExportPDFOperator(bpy.types.Operator, ExportHelper):
 
     def invoke(self, context, event):
         # do stuff
-        bpy.ops.polyzamboni.mesh_sync_op() # sync mesh changes before exporting
         ao = context.active_object
         active_mesh = ao.data
         self.build_steps_valid = check_if_build_step_numbers_exist_and_make_sense(active_mesh)
@@ -730,7 +727,6 @@ class PolyZamboniExportSVGOperator(bpy.types.Operator, ExportHelper):
 
     def invoke(self, context, event):
         # do stuff
-        bpy.ops.polyzamboni.mesh_sync_op() # sync mesh changes before exporting
         ao = context.active_object
         active_mesh = ao.data
         self.build_steps_valid = check_if_build_step_numbers_exist_and_make_sense(active_mesh)
