@@ -253,6 +253,20 @@ class SeparateAllMaterialsOperator(bpy.types.Operator):
     def poll(cls, context):
         return _active_object_is_mesh_with_paper_model(context)
 
+class RemoveAllAutoCutsOperator(bpy.types.Operator):
+    """ Removes all auto cuts from the selected paper model. """
+    bl_label = "Remove Auto Cuts"
+    bl_idname = "polyzamboni.auto_cuts_removal_op"
+    
+    def execute(self, context):
+        operators_backend.remove_auto_cuts(bpy.context.active_object.data)
+        update_all_polyzamboni_drawings(None, context)
+        return { 'FINISHED' }
+    
+    @classmethod
+    def poll(cls, context):
+        return _active_object_is_mesh_with_paper_model(context)
+
 class RecomputeFlapsOperator(bpy.types.Operator):
     """ Applies the current flap settings and recomputes all glue flaps """
     bl_label = "Recompute Flaps"
@@ -797,6 +811,7 @@ def register():
     bpy.utils.register_class(SyncMeshOperator)
     bpy.utils.register_class(RecomputeFlapsOperator)
     bpy.utils.register_class(SeparateAllMaterialsOperator)
+    bpy.utils.register_class(RemoveAllAutoCutsOperator)
     bpy.utils.register_class(FlipGlueFlapsOperator)
     bpy.utils.register_class(ZamboniGlueFlapDesignOperator)
     bpy.utils.register_class(ZamboniGLueFlapEditingPieMenu)
@@ -830,6 +845,7 @@ def unregister():
     bpy.utils.unregister_class(SyncMeshOperator)
     bpy.utils.unregister_class(RecomputeFlapsOperator)
     bpy.utils.unregister_class(SeparateAllMaterialsOperator)
+    bpy.utils.unregister_class(RemoveAllAutoCutsOperator)
     bpy.utils.unregister_class(FlipGlueFlapsOperator)
     bpy.utils.unregister_class(ZamboniGlueFlapDesignOperator)
     bpy.utils.unregister_class(ZamboniGLueFlapEditingPieMenu)

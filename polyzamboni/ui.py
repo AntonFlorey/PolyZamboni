@@ -49,19 +49,6 @@ class MainPanel(bpy.types.Panel):
                 col1.operator("polyzamboni.mesh_sync_op")
                 col2.label(icon="FILE_REFRESH")
 
-                row = layout.row()
-                col1 = row.column()
-                col2 = row.column()
-                col1.operator("polyzamboni.build_order_op")
-                col2.label(icon="MOD_BUILD")
-
-                # TODO AUTO CUTS REMOVAL
-                # row = layout.row()
-                # col1 = row.column()
-                # col2 = row.column()
-                # col1.prop(zamboni_props, "use_auto_cuts")
-                # col2.label(icon="LIGHT_DATA")
-
                 # cutgraph editing
                 in_edit_mode = context.mode == 'EDIT_MESH'
                 editing_box = layout.box()
@@ -89,10 +76,21 @@ class MainPanel(bpy.types.Panel):
                     row = editing_box.row()
                     col1 = row.column()
                     col2 = row.column()
+                    col1.operator("polyzamboni.auto_cuts_removal_op")
+                    col2.label(icon="BRUSH_DATA")
+                    row = editing_box.row()
+                    col1 = row.column()
+                    col2 = row.column()
                     col1.operator("polyzamboni.flaps_recompute_op")
                     col2.prop(zamboni_props, "prefer_alternating_flaps", icon="RIGID_BODY", icon_only=True)
-                # else:
-                #     editing_box.row().operator("polyzamboni.cutgraph_editing_modal_operator")
+                    row = editing_box.row()
+                    col1 = row.column()
+                    col2 = row.column()
+                    col1.operator("polyzamboni.build_order_op")
+                    col2.label(icon="MOD_BUILD")
+                else:
+                    editing_box.label(text="Modify Paper Model in Edit Mode")
+                    # editing_box.row().operator("polyzamboni.cutgraph_editing_modal_operator")
 
                 # layout.row().label(text="Export")
                 row = layout.row()
