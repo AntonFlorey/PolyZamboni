@@ -2,7 +2,7 @@ import bpy
 from bpy.types import Scene
 import numpy as np
 from .drawing import update_all_polyzamboni_drawings
-from .callbacks import update_flap_angle_callback, update_flap_height_callback, update_auto_cuts_usage_callback
+from .callbacks import update_glueflap_geometry_callback
 
 # For more information about Blender Properties, visit:
 # <https://blender.org/api/blender_python_api_2_78a_release/bpy.types.Property.html>
@@ -10,7 +10,6 @@ from bpy.props import BoolProperty
 from bpy.props import EnumProperty
 from bpy.props import FloatProperty
 from bpy.props import IntProperty
-from bpy.props import StringProperty
 from bpy.props import FloatVectorProperty
 
 class DrawSettings(bpy.types.PropertyGroup):
@@ -44,13 +43,18 @@ class DrawSettings(bpy.types.PropertyGroup):
         update=update_all_polyzamboni_drawings
     )
 
-class ZamboniSettingsPerObject(bpy.types.PropertyGroup):
+class ZamboniGeneralMeshProps(bpy.types.PropertyGroup):
+    has_attached_paper_model : BoolProperty(
+        name="Has attached paper model",
+        description="Is true if the mesh has a paper model attached to it",
+        default=False
+    )
     glue_flap_height : FloatProperty(
         name="Glue flap height",
         description="Controls how far the glue flaps extend",
         default=0.15,
         min=0.01,
-        update=update_flap_height_callback
+        update=update_glueflap_geometry_callback
     )
     glue_flap_angle : FloatProperty(
         name="Glue flap angle",
@@ -59,7 +63,7 @@ class ZamboniSettingsPerObject(bpy.types.PropertyGroup):
         min=np.deg2rad(10),
         max=np.deg2rad(170),
         subtype="ANGLE",
-        update=update_flap_angle_callback
+        update=update_glueflap_geometry_callback
     )
     prefer_alternating_flaps : BoolProperty(
         name="ZigZag Flaps",
@@ -70,12 +74,6 @@ class ZamboniSettingsPerObject(bpy.types.PropertyGroup):
         name="Lock Flap Positions",
         description="Determines if glue flaps are allowed to be relocated when applying new settings",
         default=False
-    )
-    apply_auto_cuts_to_previev : BoolProperty(
-        name="Auto Cuts Preview",
-        description="If set to True, all automatically generated cuts will be considered when showing a preview of the mesh unfolding",
-        default=True,
-        update=update_auto_cuts_usage_callback
     )
     multi_touching_faces_present : BoolProperty(
         name="Multi touching faces present",
@@ -249,22 +247,22 @@ class TextureExportSettings(bpy.types.PropertyGroup):
 # won't always be assigned to the Scene object but it's a good place to start.
 def register():
     bpy.utils.register_class(DrawSettings)
-    bpy.utils.register_class(ZamboniSettingsPerObject)
+    bpy.utils.register_class(ZamboniGeneralMeshProps)
     bpy.utils.register_class(GeneralExportSettings)
     bpy.utils.register_class(LineExportSettings)
     bpy.utils.register_class(TextureExportSettings)
     Scene.polyzamboni_drawing_settings = bpy.props.PointerProperty(type=DrawSettings)
-    bpy.types.Object.polyzamboni_object_prop = bpy.props.PointerProperty(type=ZamboniSettingsPerObject)
+    bpy.types.Mesh.polyzamboni_general_mesh_props = bpy.props.PointerProperty(type=ZamboniGeneralMeshProps)
     bpy.types.WindowManager.polyzamboni_auto_cuts_progress = FloatProperty(name="Auto Cuts Progress", min=0, max=1, default=0.0)
     bpy.types.WindowManager.polyzamboni_auto_cuts_running = BoolProperty(name="Auto Cuts computation running", default=False)
 
 def unregister():
     bpy.utils.unregister_class(DrawSettings)
-    bpy.utils.unregister_class(ZamboniSettingsPerObject)
+    bpy.utils.unregister_class(ZamboniGeneralMeshProps)
     bpy.utils.unregister_class(GeneralExportSettings)
     bpy.utils.unregister_class(LineExportSettings)
     bpy.utils.unregister_class(TextureExportSettings)
     del Scene.polyzamboni_drawing_settings
-    del bpy.types.Object.polyzamboni_object_prop
+    del bpy.types.Mesh.polyzamboni_general_mesh_props
     del bpy.types.WindowManager.polyzamboni_auto_cuts_progress
     del bpy.types.WindowManager.polyzamboni_auto_cuts_running

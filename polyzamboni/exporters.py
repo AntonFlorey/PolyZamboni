@@ -1,3 +1,8 @@
+"""
+All classes inheriting from PolyzamboniExporter generate paper model instructions from a list of ComponentPrintData objects.
+So far only one exporter that uses matplotlib to create PDS as SVG
+"""
+
 from abc import ABC, abstractmethod
 import platform
 from matplotlib import axes
@@ -17,7 +22,6 @@ if platform.system() == "Darwin":
     import matplotlib
     matplotlib.use("agg") # try to use a different backend 
     
-
 # feel free to add more paper sizes (in cm)
 paper_sizes = {
     "A0" : (84.1, 118.8),
@@ -95,7 +99,7 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
     """ 
     This exporter makes use of the matplotlib package. 
     
-    If anyone reads this, feel free to write your own exporter that does not require this package to be installed 
+    If anyone reads this, feel free to write your own exporter that does not require this package to be installed.
     """
 
     supported_formats = ["pdf", "svg"]
@@ -324,7 +328,6 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
         return fig, ax
 
     def export(self, print_ready_pages, output_file_name_prefix):
-        
         if self.output_format not in self.supported_formats:
             print("POLYZAMBONI ERROR: Output format not supported!")
             return
@@ -368,4 +371,4 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
                         plt.close(fig)
                         page_number += 1
         
-        print("Called matplotlib based exporter with output filepath:", output_file_name_prefix)
+        print("POLYZAMBONI INFO: Paper model instructions successfully created!")

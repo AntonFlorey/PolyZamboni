@@ -1,3 +1,7 @@
+"""
+Custom geometry functions used to compute triangulation, do intersection tests and map from 3D to 2D local spaces and back.
+"""
+
 import numpy as np
 import bmesh
 import matplotlib.pyplot as plt
@@ -280,9 +284,9 @@ def solve_for_weird_intersection_point(center_point_3d, prev_point_3d, next_poin
 
 def triangle_intersection_test_2d(t1_a, t1_b, t1_c, t2_a, t2_b, t2_c):
     if determinant_2d(t1_b - t1_a, t1_c - t1_a) <= 0:
-        print("Faulty triangle detected with determinant:", determinant_2d(t1_b - t1_a, t1_c - t1_a))
+        print("POLYZAMBONI ERROR: Faulty triangle detected with determinant", determinant_2d(t1_b - t1_a, t1_c - t1_a))
     if determinant_2d(t2_b - t2_a, t2_c - t2_a) <= 0:
-        print("Faulty triangle detected with determinant:", determinant_2d(t2_b - t2_a, t2_c - t2_a))
+        print("POLYZAMBONI ERROR: Faulty triangle detected with determinant", determinant_2d(t2_b - t2_a, t2_c - t2_a))
 
     assert determinant_2d(t1_b - t1_a, t1_c - t1_a) > 0
     assert determinant_2d(t2_b - t2_a, t2_c - t2_a) > 0
