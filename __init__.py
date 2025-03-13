@@ -1,7 +1,7 @@
 bl_info = {
     "name": "PolyZamboni",
     "author": "Anton Florey",
-    "version": (1,0),
+    "version": (1,0,0),
     "blender": (4,1,0),
     "location": "View3D",
     "warning": "",
@@ -33,6 +33,7 @@ def register():
     bpy.app.handlers.load_post.append(callbacks.post_load_handler)
     bpy.app.handlers.load_pre.append(callbacks.pre_load_handler)
     bpy.app.handlers.undo_post.append(callbacks.redraw_callback)
+    callbacks.subscribe_to_active_object()
 
 def unregister():
     drawing.hide_all_drawings()
