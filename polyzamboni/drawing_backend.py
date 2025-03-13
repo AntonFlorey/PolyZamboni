@@ -186,9 +186,7 @@ def get_triangle_list_per_cluster_quality(mesh : Mesh, bmesh : BMesh, face_offse
     if connected_components is None:
         connected_components = io.read_connected_component_sets(mesh)
         assert connected_components is not None
-    start_time = time.time()
     all_v_positions, tris_per_component = compute_and_update_connected_component_triangle_lists_for_drawing(mesh, bmesh, face_offset, edge_constraints, world_matrix, connected_components)
-    print("time to compute or fetch triangles:", time.time() - start_time, "seconds")
     cyclic_components = io.read_components_with_cycles_set(mesh)
     components_with_overlaps = io.read_components_with_overlaps(mesh)
     glue_flap_collisions = io.read_glue_flap_collisions_dict(mesh)

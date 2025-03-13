@@ -7,7 +7,6 @@ from .operators_backend import update_all_flap_geometry
 
 # redraw polyzamboni feedback when object selection changes
 def object_select_callback(*args):
-    # print("Updating drawings of:", bpy.context.active_object.name)
     update_all_polyzamboni_drawings(None, bpy.context)
 
 dummy_owner = object()

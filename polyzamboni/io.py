@@ -4,15 +4,10 @@ All properties come with validity checks (they do not check if the stored data m
 
 """
 
-import bpy
 from bpy.types import Mesh
 import bmesh
 import numpy as np
-import os
-import networkx as nx
-import math
 import mathutils
-from collections import deque
 from .geometry import AffineTransform2D
 from . import utils
 
@@ -442,9 +437,6 @@ def affine_transforms_to_roots_valid(mesh : Mesh):
         return False
     for component_id, facewise_affine_transformations in affine_transforms_to_roots.items():
         if components_as_sets[component_id] != set(facewise_affine_transformations.keys()):
-            print("face keys differ")
-            print(components_as_sets[component_id])
-            print(set(facewise_affine_transformations.keys()))
             return False
     return True
 _all_validity_check_functions.append(affine_transforms_to_roots_valid)
@@ -644,7 +636,7 @@ def check_if_all_polyzamboni_data_exists(mesh : Mesh):
 def check_if_all_polyzamboni_data_is_valid(mesh : Mesh):
     for validity_check_function in _all_validity_check_functions:
         if not validity_check_function(mesh):
-            print(validity_check_function)
+            print("POLYZAMBONI INFO: Failed validity check: ", validity_check_function)
             return False
     return True
 

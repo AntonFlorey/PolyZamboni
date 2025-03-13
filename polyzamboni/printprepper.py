@@ -1,3 +1,9 @@
+"""
+Contains functions that extract all data to print from a mesh with attached paper model. 
+Objects to draw are grouped in instances of ComponentPrintData.
+Use "fit_components_on_pages" to place all components (or islands) on pages of a given size.
+"""
+
 import os
 import bpy
 from bpy.types import Object, Mesh
@@ -9,7 +15,7 @@ from . import glueflaps
 from . import unfolding
 from . import utils
 from . import io
- 
+
 class CutEdgeData():
     def __init__(self, coords, edge_index):
         self.coords = coords
@@ -437,7 +443,6 @@ def fit_components_on_pages(components, page_size, page_margin, component_margin
 
         if len(node_candidates) == 0:
             component_print_data.align_vertically_via_pca() # back to vertical alignment...
-            print("had to begin a new page for component")
             # create a new page for this component
             new_page = create_new_page_partition(page_size, page_margin)
             page_partitions.setdefault(component_mat_id, []).append(new_page)
@@ -454,7 +459,7 @@ def fit_components_on_pages(components, page_size, page_margin, component_margin
     # collect all components per page
 
     page_arrangement = []
-    print("Unfolding fits on", sum([len(roots) for roots in page_partitions.values()]), "pages.")
+    print("POLYZAMBONI INFO: Paper model instruction fits on", sum([len(roots) for roots in page_partitions.values()]), "pages.")
     for page_root_list in page_partitions.values():
         for page_root in page_root_list:
             components_on_curr_page = []
@@ -463,8 +468,6 @@ def fit_components_on_pages(components, page_size, page_margin, component_margin
 
     # quick sanity check
     number_of_components_on_pages = sum([len(page) for page in page_arrangement])
-    print("Number of components on all pages:", number_of_components_on_pages)
-    print("Number of input components:", len(components))
     assert number_of_components_on_pages == len(components)
 
     return page_arrangement

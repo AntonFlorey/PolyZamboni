@@ -47,3 +47,6 @@ wheels = [
   "./wheels/kiwisolver-1.4.8-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
   "./wheels/kiwisolver-1.4.8-cp311-cp311-win_amd64.whl",
 ]
+
+[permissions]
+files = "Export PDF/SVG to disk"

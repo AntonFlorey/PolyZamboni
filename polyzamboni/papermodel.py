@@ -155,7 +155,6 @@ class PaperModel():
     @classmethod
     def from_existing(cls, mesh : Mesh):
         """ Initializes a paper model from data attached to a Mesh object. """
-        read_start_time = time.time()
         papermodel_instance = cls(mesh)
         # check if the existing data is valid (or atleast seems valid)
         papermodel_instance.__init_mesh_data(mesh)
@@ -180,7 +179,6 @@ class PaperModel():
         glueflap_geometry = io.read_glue_flap_geometry_per_edge_per_component(mesh)
         glueflap_collisions = io.read_glue_flap_collisions_dict(mesh)
         component_render_vertices, component_render_triangles = io.read_all_component_render_data(mesh)
-        component_creation_start_time = time.time()
         for component_id, component_face_set in connected_component_sets.items():
             read_component = ConnectedComponent.from_mesh_props(component_face_set, component_id in cyclic_components, component_id in overlapping_components, 
                                                                 affine_transforms_to_root[component_id] if component_id in affine_transforms_to_root else None, 
@@ -192,8 +190,6 @@ class PaperModel():
                                                                 component_render_vertices[component_id] if component_id in component_render_vertices else None,
                                                                 component_render_triangles[component_id] if component_id in component_render_triangles else None)
             papermodel_instance.connected_components[component_id] = read_component
-        print("Creating connected component instances took", time.time() - component_creation_start_time, "seconds.")
-        print("Reading existing Paper Model took", time.time() - read_start_time, "seconds.")
         return papermodel_instance
 
     @classmethod
@@ -211,7 +207,7 @@ class PaperModel():
 
     def __exit__(self, exc_type, exc_value, exc_tb):
         if exc_type is not None:
-            print("Exception occured while working on the paper model!")
+            print("POLYZAMBONI ERROR: Exception occured while working on the paper model!")
             self.valid = False
         self.close()
         return True 
@@ -287,7 +283,6 @@ class PaperModel():
 
     def close(self):
         """ Write back all altered papermodel data back to mesh properties and frees the bmesh. """
-        write_start_time = time.time()
         if self.valid:
             self.write_back_mesh_data()
         else:
@@ -295,7 +290,6 @@ class PaperModel():
             io.remove_all_polyzamboni_data(self.mesh)
             self.zamboni_props.has_attached_paper_model = False
         self.bm.free()
-        print("Writing Paper Model back to mesh took", time.time() - write_start_time, "seconds.")
 
     #################################
     #      Editing Operations       #
@@ -587,10 +581,10 @@ class PaperModel():
         """ Returns: The used halfedge, no new overlaps (bool) """
         bm_edge : bmesh.types.BMEdge = utils.find_bmesh_edge_of_halfedge(self.bm, preferred_halfedge)
         if bm_edge.index in self.glueflap_dict.keys():
-            print("WARNING: This edge already has a glue flap attached to it.")
+            print("POLYZAMBONI ERROR: This edge already has a glue flap attached to it.")
             return
         if bm_edge.is_boundary:
-            print("WARNING: Boundary edge cannot have a glue flap.")
+            print("POLYZAMBONI WARNING: Boundary edge cannot have a glue flap.")
             return
         
         preferred_mesh_face = self.halfedge_to_face_dict[preferred_halfedge]

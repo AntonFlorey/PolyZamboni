@@ -40,7 +40,6 @@ def greedy_auto_cuts(mesh : Mesh, quality_level="NO_OVERLAPS_ALLOWED", target_lo
         def edge_alignment_to_axis_vec(e : bmesh.types.BMEdge):
             e_dir = np.array(e.verts[0].co - e.verts[1].co)
             return abs(np.dot(loops_axis_vec, e_dir / np.linalg.norm(e_dir)))
-
         sorted_autocut_edges = sorted(filled_edges, key=edge_alignment_to_axis_vec, reverse=True)
         init_time = time.time() - init_start_time
 
@@ -89,9 +88,9 @@ def greedy_auto_cuts(mesh : Mesh, quality_level="NO_OVERLAPS_ALLOWED", target_lo
 
     # timings
     total_time = time.time() - algo_start_time
-    print("Greedy Auto Cuts total time:", total_time)
+    print("POLYZAMBONI INFO: Greedy Auto Cuts total time:", total_time)
     if total_time > 0:
-        print("Init time: {:.2f}s ({:.1f}%)".format(init_time, 100 * init_time / total_time))
+        print("POLYZAMBONI INFO: Init time: {:.2f}s ({:.1f}%)".format(init_time, 100 * init_time / total_time))
 
     yield 1.0
     

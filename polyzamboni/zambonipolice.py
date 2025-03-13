@@ -7,6 +7,7 @@ from bmesh.types import BMesh
 
 from . import io
 
+# TODO Add more checks to this function to avoid more crashes
 def check_if_polyzamobni_data_exists_and_fits_to_bmesh(mesh : Mesh, bmesh : BMesh):
     if not io.check_if_all_polyzamboni_data_exists(mesh):
         return False

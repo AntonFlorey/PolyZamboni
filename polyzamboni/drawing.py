@@ -1,9 +1,12 @@
+"""
+Handling of all the user feedback rendering. 
+"""
+
 import bpy
 import bmesh
 import gpu
 import numpy as np
 from gpu_extras.batch import batch_for_shader
-import time
 
 from . import drawing_backend
 from . import io
@@ -186,7 +189,7 @@ def hide_region_quality_triangles():
 def region_quality_triangles_draw_callback(vertex_positions, regions_by_quality):
     for quality, triangle_indices in regions_by_quality.items():
         if quality not in quality_color_mapping:
-            print("WARNING: Quality of provided region is not known!")
+            print("POLYZAMBONI WARNING: Quality of provided region is not known!")
             continue
         triangles_draw_callback(vertex_positions, triangle_indices, quality_color_mapping[quality])
 
@@ -213,7 +216,7 @@ def hide_glue_flaps():
 def glue_flaps_draw_callback(flaps_by_quality):
     for quality, glue_flap_lines in flaps_by_quality.items():
         if quality not in flap_quality_color_mapping:
-            print("WARNING: Quality of provided glue flaps is not known!")
+            print("POLYZAMBONI WARNING: Quality of provided glue flaps is not known!")
         lines_draw_callback(glue_flap_lines, flap_quality_color_mapping[quality], width=2.5)
 
 def show_glue_flaps(flaps_by_quality):
@@ -236,8 +239,7 @@ def update_all_polyzamboni_drawings(self, context):
     try:
         draw_settings = context.scene.polyzamboni_drawing_settings
     except AttributeError:
-        print("Context not yet available...")
-        # Trigger a redraw of all screen areas
+        print("POLYZAMBONI WARNING: Context not yet available...")
         return
     
     # hide everything
@@ -257,7 +259,7 @@ def update_all_polyzamboni_drawings(self, context):
     bm = bmesh.new()
     bm.from_mesh(active_mesh)
     if not check_if_polyzamobni_data_exists_and_fits_to_bmesh(active_mesh, bm):
-        print("Attached paper model data invalid! CAN NOT DRAW D:")
+        print("POLYZAMBONI WARNING: Attached paper model data invalid! CAN NOT DRAW D:")
         for area in bpy.context.screen.areas:
             if area.type == 'VIEW_3D':
                 area.tag_redraw()
@@ -272,13 +274,12 @@ def update_all_polyzamboni_drawings(self, context):
     show_auto_completed_cuts(drawing_backend.mesh_edge_id_list_to_coordinate_list(bm, io.read_auto_cut_edges(active_mesh), draw_settings.normal_offset, world_matrix), dotted_line_length=draw_settings.dotted_line_length)
 
     if draw_settings.color_faces_by_quality:
-        # region_fetch_time_start = time.time()
         all_v_positions, quality_dict = drawing_backend.get_triangle_list_per_cluster_quality(active_mesh, bm, draw_settings.normal_offset, edge_constraints, 
                                                                                               world_matrix, connected_components)
-        # print("time to fetch new regions:", time.time() - region_fetch_time_start, "seconds")
         show_region_quality_triangles(all_v_positions, quality_dict)
 
     if draw_settings.show_glue_flaps:
+        # so far, the glue flap geometry gets computed on the fly each time this function is called
         glue_flap_quality_dict = drawing_backend.get_lines_array_per_glue_flap_quality(active_mesh, bm, draw_settings.normal_offset, world_matrix, general_mesh_props.glue_flap_angle, 
                                                                                        general_mesh_props.glue_flap_height, connected_components, face_to_component_dict)
         show_glue_flaps(glue_flap_quality_dict)
@@ -287,6 +288,3 @@ def update_all_polyzamboni_drawings(self, context):
     for area in bpy.context.screen.areas:
         if area.type == 'VIEW_3D':
             area.tag_redraw()
-
-def draw_errors():
-    print("drawing not implemented yet")

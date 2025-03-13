@@ -426,7 +426,6 @@ class AutoCutsOperator(bpy.types.Operator):
     _running = False
 
     def invoke(self, context, event):
-        print("invoke called")
         wm = context.window_manager
         return wm.invoke_props_dialog(self, title="Auto cut options", confirm_text="Lets go!")
 
@@ -437,13 +436,11 @@ class AutoCutsOperator(bpy.types.Operator):
         write_custom_split_property_row(layout.row(), "Pieces per component", self.properties, "max_pieces_per_component", 0.5)
 
     def execute(self, context):
-        print("execute called")
         ao = context.active_object
         ao_mesh = ao.data
         # progress bar setup
         self._running = True
         wm = context.window_manager
-        #print("operator wm", wm)
         wm.polyzamboni_auto_cuts_progress = 0.0
         wm.polyzamboni_auto_cuts_running = True
         self._timer = wm.event_timer_add(time_step=0.1, window=context.window)
@@ -692,7 +689,6 @@ class PolyZamboniExportPDFOperator(bpy.types.Operator, ExportHelper):
         export_draw_func(self)
 
     def execute(self, context):
-        print("executed polyzamboni export operator")
         # first, check if the selected model can be unfolded
         ao = context.active_object
         ao_mesh = ao.data
@@ -768,7 +764,6 @@ class PolyZamboniExportSVGOperator(bpy.types.Operator, ExportHelper):
         export_draw_func(self)
 
     def execute(self, context):
-        print("executed polyzamboni export operator")
         # first, check if the selected model can be unfolded
         ao = context.active_object
         ao_mesh = ao.data
