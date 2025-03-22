@@ -16,6 +16,9 @@ To add polyzamboni to Blender, clone this repository and zip the `PolyZamboni` f
 ### PolyZamboni as a Blender Extension
 If you are using Blender version 4.3, you can install polyzamboni as a Blender Extension. This comes with the benefit of all external python packages being taken care of (hopefully) automatically. You can find several builds of this addon [here](https://github.com/AntonFlorey/PolyZamboni/releases).
 
+#### Great News 
+This addon got approved by Blender! Just go to **Edit-><ins>P</ins>references->Get Extensions** and search for "PolyZamboni" and install the addon with one click.
+
 ## Usage
 With the addon enabled, select any mesh object and navigate to the PolyZamboni panel in the viewport sidebar (toggle with `'N'`) and click on the `Unfold this mesh` button. This starts the unfolding process of the selected mesh with no initial cuts.  
 Not all meshes can be processed by PolyZamboni. The following things prevent this addon from working for your mesh:
@@ -34,10 +37,11 @@ You will get a warning whenever one of these fail-cases occur and the option to 
     <img src ="images/SpotUnfoldingResult.png" width=370>
 </p>
 
-To transform your 3D model into printable mesh pieces that can be glued together to create an awesome paper model, you have to define where the mesh should be cut open and where to place flaps for glueing. You can edit cuts and glue flaps by pressing the `PolyZamboni Edit Mode` button. In this edit mode you have access to plenty of powerful tools:
+To transform your 3D model into printable mesh pieces that can be glued together to create an awesome paper model, you have to define where the mesh should be cut open and where to place flaps for glueing. You can edit cuts and glue flaps by entering `Edit Mode`. Here, you have access to plenty of powerful tools:
 
 - `Separate Materials` adds cuts between all faces that have different materials assigned to them.
 - `Auto Unfold` automatically adds cuts until the entire mesh can be unfolded. The algorithm tries to create loops of connected faces. You can choose whether these loops should wrap around the `X`, `Y` or `Z` axis. You can also give a maximum number of connected faces.
+- `Remove Auto Cuts` removes all automatically added cuts. In case you are not happy with the results of the previously listed operation.
 - `Recompute Flaps` places glue flaps at all cut edges. The greedy algorithm tries to avoid overlaps of the printed pieces. There is also a toggle next to the button that lets you decide whether flaps should alternate along patch boundaries.
 - `Alt+C` opens the manual cuts pie menu. Here you can cut, clear or glue all selected edges. Glued edges can not be cut by the `Auto Unfold` operator and have no other purpose. You can also select multiple faces and mark them as one connected region via the `Define Region` operator. This automatically cuts all edges between selected and non-selected faces.
 - `Alt+X` opens the glue flaps pie menu. Here you can flip the glue flaps attached to all selected edges. 
