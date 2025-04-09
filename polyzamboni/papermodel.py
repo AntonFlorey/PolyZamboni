@@ -100,7 +100,8 @@ class ConnectedComponent():
             del self.glueflap_geometry[edge_index]
         if edge_index in self.glueflap_collisions:
             for other_collision_edge_index in self.glueflap_collisions[edge_index]:
-                self.glueflap_collisions[other_collision_edge_index].remove(edge_index)
+                if other_collision_edge_index != -1:
+                    self.glueflap_collisions[other_collision_edge_index].remove(edge_index)
             del self.glueflap_collisions[edge_index]
     
     def remove_all_glue_flaps(self):

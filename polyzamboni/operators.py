@@ -347,6 +347,7 @@ class ZamboniCutDesignOperator(bpy.types.Operator):
     """ Add or remove cuts """
     bl_label = "PolyZamboni Cut Design Tool"
     bl_idname  = "polyzamboni.cut_editing_operator"
+    bl_options = {'UNDO'}
 
     design_actions: bpy.props.EnumProperty(
         name="actions",
@@ -365,7 +366,9 @@ class ZamboniCutDesignOperator(bpy.types.Operator):
         ao = context.active_object
         ao_mesh = ao.data
         ao_bmesh = bmesh.from_edit_mesh(ao_mesh)
-        selected_edges = [e.index for e in ao_bmesh.edges if e.select] 
+        selected_edges = [e.index for e in ao_bmesh.edges if e.select]
+        ao_bmesh.free()
+
         if self.design_actions == "ADD_CUT":
             operators_backend.cut_edges(ao_mesh, selected_edges)
         elif self.design_actions == "GLUE_EDGE":
@@ -376,6 +379,7 @@ class ZamboniCutDesignOperator(bpy.types.Operator):
             selected_faces = [f.index for f in ao_bmesh.faces if f.select]
             operators_backend.add_cutout_region(ao_mesh, selected_faces)
         update_all_polyzamboni_drawings(None, context)
+
         return {"FINISHED"}
 
     @classmethod
