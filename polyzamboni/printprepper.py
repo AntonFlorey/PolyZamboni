@@ -279,7 +279,7 @@ def create_print_data_for_all_components(obj : Object, scaling_factor):
                 dist_cog_edge_sum += signed_point_dist_to_line(face_cog, vertex_coords_unfolded[0], vertex_coords_unfolded[1])
                 if curr_edge.is_boundary or utils.mesh_edge_is_cut(curr_edge.index, edge_constraints):
                     # check if this edge has a glue flap attached to it
-                    if glueflaps.check_if_edge_has_flap_geometry_attached_to_it(mesh, c_id, curr_edge, glue_flap_triangles):
+                    if glueflaps.check_if_edge_has_flap_geometry_attached_to_it(mesh, c_id, curr_edge.index, glue_flap_triangles):
                         # this is a fold edge of a glue flap
                         curr_component_print_data.add_fold_edges_at_flaps(FoldEdgeAtGlueFlapData(tuple(vertex_coords_unfolded), curr_edge.is_convex, curr_edge.calc_face_angle(), curr_edge.index))
                     else:
