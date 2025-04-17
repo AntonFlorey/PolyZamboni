@@ -290,41 +290,37 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
         # create a new figure for this page
         fig, ax = self.__create_new_page()
         
+        component_print_data : ComponentPrintData
         if only_textures:
-            for component_on_page in components_on_page:
-                component_print_data : ComponentPrintData = component_on_page["print data"]
-                component_page_transform : AffineTransform2D = component_on_page["page coord transform"]
+            for component_print_data in components_on_page:
                 for colored_triangle_data in component_print_data.colored_triangles:
-                    self.__draw_colored_triangle(ax, colored_triangle_data, component_page_transform)
+                    self.__draw_colored_triangle(ax, colored_triangle_data, component_print_data.page_transform)
             return fig, ax
 
         # draw all lines and text and maybe colored triangles
-        for component_on_page in components_on_page:
-            component_print_data : ComponentPrintData = component_on_page["print data"]
-            component_page_transform : AffineTransform2D = component_on_page["page coord transform"]
-            
+        for component_print_data in components_on_page:
             if self.show_build_step_numbers:
                 self.__write_text(ax, str(component_print_data.build_step_number), 
                                 component_print_data.build_step_number_position,
                                 self.build_step_number_font_size,
                                 self.__linear_to_srgb(self.builf_step_number_color),
-                                component_page_transform)
+                                component_print_data.page_transform)
 
             for cut_edge_print_data in component_print_data.cut_edges:
-                self.__draw_cut_edge(ax, cut_edge_print_data, component_page_transform)
+                self.__draw_cut_edge(ax, cut_edge_print_data, component_print_data.page_transform)
             
             for fold_edge_print_data in component_print_data.fold_edges:
-                self.__draw_fold_edge(ax, fold_edge_print_data, component_page_transform)
+                self.__draw_fold_edge(ax, fold_edge_print_data, component_print_data.page_transform)
 
             for fold_edge_at_flap_print_data in component_print_data.fold_edges_at_flaps:
-                self.__draw_fold_edge_at_glue_flap(ax, fold_edge_at_flap_print_data, component_page_transform)
+                self.__draw_fold_edge_at_glue_flap(ax, fold_edge_at_flap_print_data, component_print_data.page_transform)
 
             for glue_flap_edge_data in component_print_data.glue_flap_edges:
-                self.__draw_glue_flap_edge(ax, glue_flap_edge_data, component_page_transform)
+                self.__draw_glue_flap_edge(ax, glue_flap_edge_data, component_print_data.page_transform)
 
             if draw_textures:
                 for colored_triangle_data in component_print_data.colored_triangles:
-                    self.__draw_colored_triangle(ax, colored_triangle_data, component_page_transform)
+                    self.__draw_colored_triangle(ax, colored_triangle_data, component_print_data.page_transform)
         return fig, ax
 
     def export(self, print_ready_pages, output_file_name_prefix):

@@ -83,6 +83,29 @@ class ZamboniGeneralMeshProps(bpy.types.PropertyGroup):
         name="Not tri-able faces present",
         default=False
     )
+    number_of_print_pages : IntProperty(
+        name="Number of Print Pages",
+        description="Stores the number of pages the model is printed on",
+        default=0
+    )
+    paper_size: EnumProperty(
+        name="Page Size",
+        items=[
+            ("A0", "A0", "", "", 0),
+            ("A1", "A1", "", "", 1),
+            ("A2", "A2", "", "", 2),
+            ("A3", "A3", "", "", 3),
+            ("A4", "A4", "", "", 4),
+            ("A5", "A5", "", "", 5),
+            ("A6", "A6", "", "", 6),
+            ("A7", "A7", "", "", 7),
+            ("A8", "A8", "", "", 8),
+            ("Letter", "Letter", ", ", 9),
+            ("Legal", "Legal", "", "", 10),
+            ("Tabloid", "Tabloid", "", "", 11)
+        ],
+        default="A4"
+    )
 
 linestyles = [
         ("-", "-", "", "", 0),

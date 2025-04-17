@@ -11,8 +11,10 @@ from gpu_extras.batch import batch_for_shader
 from . import drawing_backend
 from . import io
 from .zambonipolice import check_if_polyzamobni_data_exists_and_fits_to_bmesh
+from .exporters import paper_sizes
+from .printprepper import ComponentPrintData, ColoredTriangleData, CutEdgeData, FoldEdgeData, GlueFlapEdgeData, FoldEdgeAtGlueFlapData
 
-# colors 
+# colors (RWTH)
 BLUE = (  0 / 255,  84 / 255, 159 / 255, 1.0)
 MAGENTA = (227 / 255,   0 / 255, 102 / 255, 1.0)
 YELLOW = (255 / 255, 237 / 255,   0 / 255, 1.0)
@@ -36,6 +38,8 @@ POLYZAMBONI_BLUE = (  71 / 255,  141 / 255, 179 / 255, 1.0)
 POLYZAMBONI_LILA = (  134 / 255,  71 / 255, 179 / 255, 1.0)
 POLYZAMBONI_ROSE = (  179 / 255,  71 / 255, 116 / 255, 1.0)
 
+BLACK = (0.0, 0.0, 0.0, 1.0)
+WHITE = (1.0, 1.0, 1.0, 1.0)
 
 # Keep track of active draw callbacks
 _drawing_handle_user_provided_cuts = None
@@ -43,6 +47,7 @@ _drawing_handle_locked_edges = None
 _drawing_handle_auto_completed_cuts = None
 _drawing_handle_region_quality_triangles = None
 _drawing_handle_glue_flaps = None
+_drawing_handle_pages = None
 
 class ColorGenerator():
     """ A simple color generator"""
@@ -69,7 +74,7 @@ class ColorGenerator():
         self.index = (self.index + 1) % len(self.colors)
         return col
     
-def make_dotted_lines(line_array, target_line_length, max_segments = 100):
+def make_dotted_lines(line_array, target_line_length, max_segments = 100, linestyle = (1,1)):
     if target_line_length <= 0:
         return line_array
     dotted_lines_array = []
@@ -82,11 +87,17 @@ def make_dotted_lines(line_array, target_line_length, max_segments = 100):
         segments = min(int(line_len / target_line_length), max_segments)
         
         total_segments = 2 * segments + 1
-        for segment_i in range(1, total_segments, 2):
-            t_from = segment_i / total_segments
-            t_to = (segment_i + 1) / total_segments
+        segment_start_index = 0
+        style_len = len(linestyle)
+        assert (style_len % 2) == 0
+        style_index = 0
+        while segment_start_index < total_segments:
+            t_from = segment_start_index / total_segments
+            t_to = min((segment_start_index + linestyle[style_index]) / total_segments, 1.0)
             dotted_lines_array.append((1.0 - t_from) * v_from + t_from * v_to)
             dotted_lines_array.append((1.0 - t_to) * v_from + t_to * v_to)
+            segment_start_index += linestyle[style_index] + linestyle[style_index + 1]
+            style_index = (style_index + 2) % style_len
         line_index += 2
     return dotted_lines_array
 
@@ -98,17 +109,37 @@ def deactivate_draw_callback(callback_handle, region_type='WINDOW'):
     if callback_handle is not None:
         bpy.types.SpaceView3D.draw_handler_remove(callback_handle, region_type)
 
+def lines_2D_draw_callback(line_array, color, width=3):
+    shader = gpu.shader.from_builtin("2D_UNIFORM_COLOR")
+    prev_line_width = gpu.state.line_width_get()
+    gpu.state.line_width_set(width)
+    batch = batch_for_shader(shader, 'LINES', {"pos" : line_array})
+    shader.bind()
+    shader.uniform_float("color", color)
+    batch.draw(shader)
+    gpu.state.line_width_set(prev_line_width)
+
+def triangles_2D_draw_callback(vertex_positions, triangle_indices, color):
+    shader = gpu.shader.from_builtin('2D_UNIFORM_COLOR')
+    # prepare and draw batch
+    batch = batch_for_shader(shader, 'TRIS', {"pos": vertex_positions}, indices=triangle_indices)
+    shader.bind()
+    shader.uniform_float("color", color)
+    batch.draw(shader)
+
 def lines_draw_callback(line_array, color, width=3):
     shader = gpu.shader.from_builtin('UNIFORM_COLOR')
+    prev_line_width = gpu.state.line_width_get()
     gpu.state.line_width_set(width)
     batch = batch_for_shader(shader, 'LINES', {"pos": line_array})
+    shader.bind()
     shader.uniform_float("color", color)
     gpu.state.depth_test_set('LESS_EQUAL')
     gpu.state.depth_mask_set(True)
     batch.draw(shader)
     # restore opengl defaults
     gpu.state.depth_mask_set(False)
-    gpu.state.line_width_set(1.0)
+    gpu.state.line_width_set(prev_line_width)
 
 def triangles_draw_callback(vertex_positions, triangle_indices, color):
     shader = gpu.shader.from_builtin('UNIFORM_COLOR')
@@ -117,6 +148,7 @@ def triangles_draw_callback(vertex_positions, triangle_indices, color):
     gpu.state.depth_mask_set(True)
     # prepare and draw batch
     batch = batch_for_shader(shader, 'TRIS', {"pos": vertex_positions}, indices=triangle_indices)
+    shader.bind()
     shader.uniform_float("color", color)
     batch.draw(shader)
     # restore opengl defaults
@@ -223,6 +255,71 @@ def show_glue_flaps(flaps_by_quality):
     hide_glue_flaps()
     global _drawing_handle_glue_flaps
     _drawing_handle_glue_flaps = bpy.types.SpaceView3D.draw_handler_add(glue_flaps_draw_callback, (flaps_by_quality,), "WINDOW", "POST_VIEW")
+
+#################################
+#              Pages            #
+#################################
+
+def hide_pages():
+    global _drawing_handle_pages
+    if _drawing_handle_pages is not None:
+        bpy.types.SpaceImageEditor.draw_handler_remove(_drawing_handle_pages, "WINDOW")
+        _drawing_handle_pages = None
+
+def page_bg_draw_callback(selected_page_lines, other_pages_lines):
+    if selected_page_lines is not None:
+        lines_2D_draw_callback(selected_page_lines, ORANGE)
+    lines_2D_draw_callback(other_pages_lines, BLACK)
+
+def page_draw_callback(selected_page_lines, other_pages_lines):
+    # pages in the backgound
+    page_bg_draw_callback(selected_page_lines, other_pages_lines)
+    # connected components
+    # TODO
+
+def show_pages(num_pages, components_per_page, paper_size = paper_sizes["A4"], selected_page = None, margin_between_pages = 1.0, pages_per_row = 2):
+    selected_page_lines = None if selected_page is None else []
+    other_page_lines = []
+    for page_index in range(num_pages):
+        row_index = page_index % pages_per_row
+        col_index = page_index // pages_per_row
+        page_anchor = np.array(row_index * (paper_size[0] + margin_between_pages), -col_index * (paper_size[1] + margin_between_pages))
+        current_page_line_coords = []
+        current_page_line_coords.append(page_anchor)
+        current_page_line_coords.append(page_anchor + np.array(paper_size[0], 0,0))
+
+        current_page_line_coords.append(page_anchor + np.array(paper_size[0], 0,0))
+        current_page_line_coords.append(page_anchor + np.array(paper_size[0], paper_size[1]))
+
+        current_page_line_coords.append(page_anchor + np.array(paper_size[0], paper_size[1]))
+        current_page_line_coords.append(page_anchor + np.array(0,0, paper_size[1]))
+
+        current_page_line_coords.append(page_anchor + np.array(0,0, paper_size[1]))
+        current_page_line_coords.append(page_anchor)
+
+        if selected_page is not None and selected_page == page_index:
+            selected_page_lines += current_page_line_coords
+        else:
+            other_page_lines += current_page_line_coords
+    
+    # components on pages
+    component_lines = []
+    component_bg_verts = []
+    component_bg_triangle_ids = []
+
+    
+
+    assert num_pages >= len(components_per_page)
+    for components_on_page, page_index in enumerate(components_per_page):
+        current_component : ComponentPrintData
+        for current_component in components_on_page:
+            current_component.page_transform
+
+    
+    hide_pages()
+    global _drawing_handle_pages
+    _drawing_handle_pages = bpy.types.SpaceImageEditor.draw_handler_add(page_draw_callback, (selected_page_lines, other_page_lines), "WINDOW", "POST_VIEW")
+    
 
 #################################
 #          Update all           #
