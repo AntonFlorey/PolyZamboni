@@ -13,6 +13,7 @@ from . import io
 from .zambonipolice import check_if_polyzamobni_data_exists_and_fits_to_bmesh
 from .exporters import paper_sizes
 from .printprepper import ComponentPrintData, ColoredTriangleData, CutEdgeData, FoldEdgeData, GlueFlapEdgeData, FoldEdgeAtGlueFlapData
+from .geometry import AffineTransform2D
 
 # colors (RWTH)
 BLUE = (  0 / 255,  84 / 255, 159 / 255, 1.0)
@@ -303,17 +304,29 @@ def show_pages(num_pages, components_per_page, paper_size = paper_sizes["A4"], s
             other_page_lines += current_page_line_coords
     
     # components on pages
-    component_lines = []
+
+    full_lines = []
+    convex_lines = []
+    concave_lines = []
     component_bg_verts = []
     component_bg_triangle_ids = []
-
-    
 
     assert num_pages >= len(components_per_page)
     for components_on_page, page_index in enumerate(components_per_page):
         current_component : ComponentPrintData
         for current_component in components_on_page:
-            current_component.page_transform
+            page_transform = current_component.page_transform
+            for cut_edge_data in current_component.cut_edges + current_component.glue_flap_edges:
+                full_lines += [page_transform * coord for coord in cut_edge_data.coords]
+            for fold_edge_data in current_component.fold_edges + current_component.fold_edges_at_flaps:
+                if fold_edge_data.is_convex:
+                    convex_lines += [page_transform * coord for coord in fold_edge_data.coords]
+                else:
+                    concave_lines += [page_transform * coord for coord in fold_edge_data.coords]
+            tri_data : ColoredTriangleData
+            for tri_data in current_component.colored_triangles:
+                tri_data.color
+
 
     
     hide_pages()
