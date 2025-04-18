@@ -50,8 +50,9 @@ class ComponentPrintData():
     """ Instances of this class store all data necessary to print a connected component. """ 
     
     def __init__(self):
-        self.lower_left = np.zeros(2) # post page transform bounding box
-        self.upper_right = np.zeros(2) # post page transform bounding box
+        self.og_component_id = 0
+        self.lower_left = np.inf * np.ones(2) # post page transform bounding box
+        self.upper_right = -np.inf * np.ones(2) # post page transform bounding box
         self.cut_edges = []
         self.fold_edges = []
         self.fold_edges_at_flaps = []
@@ -102,14 +103,13 @@ class ComponentPrintData():
         # collect all coords along cut edges (not glue flaps for now)
         cut_edge_first_coords = [cut_edge_data.coords[0] for cut_edge_data in self.cut_edges]
         fold_edge_at_glue_flap_first_coords = [fold_edge_at_flap_data.coords[0] for fold_edge_at_flap_data in self.fold_edges_at_flaps]
-        boundary_coords = np.array(cut_edge_first_coords + fold_edge_at_glue_flap_first_coords)
+        boundary_coords = np.array([self.page_transform * coord for coord in cut_edge_first_coords + fold_edge_at_glue_flap_first_coords])
         mean_shifted_coords = boundary_coords - np.mean(boundary_coords, axis=0)
         corr_mat = mean_shifted_coords.T @ mean_shifted_coords
         eigenvalues, eigenvectors = np.linalg.eigh(corr_mat)
         return np.mean(boundary_coords, axis=0), eigenvectors
 
     def align_horizontally_via_pca(self):
-        self.apply_page_transform_to_all_coords()
         boundary_cog, pca_basis = self.__pca()
         shift_cog_to_orig = AffineTransform2D(affine_part=-boundary_cog)
         long_axis_eigvec = pca_basis[:,1] # eigenvector of largest eigenvalue
@@ -117,48 +117,30 @@ class ComponentPrintData():
         PCA_B = np.column_stack([long_axis_eigvec, short_axis_eigvec])
         rotate_x_axis_to_long_axis = AffineTransform2D(linear_part=np.linalg.inv(PCA_B))
         horizontal_alignment_transform = shift_cog_to_orig.inverse() @ rotate_x_axis_to_long_axis @ shift_cog_to_orig
-        self.set_new_page_transform(horizontal_alignment_transform)
+        self.concat_page_transform(horizontal_alignment_transform)
 
     def align_vertically_via_pca(self):
-        self.apply_page_transform_to_all_coords()
         boundary_cog, pca_basis = self.__pca()
         shift_cog_to_orig = AffineTransform2D(affine_part=-boundary_cog)
         long_axis_eigvec = pca_basis[:,1] # eigenvector of largest eigenvalue
         short_axis_eigvec = np.array([-long_axis_eigvec[1], long_axis_eigvec[0]])
         rotate_y_axis_to_long_axis = AffineTransform2D(linear_part=np.linalg.inv(np.column_stack([-short_axis_eigvec, long_axis_eigvec])))
         vertical_alignment_transform = shift_cog_to_orig.inverse() @ rotate_y_axis_to_long_axis @ shift_cog_to_orig
-        self.set_new_page_transform(vertical_alignment_transform)
+        self.concat_page_transform(vertical_alignment_transform)
 
     def __adjust_bounding_box_to_page_trasform(self):
+        self.lower_left = np.inf * np.ones(2)
+        self.upper_right = -np.inf * np.ones(2)
         for edge_data in self.__all_edge_data():
             transformed_edge = tuple([self.page_transform * coord for coord in edge_data.coords])
             self.__update_bb_after_adding_edge(transformed_edge)
 
     def set_new_page_transform(self, new_page_transform):
         self.page_transform = new_page_transform
-        self.__adjust_bounding_box_to_page_trasform
+        self.__adjust_bounding_box_to_page_trasform()
 
     def concat_page_transform(self, latest_page_trasform):
         self.set_new_page_transform(latest_page_trasform @ self.page_transform)
-
-    def apply_page_transform_to_all_coords(self):
-        self.lower_left = np.inf * np.ones(2)
-        self.upper_right = -np.inf * np.ones(2)
-
-        # edges
-        for edge_data in self.__all_edge_data():
-            edge_data.coords = tuple([self.page_transform * coord for coord in edge_data.coords])
-            self.__update_bb_after_adding_edge(edge_data.coords)
-
-        # triangles
-        for triangle_data in self.colored_triangles:
-            triangle_data.coords = tuple([self.page_transform * coord for coord in triangle_data.coords])
-
-        # build step number
-        self.build_step_number_position = self.page_transform * self.build_step_number_position
-
-        # set page transform to identity
-        self.page_transform = AffineTransform2D()
 
 class PagePartitionNode():
     def __init__(self, ll, ur):
@@ -264,6 +246,7 @@ def create_print_data_for_all_components(obj : Object, scaling_factor):
         if c_id in cyclic_components:
             continue
         curr_component_print_data = ComponentPrintData()
+        curr_component_print_data.og_component_id = c_id
 
         def get_unfolded_vertex_coord(coord, face_index):
             return unfolding.get_globally_consistent_2d_coord_in_face(mesh, coord, face_index, c_id, local_coordinate_systems, affine_transforms_to_root)
@@ -417,7 +400,7 @@ def recursively_collect_all_page_components(node : PagePartitionNode, component_
         return
     if node.contained_component_id is not None:
         component_in_node : ComponentPrintData = component_list[node.contained_component_id]
-        translation =  AffineTransform2D(affine_part = node.lower_left_corner - component_in_node.lower_left)
+        translation = AffineTransform2D(affine_part = node.lower_left_corner - component_in_node.lower_left)
         component_in_node.concat_page_transform(translation)
         target_list.append(component_in_node)
     recursively_collect_all_page_components(node.child_one, component_list, target_list)
@@ -459,7 +442,7 @@ def fit_components_on_pages(components, page_size, page_margin, component_margin
                 # recursively search for free space
                 for page_root in page_list:
                     recursive_search_for_all_free_spaces(component_print_data, page_root, node_candidates)
-
+    
         if len(node_candidates) == 0:
             component_print_data.align_vertically_via_pca() # back to vertical alignment...
             # create a new page for this component
@@ -467,7 +450,7 @@ def fit_components_on_pages(components, page_size, page_margin, component_margin
             page_partitions.setdefault(component_mat_id, []).append(new_page)
             # add component to the created page
             if not component_fits_in_page_part_node(component_print_data, new_page):
-                print("POLYZAMBONI WARNING: Unfolded connected component does not fit on one page! ")
+                print("POLYZAMBONI WARNING: Unfolded connected component does not fit on one page!")
             new_page.contained_component_id = current_component_id
             partition_node_after_component_insertion(component_print_data, new_page, component_margin)
         else:

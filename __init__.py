@@ -37,6 +37,7 @@ def register():
 
 def unregister():
     drawing.hide_all_drawings()
+    drawing.hide_pages()
     operators.unregister()
     ui.unregister()
     properties.unregister()

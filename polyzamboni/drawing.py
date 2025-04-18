@@ -10,9 +10,9 @@ from gpu_extras.batch import batch_for_shader
 
 from . import drawing_backend
 from . import io
-from .zambonipolice import check_if_polyzamobni_data_exists_and_fits_to_bmesh
+from .zambonipolice import check_if_polyzamobni_data_exists_and_fits_to_bmesh, check_if_page_numbers_and_transforms_exist_for_all_components
 from .exporters import paper_sizes
-from .printprepper import ComponentPrintData, ColoredTriangleData, CutEdgeData, FoldEdgeData, GlueFlapEdgeData, FoldEdgeAtGlueFlapData
+from .printprepper import ComponentPrintData, ColoredTriangleData, CutEdgeData, FoldEdgeData, GlueFlapEdgeData, FoldEdgeAtGlueFlapData, create_print_data_for_all_components
 from .geometry import AffineTransform2D
 
 # colors (RWTH)
@@ -111,7 +111,7 @@ def deactivate_draw_callback(callback_handle, region_type='WINDOW'):
         bpy.types.SpaceView3D.draw_handler_remove(callback_handle, region_type)
 
 def lines_2D_draw_callback(line_array, color, width=3):
-    shader = gpu.shader.from_builtin("2D_UNIFORM_COLOR")
+    shader = gpu.shader.from_builtin("UNIFORM_COLOR")
     prev_line_width = gpu.state.line_width_get()
     gpu.state.line_width_set(width)
     batch = batch_for_shader(shader, 'LINES', {"pos" : line_array})
@@ -120,10 +120,17 @@ def lines_2D_draw_callback(line_array, color, width=3):
     batch.draw(shader)
     gpu.state.line_width_set(prev_line_width)
 
-def triangles_2D_draw_callback(vertex_positions, triangle_indices, color):
-    shader = gpu.shader.from_builtin('2D_UNIFORM_COLOR')
+def multicolored_triangles_2D_draw_callback(vertex_positions, vertex_colors):
+    shader = gpu.shader.from_builtin('SMOOTH_COLOR')
     # prepare and draw batch
-    batch = batch_for_shader(shader, 'TRIS', {"pos": vertex_positions}, indices=triangle_indices)
+    batch = batch_for_shader(shader, 'TRIS', {"pos": vertex_positions, "color" : vertex_colors})
+    shader.bind()
+    batch.draw(shader)
+
+def triangles_2D_draw_callback(vertex_positions, color):
+    shader = gpu.shader.from_builtin('UNIFORM_COLOR')
+    # prepare and draw batch
+    batch = batch_for_shader(shader, 'TRIS', {"pos": vertex_positions})
     shader.bind()
     shader.uniform_float("color", color)
     batch.draw(shader)
@@ -267,72 +274,89 @@ def hide_pages():
         bpy.types.SpaceImageEditor.draw_handler_remove(_drawing_handle_pages, "WINDOW")
         _drawing_handle_pages = None
 
-def page_bg_draw_callback(selected_page_lines, other_pages_lines):
+def page_bg_draw_callback(page_verts, selected_page_lines, other_pages_lines):
+    triangles_2D_draw_callback(page_verts, WHITE)
     if selected_page_lines is not None:
         lines_2D_draw_callback(selected_page_lines, ORANGE)
     lines_2D_draw_callback(other_pages_lines, BLACK)
 
-def page_draw_callback(selected_page_lines, other_pages_lines):
-    # pages in the backgound
-    page_bg_draw_callback(selected_page_lines, other_pages_lines)
-    # connected components
-    # TODO
+def component_draw_callback(component_triangle_verts, component_triangle_colors, component_lines):
+    multicolored_triangles_2D_draw_callback(component_triangle_verts, component_triangle_colors)
+    lines_2D_draw_callback(component_lines, BLACK, 1)
 
-def show_pages(num_pages, components_per_page, paper_size = paper_sizes["A4"], selected_page = None, margin_between_pages = 1.0, pages_per_row = 2):
+def pages_draw_callback(page_verts, selected_page_lines, other_pages_lines, component_triangle_verts, component_triangle_colors, component_lines):
+    # pages in the backgound
+    page_bg_draw_callback(page_verts, selected_page_lines, other_pages_lines)
+    # connected components
+    component_draw_callback(component_triangle_verts, component_triangle_colors, component_lines)
+
+def show_pages(num_pages, components_per_page, paper_size = paper_sizes["A4"], selected_page = None, margin_between_pages = 1.0, pages_per_row = 2, fold_angle_th = 0.0):
     selected_page_lines = None if selected_page is None else []
+    page_verts = []
     other_page_lines = []
     for page_index in range(num_pages):
         row_index = page_index % pages_per_row
         col_index = page_index // pages_per_row
-        page_anchor = np.array(row_index * (paper_size[0] + margin_between_pages), -col_index * (paper_size[1] + margin_between_pages))
-        current_page_line_coords = []
-        current_page_line_coords.append(page_anchor)
-        current_page_line_coords.append(page_anchor + np.array(paper_size[0], 0,0))
-
-        current_page_line_coords.append(page_anchor + np.array(paper_size[0], 0,0))
-        current_page_line_coords.append(page_anchor + np.array(paper_size[0], paper_size[1]))
-
-        current_page_line_coords.append(page_anchor + np.array(paper_size[0], paper_size[1]))
-        current_page_line_coords.append(page_anchor + np.array(0,0, paper_size[1]))
-
-        current_page_line_coords.append(page_anchor + np.array(0,0, paper_size[1]))
-        current_page_line_coords.append(page_anchor)
-
+        page_anchor = np.array([row_index * (paper_size[0] + margin_between_pages), -col_index * (paper_size[1] + margin_between_pages)])
+        ll = page_anchor 
+        lr = page_anchor + np.array([paper_size[0], 0.0])
+        ur = page_anchor + np.array([paper_size[0], paper_size[1]])
+        ul = page_anchor + np.array([0.0, paper_size[1]])
+        current_page_line_coords = [ll, lr, lr, ur, ur, ul, ul, ll]
         if selected_page is not None and selected_page == page_index:
             selected_page_lines += current_page_line_coords
         else:
             other_page_lines += current_page_line_coords
+        page_verts += [ll, lr, ur, ll, ur, ul]
     
     # components on pages
-
     full_lines = []
     convex_lines = []
     concave_lines = []
     component_bg_verts = []
-    component_bg_triangle_ids = []
+    component_bg_colors = []
 
     assert num_pages >= len(components_per_page)
-    for components_on_page, page_index in enumerate(components_per_page):
+    for page_index, components_on_page in enumerate(components_per_page):
+        row_index = page_index % pages_per_row
+        col_index = page_index // pages_per_row
+        page_anchor = np.array([row_index * (paper_size[0] + margin_between_pages), -col_index * (paper_size[1] + margin_between_pages)])
+
         current_component : ComponentPrintData
         for current_component in components_on_page:
             page_transform = current_component.page_transform
             for cut_edge_data in current_component.cut_edges + current_component.glue_flap_edges:
-                full_lines += [page_transform * coord for coord in cut_edge_data.coords]
-            for fold_edge_data in current_component.fold_edges + current_component.fold_edges_at_flaps:
+                full_lines += [page_anchor + page_transform * coord for coord in cut_edge_data.coords]
+            fold_edge_data : FoldEdgeData
+            for fold_edge_data in current_component.fold_edges:
+                if fold_edge_data.fold_angle <= fold_angle_th:
+                    continue
+                coords = [page_anchor + page_transform * coord for coord in fold_edge_data.coords]
                 if fold_edge_data.is_convex:
-                    convex_lines += [page_transform * coord for coord in fold_edge_data.coords]
+                    convex_lines += coords
                 else:
-                    concave_lines += [page_transform * coord for coord in fold_edge_data.coords]
+                    concave_lines += coords
+            fold_edge_at_flap : FoldEdgeAtGlueFlapData
+            for fold_edge_at_flap in current_component.fold_edges_at_flaps:
+                coords = [page_anchor + page_transform * coord for coord in fold_edge_at_flap.coords]
+                if fold_edge_at_flap.fold_angle <= fold_angle_th:
+                    full_lines += coords
+                    continue
+                if fold_edge_at_flap.is_convex:
+                    convex_lines += coords
+                else:
+                    concave_lines += coords
             tri_data : ColoredTriangleData
             for tri_data in current_component.colored_triangles:
-                tri_data.color
+                component_bg_verts += [page_anchor + page_transform * coord for coord in tri_data.coords]
+                component_bg_colors += [tri_data.color] * 3
+    convex_lines = make_dotted_lines(convex_lines, 0.2)
+    concave_lines = make_dotted_lines(concave_lines, 0.2, linestyle=[1,1,3,1])
+    component_lines = full_lines + convex_lines + concave_lines
 
-
-    
     hide_pages()
     global _drawing_handle_pages
-    _drawing_handle_pages = bpy.types.SpaceImageEditor.draw_handler_add(page_draw_callback, (selected_page_lines, other_page_lines), "WINDOW", "POST_VIEW")
-    
+    _drawing_handle_pages = bpy.types.SpaceImageEditor.draw_handler_add(pages_draw_callback, (page_verts, selected_page_lines, other_page_lines, component_bg_verts, component_bg_colors, component_lines), "WINDOW", "POST_VIEW")
 
 #################################
 #          Update all           #
@@ -344,6 +368,60 @@ def hide_all_drawings():
     hide_auto_completed_cuts()
     hide_region_quality_triangles()
     hide_glue_flaps()
+
+def redraw_image_editor(context : bpy.types.Context):
+    for area in context.screen.areas:
+        if area.type == 'IMAGE_EDITOR':
+            area.tag_redraw()
+
+def redraw_view_3d(context : bpy.types.Context):
+    for area in context.screen.areas:
+        if area.type == 'VIEW_3D':
+            area.tag_redraw()
+
+def update_all_page_layout_drawings(self, context):
+    try:
+        draw_settings = context.scene.polyzamboni_drawing_settings
+    except AttributeError:
+        print("POLYZAMBONI WARNING: Context not yet available...")
+        return
+    
+    # hide everything
+    hide_pages()
+
+    ao : bpy.types.Object = context.active_object
+    if not draw_settings.show_page_layout or ao.type != 'MESH' or not ao.data.polyzamboni_general_mesh_props.has_attached_paper_model:
+        redraw_image_editor(context)
+        return
+    
+    #obtain selected paper model
+    active_mesh = ao.data
+    general_mesh_props = active_mesh.polyzamboni_general_mesh_props
+
+    if not check_if_page_numbers_and_transforms_exist_for_all_components(active_mesh):
+        print("DEBUG: No page layout to draw found!")
+        redraw_image_editor(context)
+        return
+    
+    # collect all component print data
+    component_print_data = create_print_data_for_all_components(ao, general_mesh_props.model_scale)
+
+    # read and set correct page transforms
+    page_transforms_per_component = io.read_page_transforms(active_mesh)
+    current_component_print_data : ComponentPrintData
+    for current_component_print_data in component_print_data:
+        current_component_print_data.page_transform = page_transforms_per_component[current_component_print_data.og_component_id]
+
+    # create page layout
+    page_numbers_per_components = io.read_page_numbers(active_mesh)
+    num_pages = max(page_numbers_per_components.values()) + 1 if len(page_numbers_per_components) > 0 else 0
+    components_on_pages = [[] for _ in range(num_pages)]
+    for current_component_print_data in component_print_data:
+        components_on_pages[page_numbers_per_components[current_component_print_data.og_component_id]].append(current_component_print_data)
+
+    # erstmal so
+    show_pages(num_pages + 1, components_on_pages, paper_sizes[general_mesh_props.paper_size], None)
+    redraw_image_editor(context)
 
 def update_all_polyzamboni_drawings(self, context):
     try:
@@ -358,9 +436,7 @@ def update_all_polyzamboni_drawings(self, context):
     ao : bpy.types.Object = context.active_object
     # draw user provided cuts
     if not draw_settings.drawing_enabled or ao.type != 'MESH' or not ao.data.polyzamboni_general_mesh_props.has_attached_paper_model:
-        for area in bpy.context.screen.areas:
-            if area.type == 'VIEW_3D':
-                area.tag_redraw()
+        redraw_view_3d(context)
         return
     
     # obtain selected paper model to draw
@@ -370,9 +446,7 @@ def update_all_polyzamboni_drawings(self, context):
     bm.from_mesh(active_mesh)
     if not check_if_polyzamobni_data_exists_and_fits_to_bmesh(active_mesh, bm):
         print("POLYZAMBONI WARNING: Attached paper model data invalid! CAN NOT DRAW D:")
-        for area in bpy.context.screen.areas:
-            if area.type == 'VIEW_3D':
-                area.tag_redraw()
+        redraw_view_3d(context)
         return
     world_matrix = ao.matrix_world
     edge_constraints = io.read_edge_constraints_dict(active_mesh)
@@ -395,6 +469,4 @@ def update_all_polyzamboni_drawings(self, context):
         show_glue_flaps(glue_flap_quality_dict)
 
     # Trigger a redraw of all screen areas
-    for area in bpy.context.screen.areas:
-        if area.type == 'VIEW_3D':
-            area.tag_redraw()
+    redraw_view_3d(context)

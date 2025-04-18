@@ -32,10 +32,12 @@ class ConnectedComponent():
         self.glueflap_collisions = None
         self.build_step_number = None
         self.render_data_outdated = True
+        self.page_number = None
+        self.page_transform = None
 
     @classmethod
     def from_mesh_props(cls, face_indices, cyclic, overlapping, unfolding_affine_transforms, unfolded_face_geometry, glueflap_geometry, glueflap_collisions, 
-                        build_step_number, render_data_outdated, render_vertices, render_triangles):
+                        build_step_number, render_data_outdated, render_vertices, render_triangles, page_number, page_transform):
         instance = cls(face_indices)
         instance.cyclic = cyclic
         instance.overlapping = overlapping
@@ -47,6 +49,8 @@ class ConnectedComponent():
         instance.render_data_outdated = render_data_outdated
         instance.render_vertices = render_vertices
         instance.render_triangles = render_triangles
+        instance.page_number = page_number
+        instance.page_transform = page_transform
         return instance
 
     @classmethod
@@ -180,6 +184,8 @@ class PaperModel():
         glueflap_geometry = io.read_glue_flap_geometry_per_edge_per_component(mesh)
         glueflap_collisions = io.read_glue_flap_collisions_dict(mesh)
         component_render_vertices, component_render_triangles = io.read_all_component_render_data(mesh)
+        page_numbers_per_component = io.read_page_numbers(mesh)
+        page_transforms_per_component = io.read_page_transforms(mesh)
         for component_id, component_face_set in connected_component_sets.items():
             read_component = ConnectedComponent.from_mesh_props(component_face_set, component_id in cyclic_components, component_id in overlapping_components, 
                                                                 affine_transforms_to_root[component_id] if component_id in affine_transforms_to_root else None, 
@@ -189,7 +195,9 @@ class PaperModel():
                                                                 step_numbers[component_id] if component_id in step_numbers else None,
                                                                 component_id in outdated_components,
                                                                 component_render_vertices[component_id] if component_id in component_render_vertices else None,
-                                                                component_render_triangles[component_id] if component_id in component_render_triangles else None)
+                                                                component_render_triangles[component_id] if component_id in component_render_triangles else None,
+                                                                page_numbers_per_component[component_id] if page_numbers_per_component is not None and component_id in page_numbers_per_component else None,
+                                                                page_transforms_per_component[component_id] if page_transforms_per_component is not None and component_id in page_transforms_per_component else None)
             papermodel_instance.connected_components[component_id] = read_component
         return papermodel_instance
 
@@ -247,6 +255,8 @@ class PaperModel():
         glue_flap_collisions = {}
         component_render_vertices = {}
         component_render_triangles = {}
+        page_numbers_per_component = {}
+        page_transforms_per_component = {}
         component : ConnectedComponent
         for c_index, component in self.connected_components.items():
             components_as_sets[c_index] = component.face_index_set
@@ -268,6 +278,11 @@ class PaperModel():
             affine_transforms_to_roots[c_index] = component.unfolding_affine_transforms
             glue_flap_geometry[c_index] = component.glueflap_geometry
             glue_flap_collisions[c_index] = component.glueflap_collisions
+            # print data
+            if component.page_number is not None:
+                assert component.page_transform is not None
+                page_numbers_per_component[c_index] = component.page_number
+                page_transforms_per_component[c_index] = component.page_transform
         io.write_edge_constraints_dict(self.mesh, self.edge_constraints)
         io.write_connected_components(self.mesh, components_as_sets)
         io.write_components_with_cycles_set(self.mesh, cyclic_components)
@@ -280,6 +295,8 @@ class PaperModel():
         io.write_glue_flap_geometry_per_edge_per_component(self.mesh, glue_flap_geometry)
         io.write_glue_flap_collision_dict(self.mesh, glue_flap_collisions)
         io.write_all_component_render_data(self.mesh, component_render_vertices, component_render_triangles)
+        io.write_page_numbers(self.mesh, page_numbers_per_component)
+        io.write_page_transforms(self.mesh, page_transforms_per_component)
         self.zamboni_props.has_attached_paper_model = True
 
     def close(self):

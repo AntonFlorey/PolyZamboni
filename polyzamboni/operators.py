@@ -3,14 +3,13 @@ import bmesh
 import numpy as np
 import os
 import threading
-from collections import deque
 from bpy.props import StringProperty, PointerProperty
 from bpy_extras.io_utils import ExportHelper
-from .properties import GeneralExportSettings, LineExportSettings, TextureExportSettings, ZamboniGeneralMeshProps
+from .properties import GeneralExportSettings, LineExportSettings, TextureExportSettings, ZamboniGeneralMeshProps, PageLayoutCreationSettings
 from .drawing import *
 from . import exporters
 from . import printprepper
-from .geometry import compute_planarity_score, triangulate_3d_polygon
+from .geometry import compute_planarity_score
 from .autozamboni import greedy_auto_cuts
 from . import printprepper
 from . import operators_backend
@@ -795,6 +794,97 @@ class PolyZamboniExportSVGOperator(bpy.types.Operator, ExportHelper):
     def poll(cls, context):
         return _active_object_is_mesh_with_paper_model(context)
 
+class PolyZamboniPageLayoutOperator(bpy.types.Operator):
+    """ Creates the final print layout of the papermodel instructions """
+    bl_label = "Create print preview"
+    bl_idname  = "polyzamboni.page_layout_op"
+
+    page_layout_options : PointerProperty(type=PageLayoutCreationSettings)
+
+    def invoke(self, context, event):
+        # do stuff
+        ao = context.active_object
+        active_mesh = ao.data
+        self.max_comp_with, self.max_comp_height = printprepper.compute_max_print_component_dimensions(ao)
+        self.mesh_height = utils.compute_mesh_height(active_mesh)
+        if self.mesh_height == 0:
+            print("POLYZAMBONI WARNING: Mesh has zero height!")
+            self.mesh_height = 1 # to prevent crashes
+        self.curr_len_unit = context.scene.unit_settings.length_unit
+        self.curr_unit_system = context.scene.unit_settings.system
+        self.curr_len_scale = context.scene.unit_settings.scale_length
+        
+        #compute maximum target mesh height
+        page_margin_in_cm = 100 * self.curr_len_scale * self.page_layout_options.page_margin
+        max_w_in_cm = 100 * self.curr_len_scale * self.max_comp_with
+        max_h_in_cm = 100 * self.curr_len_scale * self.max_comp_height
+        curr_page_size = exporters.paper_sizes[self.page_layout_options.paper_size]
+        max_scaling = min((curr_page_size[0] - 2 * page_margin_in_cm) / max_w_in_cm, (curr_page_size[1] - 2 * page_margin_in_cm) / max_h_in_cm)
+        self.page_layout_options.sizing_scale = 0.9 * max_scaling
+        self.page_layout_options.target_model_height = 0.9 * max_scaling * self.mesh_height
+
+        wm = context.window_manager
+        return wm.invoke_props_dialog(self, title="Page Layout Options")
+
+    def draw(self, context):
+        layout : bpy.types.UILayout = self.layout
+        # paper size
+        write_custom_split_property_row(layout, "Paper size", self.page_layout_options, "paper_size", 0.6)
+        # model scale
+        # scaling mode
+        scaling_mode_row = layout.row().column_flow(columns=2, align=True)
+        scaling_mode_row.column(align=True).prop_enum(self.page_layout_options, "scaling_mode", "HEIGHT")
+        scaling_mode_row.column(align=True).prop_enum(self.page_layout_options, "scaling_mode", "SCALE")
+
+        if self.page_layout_options.scaling_mode == "HEIGHT":
+            # target model height
+            write_custom_split_property_row(layout, "Target height", self.page_layout_options, "target_model_height", 0.6)
+            curr_scale_factor = self.page_layout_options.target_model_height / self.mesh_height
+            # set correct scaling
+            self.page_layout_options.sizing_scale = curr_scale_factor 
+        elif self.page_layout_options.scaling_mode == "SCALE":
+            write_custom_split_property_row(layout, "Model scale", self.page_layout_options, "sizing_scale", 0.6)
+            curr_scale_factor = self.page_layout_options.sizing_scale
+            # set target model height
+            self.page_layout_options.target_model_height = curr_scale_factor * self.mesh_height
+
+        bu_to_cm_scale_factor =  100 * self.page_layout_options.target_model_height * self.curr_len_scale / self.mesh_height
+        page_margin_in_cm = 100 * self.curr_len_scale * self.page_layout_options.page_margin
+        curr_page_size = exporters.paper_sizes[self.page_layout_options.paper_size]
+        if self.max_comp_with * bu_to_cm_scale_factor > curr_page_size[0] - 2 * page_margin_in_cm or self.max_comp_height * bu_to_cm_scale_factor > curr_page_size[1] - 2 * page_margin_in_cm:
+            layout.row().label(icon="ERROR", text="A piece does not fit on one page!")
+
+        # one mat per page
+        write_custom_split_property_row(layout, "One material per page", self.page_layout_options, "one_material_per_page", 0.6)
+        # margin
+        write_custom_split_property_row(layout, "Page margin", self.page_layout_options, "page_margin", 0.6)
+        # island spacing
+        write_custom_split_property_row(layout, "Island spacing", self.page_layout_options, "space_between_components", 0.6)
+        # hide fold edge threshold
+        write_custom_split_property_row(layout, "Fold edge threshold", self.page_layout_options, "hide_fold_edge_angle_th", 0.6)
+
+    def execute(self, context):
+        ao = context.active_object
+
+        my_options : PageLayoutCreationSettings = self.page_layout_options
+        scaling_factor = printprepper.compute_scaling_factor_for_target_model_height(ao.data, 100 * self.curr_len_scale * self.page_layout_options.target_model_height)
+
+        operators_backend.compute_and_save_page_layout(ao, scaling_factor, 
+                                                       my_options.paper_size, 
+                                                       100 * self.curr_len_scale * my_options.page_margin, 
+                                                       100 * self.curr_len_scale * my_options.space_between_components, 
+                                                       my_options.one_material_per_page)
+
+        # trigger a redraw
+        update_all_page_layout_drawings(None, context)
+
+        return { 'FINISHED' }
+
+    @classmethod
+    def poll(cls, context):
+        return _active_object_is_mesh_with_paper_model(context)
+
+
 polyzamboni_keymaps = []
 
 def menu_func_polyzamboni_export_pdf(self, context):
@@ -821,6 +911,7 @@ def register():
     bpy.utils.register_class(AutoCutsOperator)
     bpy.utils.register_class(SelectMultiTouchingFacesOperator)
     bpy.utils.register_class(SelectNonTriangulatableFacesOperator)
+    bpy.utils.register_class(PolyZamboniPageLayoutOperator)
 
     bpy.types.TOPBAR_MT_file_export.append(menu_func_polyzamboni_export_pdf)
     bpy.types.TOPBAR_MT_file_export.append(menu_func_polyzamboni_export_svg)
@@ -855,6 +946,7 @@ def unregister():
     bpy.utils.unregister_class(AutoCutsOperator)
     bpy.utils.unregister_class(SelectMultiTouchingFacesOperator)
     bpy.utils.unregister_class(SelectNonTriangulatableFacesOperator)
+    bpy.utils.unregister_class(PolyZamboniPageLayoutOperator)
 
     bpy.types.TOPBAR_MT_file_export.remove(menu_func_polyzamboni_export_pdf)
     bpy.types.TOPBAR_MT_file_export.remove(menu_func_polyzamboni_export_svg)

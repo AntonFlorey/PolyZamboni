@@ -1,6 +1,6 @@
 import bpy
 from bpy.types import Mesh
-from .drawing import update_all_polyzamboni_drawings, hide_all_drawings
+from .drawing import update_all_polyzamboni_drawings, hide_all_drawings, update_all_page_layout_drawings, hide_pages
 from bpy.app.handlers import persistent
 
 from .operators_backend import update_all_flap_geometry
@@ -8,6 +8,7 @@ from .operators_backend import update_all_flap_geometry
 # redraw polyzamboni feedback when object selection changes
 def object_select_callback(*args):
     update_all_polyzamboni_drawings(None, bpy.context)
+    update_all_page_layout_drawings(None, bpy.context)
 
 dummy_owner = object()
 
@@ -23,6 +24,7 @@ def subscribe_to_active_object():
 @persistent
 def pre_load_handler(dummy):
     hide_all_drawings()
+    hide_pages()
 
 @persistent
 def post_load_handler(dummy):

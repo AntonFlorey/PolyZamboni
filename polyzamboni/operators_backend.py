@@ -2,12 +2,14 @@
 This file contains several high level functions that meaningful combine multiple polyzamboni operations.
 """
 
-from bpy.types import Mesh
+from bpy.types import Mesh, Object
 from bmesh.types import BMesh
 
 from . import geometry
 from . import io
 from .papermodel import PaperModel
+from .printprepper import create_print_data_for_all_components, fit_components_on_pages, ComponentPrintData
+from .exporters import paper_sizes
 
 #################################
 #    Init, delete and update    #
@@ -99,3 +101,27 @@ def recompute_all_glue_flaps(mesh : Mesh):
 def compute_build_step_numbers(mesh : Mesh, selected_start_face_ids):
     with PaperModel.from_existing(mesh) as papermodel:
         papermodel.compute_build_step_numbers(selected_start_face_ids)
+
+#################################
+#      Page Layout Editing      #
+#################################
+
+def compute_and_save_page_layout(obj : Object, scaling_factor, paper_size, page_margin, component_margin, separate_materials):
+    page_size = paper_sizes[paper_size]
+    component_print_data = create_print_data_for_all_components(obj, scaling_factor)
+    print_data_on_pages = fit_components_on_pages(component_print_data, page_size, page_margin, component_margin, separate_materials)
+    # store computed layout
+    mesh = obj.data
+    general_props = mesh.polyzamboni_general_mesh_props
+    general_props.model_scale = scaling_factor
+    general_props.paper_size = paper_size
+    page_numbers_per_component = {}
+    page_transforms_per_component = {}
+    for page_index, component_print_data_on_page in enumerate(print_data_on_pages):
+        current_print_data : ComponentPrintData
+        for current_print_data in component_print_data_on_page:
+            current_c_id = current_print_data.og_component_id
+            page_numbers_per_component[current_c_id] = page_index
+            page_transforms_per_component[current_c_id] = current_print_data.page_transform
+    io.write_page_numbers(mesh, page_numbers_per_component)
+    io.write_page_transforms(mesh, page_transforms_per_component)

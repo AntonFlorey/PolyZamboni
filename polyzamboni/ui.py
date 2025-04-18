@@ -156,13 +156,32 @@ class DrawSettingsPanel(bpy.types.Panel):
         row = layout.row()
         row.prop(drawing_settings, "normal_offset")
 
+class PageLayoutPanel(bpy.types.Panel):
+    bl_label = "Poly Zamboni"
+    bl_idname  = "POLYZAMBONI_PT_PageLayoutPanel"
+    bl_space_type = "IMAGE_EDITOR"
+    bl_region_type = "UI"
+    bl_category = "PolyZamboni"
+
+    def draw(self, context : bpy.types.Context):
+        layout = self.layout
+        scene = context.scene
+        drawing_settings = scene.polyzamboni_drawing_settings
+        row = layout.row()
+        row.label(text="Page Layout Preview", icon="FUND")
+        row = layout.row()
+        row.operator("polyzamboni.page_layout_op")
+        row = layout.row()
+        row.prop(drawing_settings, "show_page_layout")
 
 def register():
     bpy.utils.register_class(MainPanel)
     bpy.utils.register_class(GlueFlapSettingsPanel)
     bpy.utils.register_class(DrawSettingsPanel)
+    bpy.utils.register_class(PageLayoutPanel)
 
 def unregister():
     bpy.utils.unregister_class(MainPanel)
     bpy.utils.unregister_class(GlueFlapSettingsPanel)
     bpy.utils.unregister_class(DrawSettingsPanel)
+    bpy.utils.unregister_class(PageLayoutPanel)
