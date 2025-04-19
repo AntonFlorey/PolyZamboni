@@ -14,7 +14,7 @@ from .autozamboni import greedy_auto_cuts
 from . import printprepper
 from . import operators_backend
 from . import utils
-from .zambonipolice import check_if_build_step_numbers_exist_and_make_sense, all_components_have_unfoldings
+from .zambonipolice import check_if_build_step_numbers_exist_and_make_sense, all_components_have_unfoldings, check_if_page_numbers_and_transforms_exist_for_all_components
 
 def _active_object_is_mesh(context : bpy.types.Context):
     active_object = context.active_object
@@ -860,8 +860,6 @@ class PolyZamboniPageLayoutOperator(bpy.types.Operator):
         write_custom_split_property_row(layout, "Page margin", self.page_layout_options, "page_margin", 0.6)
         # island spacing
         write_custom_split_property_row(layout, "Island spacing", self.page_layout_options, "space_between_components", 0.6)
-        # hide fold edge threshold
-        write_custom_split_property_row(layout, "Fold edge threshold", self.page_layout_options, "hide_fold_edge_angle_th", 0.6)
 
     def execute(self, context):
         ao = context.active_object
@@ -884,6 +882,75 @@ class PolyZamboniPageLayoutOperator(bpy.types.Operator):
     def poll(cls, context):
         return _active_object_is_mesh_with_paper_model(context)
 
+class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
+    """ Select, move and rotate your papermodel pieces """
+    bl_label = "Edit Page Layout"
+    bl_idname  = "polyzamboni.page_layout_editing_op"
+
+    def invoke(self, context, event):
+        ao = context.active_object
+        mesh = ao.data
+        if not check_if_page_numbers_and_transforms_exist_for_all_components(mesh):
+            print("cancelled page editing operator")
+            return { 'CANCELLED' }
+        general_mesh_props = mesh.polyzamboni_general_mesh_props
+
+        self.editing_state = operators_backend.PageEditorState.SELECT_PIECES
+        self.active_page = None
+        self.paper_size = paper_sizes[general_mesh_props.paper_size]
+        self.fold_angle_th = context.scene.polyzamboni_drawing_settings.hide_fold_edge_angle_th
+
+        # collect all component print data
+        component_print_data = create_print_data_for_all_components(ao, general_mesh_props.model_scale)
+
+        # read and set correct page transforms
+        page_transforms_per_component = io.read_page_transforms(mesh)
+        current_component_print_data : ComponentPrintData
+        for current_component_print_data in component_print_data:
+            current_component_print_data.page_transform = page_transforms_per_component[current_component_print_data.og_component_id]
+
+        # create page layout
+        page_numbers_per_components = io.read_page_numbers(mesh)
+        self.num_pages = max(page_numbers_per_components.values()) + 1 if len(page_numbers_per_components) > 0 else 0
+        self.components_on_pages = [{} for _ in range(self.num_pages)]
+        for current_component_print_data in component_print_data:
+            self.components_on_pages[page_numbers_per_components[current_component_print_data.og_component_id]][current_component_print_data.og_component_id] = current_component_print_data
+        
+        print("Entered page editing mode :)")
+        context.window_manager.modal_handler_add(self)
+        return {'RUNNING_MODAL'}
+    
+    def draw_current_page_layout(self, context):
+        components_per_page = [list(page_contents.values()) for page_contents in self.components_on_pages]
+        num_display_pages = self.num_pages
+        if self.active_page is not None and self.active_page == self.num_pages:
+            num_display_pages += 1
+        show_pages(num_display_pages, components_per_page, self.paper_size, self.active_page, fold_angle_th=self.fold_angle_th)
+        redraw_image_editor(context)
+
+    def get_mouse_image_coords(self, context, event):
+        mouse_x = event.mouse_x
+        mouse_y = event.mouse_y
+        return context.region.view2d.region_to_view(mouse_x, mouse_y)
+        
+    def modal(self, context, event : bpy.types.Event):
+        if self.editing_state == operators_backend.PageEditorState.SELECT_PIECES:
+            if event.type == "MOUSEMOVE":
+                image_x, image_y = self.get_mouse_image_coords(context, event)
+                page_hovered_over = operators_backend.find_page_under_mouse_position(image_x, image_y, self.num_pages, self.paper_size)
+                if page_hovered_over != self.active_page:
+                    self.active_page = page_hovered_over
+                    self.draw_current_page_layout(context)
+
+            if event.type in {'ESC', 'ENTER'}:
+                print("Exiting page editing mode :)")
+                update_all_page_layout_drawings(None, context)
+                return {"FINISHED"}
+        return {'PASS_THROUGH'}
+
+    @classmethod
+    def poll(cls, context):
+        return _active_object_is_mesh_with_paper_model(context)
 
 polyzamboni_keymaps = []
 
@@ -912,6 +979,7 @@ def register():
     bpy.utils.register_class(SelectMultiTouchingFacesOperator)
     bpy.utils.register_class(SelectNonTriangulatableFacesOperator)
     bpy.utils.register_class(PolyZamboniPageLayoutOperator)
+    bpy.utils.register_class(PolyZamboniPageLayoutEditingOperator)
 
     bpy.types.TOPBAR_MT_file_export.append(menu_func_polyzamboni_export_pdf)
     bpy.types.TOPBAR_MT_file_export.append(menu_func_polyzamboni_export_svg)
@@ -947,6 +1015,7 @@ def unregister():
     bpy.utils.unregister_class(SelectMultiTouchingFacesOperator)
     bpy.utils.unregister_class(SelectNonTriangulatableFacesOperator)
     bpy.utils.unregister_class(PolyZamboniPageLayoutOperator)
+    bpy.utils.unregister_class(PolyZamboniPageLayoutEditingOperator)
 
     bpy.types.TOPBAR_MT_file_export.remove(menu_func_polyzamboni_export_pdf)
     bpy.types.TOPBAR_MT_file_export.remove(menu_func_polyzamboni_export_svg)

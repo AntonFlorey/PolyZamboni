@@ -7,6 +7,7 @@ import bmesh
 import gpu
 import numpy as np
 from gpu_extras.batch import batch_for_shader
+import time
 
 from . import drawing_backend
 from . import io
@@ -282,7 +283,7 @@ def page_bg_draw_callback(page_verts, selected_page_lines, other_pages_lines):
 
 def component_draw_callback(component_triangle_verts, component_triangle_colors, component_lines):
     multicolored_triangles_2D_draw_callback(component_triangle_verts, component_triangle_colors)
-    lines_2D_draw_callback(component_lines, BLACK, 1)
+    lines_2D_draw_callback(component_lines, BLACK, 1.5)
 
 def pages_draw_callback(page_verts, selected_page_lines, other_pages_lines, component_triangle_verts, component_triangle_colors, component_lines):
     # pages in the backgound
@@ -351,7 +352,7 @@ def show_pages(num_pages, components_per_page, paper_size = paper_sizes["A4"], s
                 component_bg_verts += [page_anchor + page_transform * coord for coord in tri_data.coords]
                 component_bg_colors += [tri_data.color] * 3
     convex_lines = make_dotted_lines(convex_lines, 0.2)
-    concave_lines = make_dotted_lines(concave_lines, 0.2, linestyle=[1,1,3,1])
+    concave_lines = make_dotted_lines(concave_lines, 0.2, linestyle=[1,1,4,1])
     component_lines = full_lines + convex_lines + concave_lines
 
     hide_pages()
@@ -420,7 +421,7 @@ def update_all_page_layout_drawings(self, context):
         components_on_pages[page_numbers_per_components[current_component_print_data.og_component_id]].append(current_component_print_data)
 
     # erstmal so
-    show_pages(num_pages + 1, components_on_pages, paper_sizes[general_mesh_props.paper_size], None)
+    show_pages(num_pages, components_on_pages, paper_sizes[general_mesh_props.paper_size], None, fold_angle_th=draw_settings.hide_fold_edge_angle_th)
     redraw_image_editor(context)
 
 def update_all_polyzamboni_drawings(self, context):

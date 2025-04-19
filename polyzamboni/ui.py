@@ -172,7 +172,11 @@ class PageLayoutPanel(bpy.types.Panel):
         row = layout.row()
         row.operator("polyzamboni.page_layout_op")
         row = layout.row()
+        row.operator("polyzamboni.page_layout_editing_op")
+        row = layout.row()
         row.prop(drawing_settings, "show_page_layout")
+        row = layout.row()
+        row.prop(drawing_settings, "hide_fold_edge_angle_th")
 
 def register():
     bpy.utils.register_class(MainPanel)

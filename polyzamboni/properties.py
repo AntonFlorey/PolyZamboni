@@ -47,6 +47,15 @@ class DrawSettings(bpy.types.PropertyGroup):
         default=True,
         update=update_all_page_layout_drawings
     )
+    hide_fold_edge_angle_th: FloatProperty(
+        name="Min fold edge angle",
+        description="Folds below this angle wont be drawn",
+        default=np.deg2rad(1),
+        min=0,
+        max=np.pi,
+        subtype="ANGLE",
+        update=update_all_page_layout_drawings
+    )
 
 class ZamboniGeneralMeshProps(bpy.types.PropertyGroup):
     has_attached_paper_model : BoolProperty(
@@ -325,13 +334,6 @@ class PageLayoutCreationSettings(bpy.types.PropertyGroup):
         name="Custom scaling factor",
         default=1,
         min=0
-    )
-    hide_fold_edge_angle_th: FloatProperty(
-        name="Min fold angle to print a fold edge.",
-        default=np.deg2rad(1),
-        min=0,
-        max=np.pi,
-        subtype="ANGLE"
     )
 
 # This is where you assign any variables you need in your script. Note that they

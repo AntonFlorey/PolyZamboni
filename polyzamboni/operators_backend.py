@@ -4,6 +4,8 @@ This file contains several high level functions that meaningful combine multiple
 
 from bpy.types import Mesh, Object
 from bmesh.types import BMesh
+from enum import Enum
+import math
 
 from . import geometry
 from . import io
@@ -125,3 +127,29 @@ def compute_and_save_page_layout(obj : Object, scaling_factor, paper_size, page_
             page_transforms_per_component[current_c_id] = current_print_data.page_transform
     io.write_page_numbers(mesh, page_numbers_per_component)
     io.write_page_transforms(mesh, page_transforms_per_component)
+
+class PageEditorState(Enum):
+    SELECT_PIECES = 0
+    MOVE_PIECE = 1
+    ROTATE_PIECE = 2
+
+def find_page_under_mouse_position(pos_x, pos_y, pages, paper_size, margin_between_pages = 1.0, pages_per_row = 2):
+    row_grid_size = paper_size[0] + margin_between_pages
+    row_index = math.floor(pos_x / row_grid_size)
+    if pos_x < 0:
+        row_index -= 1
+    if row_index < 0 or row_index >= pages_per_row or pos_x - row_index * row_grid_size > paper_size[0]:
+        return None
+    transformed_pos_y = -(pos_y - paper_size[1])
+    col_grid_size = paper_size[1] + margin_between_pages
+    col_index = math.floor(transformed_pos_y / col_grid_size)
+    if transformed_pos_y < 0:
+        col_index -= 1
+    if col_index < 0 or transformed_pos_y - col_index * col_grid_size > paper_size[1]:
+        return None
+    # compute page index
+    hovered_page_index = pages_per_row * col_index + row_index
+    if hovered_page_index <= pages:
+        return hovered_page_index
+    else:
+        return None
