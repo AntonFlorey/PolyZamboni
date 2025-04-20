@@ -6,11 +6,12 @@ from bpy.types import Mesh, Object
 from bmesh.types import BMesh
 from enum import Enum
 import math
+import numpy as np
 
 from . import geometry
 from . import io
 from .papermodel import PaperModel
-from .printprepper import create_print_data_for_all_components, fit_components_on_pages, ComponentPrintData
+from .printprepper import create_print_data_for_all_components, fit_components_on_pages, ComponentPrintData, ColoredTriangleData
 from .exporters import paper_sizes
 
 #################################
@@ -153,3 +154,20 @@ def find_page_under_mouse_position(pos_x, pos_y, pages, paper_size, margin_betwe
         return hovered_page_index
     else:
         return None
+
+def compute_page_anchor(page_index, pages_per_row, paper_size, margin_between_pages):
+    row_index = page_index % pages_per_row
+    col_index = page_index // pages_per_row
+    return np.array([row_index * (paper_size[0] + margin_between_pages), -col_index * (paper_size[1] + margin_between_pages)])
+
+def find_papermodel_piece_under_mouse_position(pos_x, pos_y, print_data_on_pages, current_page_index, paper_size, pages_per_row = 2, margin_between_pages = 1):
+    if current_page_index is None or current_page_index >= len(print_data_on_pages):
+        return None
+    page_anchor = compute_page_anchor(current_page_index, pages_per_row, paper_size, margin_between_pages)
+    current_print_data : ComponentPrintData
+    for current_print_data in print_data_on_pages[current_page_index].values():
+        colored_triangle : ColoredTriangleData
+        for colored_triangle in current_print_data.colored_triangles:
+            if geometry.point_in_2d_triangle(np.array([pos_x, pos_y]) - page_anchor, *[current_print_data.page_transform * coord for coord in colored_triangle.coords]):
+                return current_print_data.og_component_id
+    return None

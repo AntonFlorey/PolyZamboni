@@ -167,6 +167,8 @@ def compute_max_print_component_dimensions(obj : Object):
     local_coordinate_systems = io.read_local_coordinate_systems_per_face(mesh)
     affine_transforms_to_root = io.read_affine_transforms_to_roots(mesh)
     glue_flap_triangles = io.read_glue_flap_geometry_per_edge_per_component(mesh)
+    glue_flap_halfedge_dict = io.read_glueflap_halfedge_dict(mesh)
+    halfedge_to_face_dict = utils.construct_halfedge_to_face_dict(bm)
 
     max_height = -np.inf
     max_width = -np.inf
@@ -190,7 +192,7 @@ def compute_max_print_component_dimensions(obj : Object):
                 vertex_coords_3d = [v.co for v in curr_edge.verts]    
                 vertex_coords_unfolded = [get_unfolded_vertex_coord(co_3d, face_index) for co_3d in vertex_coords_3d]
                 if curr_edge.is_boundary or utils.mesh_edge_is_cut(curr_edge.index, edge_constraints):
-                    if glueflaps.check_if_edge_has_flap_geometry_attached_to_it(mesh, c_id, curr_edge, glue_flap_triangles):
+                    if glueflaps.check_if_edge_of_face_has_glue_flap(curr_edge.index, face_index, glue_flap_halfedge_dict, halfedge_to_face_dict):
                         # this is a fold edge of a glue flap
                         curr_component_print_data.add_fold_edges_at_flaps(FoldEdgeAtGlueFlapData(tuple(vertex_coords_unfolded), curr_edge.is_convex, curr_edge.calc_face_angle(), curr_edge.index))
                     else:
@@ -238,6 +240,8 @@ def create_print_data_for_all_components(obj : Object, scaling_factor):
     unfolded_face_triangles = io.read_facewise_triangles_per_component(mesh)
     glue_flap_triangles = io.read_glue_flap_geometry_per_edge_per_component(mesh)
     build_step_numbers = io.read_build_step_numbers(mesh)
+    glue_flap_halfedge_dict = io.read_glueflap_halfedge_dict(mesh)
+    halfedge_to_face_dict = utils.construct_halfedge_to_face_dict(bm)
 
     all_print_data = [] 
     for c_id, curr_connected_component_faces in connected_components.items():
@@ -280,7 +284,7 @@ def create_print_data_for_all_components(obj : Object, scaling_factor):
                 dist_cog_edge_sum += signed_point_dist_to_line(face_cog, vertex_coords_unfolded[0], vertex_coords_unfolded[1])
                 if curr_edge.is_boundary or utils.mesh_edge_is_cut(curr_edge.index, edge_constraints):
                     # check if this edge has a glue flap attached to it
-                    if glueflaps.check_if_edge_has_flap_geometry_attached_to_it(mesh, c_id, curr_edge.index, glue_flap_triangles):
+                    if glueflaps.check_if_edge_of_face_has_glue_flap(curr_edge.index, face_index, glue_flap_halfedge_dict, halfedge_to_face_dict):
                         # this is a fold edge of a glue flap
                         curr_component_print_data.add_fold_edges_at_flaps(FoldEdgeAtGlueFlapData(tuple(vertex_coords_unfolded), curr_edge.is_convex, curr_edge.calc_face_angle(), curr_edge.index))
                     else:

@@ -41,6 +41,7 @@ POLYZAMBONI_LILA = (  134 / 255,  71 / 255, 179 / 255, 1.0)
 POLYZAMBONI_ROSE = (  179 / 255,  71 / 255, 116 / 255, 1.0)
 
 BLACK = (0.0, 0.0, 0.0, 1.0)
+GRAY = (0.5, 0.5, 0.5, 1.0)
 WHITE = (1.0, 1.0, 1.0, 1.0)
 
 # Keep track of active draw callbacks
@@ -219,7 +220,8 @@ quality_color_mapping = {
     drawing_backend.ComponentQuality.PERFECT_REGION : POLYZAMBONI_GREEN,
     drawing_backend.ComponentQuality.BAD_GLUE_FLAPS_REGION : POLYZAMBONI_YELLOW,
     drawing_backend.ComponentQuality.OVERLAPPING_REGION : POLYZAMBONI_ORANGE,
-    drawing_backend.ComponentQuality.NOT_FOLDABLE_REGION : POLYZAMBONI_RED
+    drawing_backend.ComponentQuality.NOT_FOLDABLE_REGION : POLYZAMBONI_RED,
+    drawing_backend.ComponentQuality.NOT_SELECTED_REGION : GRAY
 }
 
 def hide_region_quality_triangles():
@@ -278,20 +280,22 @@ def hide_pages():
 def page_bg_draw_callback(page_verts, selected_page_lines, other_pages_lines):
     triangles_2D_draw_callback(page_verts, WHITE)
     if selected_page_lines is not None:
-        lines_2D_draw_callback(selected_page_lines, ORANGE)
+        lines_2D_draw_callback(selected_page_lines, PETROL)
     lines_2D_draw_callback(other_pages_lines, BLACK)
 
-def component_draw_callback(component_triangle_verts, component_triangle_colors, component_lines):
+def component_draw_callback(component_triangle_verts, component_triangle_colors, component_lines, selected_component_lines = None):
     multicolored_triangles_2D_draw_callback(component_triangle_verts, component_triangle_colors)
     lines_2D_draw_callback(component_lines, BLACK, 1.5)
+    if selected_component_lines is not None:
+        lines_2D_draw_callback(selected_component_lines, ORANGE, 2)
 
-def pages_draw_callback(page_verts, selected_page_lines, other_pages_lines, component_triangle_verts, component_triangle_colors, component_lines):
+def pages_draw_callback(page_verts, selected_page_lines, other_pages_lines, component_triangle_verts, component_triangle_colors, component_lines, selected_component_lines):
     # pages in the backgound
     page_bg_draw_callback(page_verts, selected_page_lines, other_pages_lines)
     # connected components
-    component_draw_callback(component_triangle_verts, component_triangle_colors, component_lines)
+    component_draw_callback(component_triangle_verts, component_triangle_colors, component_lines, selected_component_lines)
 
-def show_pages(num_pages, components_per_page, paper_size = paper_sizes["A4"], selected_page = None, margin_between_pages = 1.0, pages_per_row = 2, fold_angle_th = 0.0):
+def show_pages(num_pages, components_per_page, paper_size = paper_sizes["A4"], selected_page = None, selected_component = None, margin_between_pages = 1.0, pages_per_row = 2, fold_angle_th = 0.0):
     selected_page_lines = None if selected_page is None else []
     page_verts = []
     other_page_lines = []
@@ -304,6 +308,7 @@ def show_pages(num_pages, components_per_page, paper_size = paper_sizes["A4"], s
         ur = page_anchor + np.array([paper_size[0], paper_size[1]])
         ul = page_anchor + np.array([0.0, paper_size[1]])
         current_page_line_coords = [ll, lr, lr, ur, ur, ul, ul, ll]
+        # print(current_page_line_coords)
         if selected_page is not None and selected_page == page_index:
             selected_page_lines += current_page_line_coords
         else:
@@ -316,6 +321,7 @@ def show_pages(num_pages, components_per_page, paper_size = paper_sizes["A4"], s
     concave_lines = []
     component_bg_verts = []
     component_bg_colors = []
+    selected_component_lines = None if selected_component is None else []
 
     assert num_pages >= len(components_per_page)
     for page_index, components_on_page in enumerate(components_per_page):
@@ -325,9 +331,14 @@ def show_pages(num_pages, components_per_page, paper_size = paper_sizes["A4"], s
 
         current_component : ComponentPrintData
         for current_component in components_on_page:
+            this_is_the_selected_component = selected_component is not None and current_component.og_component_id == selected_component
             page_transform = current_component.page_transform
             for cut_edge_data in current_component.cut_edges + current_component.glue_flap_edges:
-                full_lines += [page_anchor + page_transform * coord for coord in cut_edge_data.coords]
+                coords = [page_anchor + page_transform * coord for coord in cut_edge_data.coords]
+                if this_is_the_selected_component:
+                    selected_component_lines += coords
+                else:
+                    full_lines += coords
             fold_edge_data : FoldEdgeData
             for fold_edge_data in current_component.fold_edges:
                 if fold_edge_data.fold_angle <= fold_angle_th:
@@ -357,7 +368,9 @@ def show_pages(num_pages, components_per_page, paper_size = paper_sizes["A4"], s
 
     hide_pages()
     global _drawing_handle_pages
-    _drawing_handle_pages = bpy.types.SpaceImageEditor.draw_handler_add(pages_draw_callback, (page_verts, selected_page_lines, other_page_lines, component_bg_verts, component_bg_colors, component_lines), "WINDOW", "POST_VIEW")
+    _drawing_handle_pages = bpy.types.SpaceImageEditor.draw_handler_add(pages_draw_callback, 
+                                                                        (page_verts, selected_page_lines, other_page_lines, component_bg_verts, component_bg_colors, component_lines, selected_component_lines), 
+                                                                        "WINDOW", "POST_VIEW")
 
 #################################
 #          Update all           #
@@ -459,8 +472,9 @@ def update_all_polyzamboni_drawings(self, context):
     show_auto_completed_cuts(drawing_backend.mesh_edge_id_list_to_coordinate_list(bm, io.read_auto_cut_edges(active_mesh), draw_settings.normal_offset, world_matrix), dotted_line_length=draw_settings.dotted_line_length)
 
     if draw_settings.color_faces_by_quality:
+        selected_component_id = general_mesh_props.selected_component_id if general_mesh_props.selected_component_id != -1 else None
         all_v_positions, quality_dict = drawing_backend.get_triangle_list_per_cluster_quality(active_mesh, bm, draw_settings.normal_offset, edge_constraints, 
-                                                                                              world_matrix, connected_components)
+                                                                                              world_matrix, connected_components, selected_component_id)
         show_region_quality_triangles(all_v_positions, quality_dict)
 
     if draw_settings.show_glue_flaps:

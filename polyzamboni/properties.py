@@ -121,6 +121,11 @@ class ZamboniGeneralMeshProps(bpy.types.PropertyGroup):
         default=1,
         min=0
     )
+    selected_component_id : IntProperty(
+        name="Selected Component ID",
+        default=-1,
+        update=update_all_polyzamboni_drawings
+    )
 
 linestyles = [
         ("-", "-", "", "", 0),

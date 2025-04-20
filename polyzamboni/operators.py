@@ -893,15 +893,16 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
         if not check_if_page_numbers_and_transforms_exist_for_all_components(mesh):
             print("cancelled page editing operator")
             return { 'CANCELLED' }
-        general_mesh_props = mesh.polyzamboni_general_mesh_props
+        self.general_mesh_props = mesh.polyzamboni_general_mesh_props
 
         self.editing_state = operators_backend.PageEditorState.SELECT_PIECES
         self.active_page = None
-        self.paper_size = paper_sizes[general_mesh_props.paper_size]
+        self.selected_component_id = None
+        self.paper_size = paper_sizes[self.general_mesh_props.paper_size]
         self.fold_angle_th = context.scene.polyzamboni_drawing_settings.hide_fold_edge_angle_th
 
         # collect all component print data
-        component_print_data = create_print_data_for_all_components(ao, general_mesh_props.model_scale)
+        component_print_data = create_print_data_for_all_components(ao, self.general_mesh_props.model_scale)
 
         # read and set correct page transforms
         page_transforms_per_component = io.read_page_transforms(mesh)
@@ -925,27 +926,50 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
         num_display_pages = self.num_pages
         if self.active_page is not None and self.active_page == self.num_pages:
             num_display_pages += 1
-        show_pages(num_display_pages, components_per_page, self.paper_size, self.active_page, fold_angle_th=self.fold_angle_th)
+        show_pages(num_display_pages, components_per_page, self.paper_size, self.active_page, self.selected_component_id, fold_angle_th=self.fold_angle_th)
         redraw_image_editor(context)
 
-    def get_mouse_image_coords(self, context, event):
-        mouse_x = event.mouse_x
-        mouse_y = event.mouse_y
+    def get_mouse_image_coords(self, context : bpy.types.Context, event :bpy.types.Event):
+        mouse_x = event.mouse_region_x
+        mouse_y = event.mouse_region_y
         return context.region.view2d.region_to_view(mouse_x, mouse_y)
-        
+    
+    def select_component(self, context, component_id):
+        self.general_mesh_props.selected_component_id = component_id if component_id is not None else -1
+        if component_id != self.select_component:
+            self.selected_component_id = component_id
+            self.draw_current_page_layout(context)
+
+    def exit_modal_mode(self, context):
+        print("Exiting page editing mode :)")
+        self.select_component(context, None)
+        update_all_page_layout_drawings(None, context)
+        return {"FINISHED"} 
+
     def modal(self, context, event : bpy.types.Event):
+        if context.region is None or context.region.view2d is None:
+            print("Left the workspace!")
+            return self.exit_modal_mode(context)
         if self.editing_state == operators_backend.PageEditorState.SELECT_PIECES:
+            if event.type in {'ESC', 'ENTER'}:
+                return self.exit_modal_mode(context)
+            mouse_x, mouse_y = event.mouse_x, event.mouse_y
+            image_x, image_y = self.get_mouse_image_coords(context, event)
+            region_x = context.region.x
+            region_y = context.region.y
+            if mouse_x < region_x or mouse_x > region_x + context.region.width or mouse_y < region_y or mouse_y > region_y + context.region.height:
+                return {'PASS_THROUGH'}
             if event.type == "MOUSEMOVE":
-                image_x, image_y = self.get_mouse_image_coords(context, event)
                 page_hovered_over = operators_backend.find_page_under_mouse_position(image_x, image_y, self.num_pages, self.paper_size)
                 if page_hovered_over != self.active_page:
                     self.active_page = page_hovered_over
                     self.draw_current_page_layout(context)
-
-            if event.type in {'ESC', 'ENTER'}:
-                print("Exiting page editing mode :)")
-                update_all_page_layout_drawings(None, context)
-                return {"FINISHED"}
+            if event.type == "LEFTMOUSE" and event.value == "PRESS":
+                page_hovered_over = operators_backend.find_page_under_mouse_position(image_x, image_y, self.num_pages, self.paper_size)
+                selected_component_id = operators_backend.find_papermodel_piece_under_mouse_position(image_x, image_y, self.components_on_pages, page_hovered_over, self.paper_size)
+                self.select_component(context, selected_component_id)
+            if event.type == "RIGHTMOUSE" and event.value == "PRESS":
+                self.select_component(context, None)
         return {'PASS_THROUGH'}
 
     @classmethod

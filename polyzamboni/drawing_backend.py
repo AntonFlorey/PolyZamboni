@@ -21,6 +21,7 @@ class ComponentQuality(Enum):
     BAD_GLUE_FLAPS_REGION = 1
     OVERLAPPING_REGION = 2
     NOT_FOLDABLE_REGION = 3
+    NOT_SELECTED_REGION = 4
 
 class GlueFlapQuality(Enum):
     GLUE_FLAP_NO_OVERLAPS = 0
@@ -182,7 +183,7 @@ def compute_and_update_connected_component_triangle_lists_for_drawing(mesh : Mes
     return render_ready_vertex_positions, render_ready_triangles_per_component
 
 def get_triangle_list_per_cluster_quality(mesh : Mesh, bmesh : BMesh, face_offset, edge_constraints, world_matrix,
-                                          connected_components = None):
+                                          connected_components = None, selected_component = None):
     if connected_components is None:
         connected_components = io.read_connected_component_sets(mesh)
         assert connected_components is not None
@@ -195,9 +196,13 @@ def get_triangle_list_per_cluster_quality(mesh : Mesh, bmesh : BMesh, face_offse
         ComponentQuality.PERFECT_REGION : [],
         ComponentQuality.BAD_GLUE_FLAPS_REGION : [],
         ComponentQuality.OVERLAPPING_REGION : [],
-        ComponentQuality.NOT_FOLDABLE_REGION : []
+        ComponentQuality.NOT_FOLDABLE_REGION : [],
+        ComponentQuality.NOT_SELECTED_REGION : []
         }
     for component_id, triangles in tris_per_component.items():
+        if selected_component is not None and component_id != selected_component:
+            #quality_dict[ComponentQuality.NOT_SELECTED_REGION] += triangles
+            continue
         if component_id in cyclic_components:
             quality_dict[ComponentQuality.NOT_FOLDABLE_REGION] += triangles
             continue
