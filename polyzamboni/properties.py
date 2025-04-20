@@ -354,6 +354,7 @@ def register():
     bpy.types.Mesh.polyzamboni_general_mesh_props = bpy.props.PointerProperty(type=ZamboniGeneralMeshProps)
     bpy.types.WindowManager.polyzamboni_auto_cuts_progress = FloatProperty(name="Auto Cuts Progress", min=0, max=1, default=0.0)
     bpy.types.WindowManager.polyzamboni_auto_cuts_running = BoolProperty(name="Auto Cuts computation running", default=False)
+    bpy.types.WindowManager.polyzamboni_in_page_edit_mode = BoolProperty(name="Editing page layout", default=False)
 
 def unregister():
     bpy.utils.unregister_class(DrawSettings)
@@ -366,3 +367,4 @@ def unregister():
     del bpy.types.Mesh.polyzamboni_general_mesh_props
     del bpy.types.WindowManager.polyzamboni_auto_cuts_progress
     del bpy.types.WindowManager.polyzamboni_auto_cuts_running
+    del bpy.types.WindowManager.polyzamboni_in_page_edit_mode

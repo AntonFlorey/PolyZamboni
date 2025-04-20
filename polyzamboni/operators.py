@@ -197,6 +197,7 @@ class RemoveAllPolyzamboniDataOperator(bpy.types.Operator):
     def execute(self, context):
         operators_backend.delete_paper_model(context.active_object.data)
         update_all_polyzamboni_drawings(None, context)
+        update_all_page_layout_drawings(None, context)
         return { 'FINISHED' }
     
     def invoke(self, context, event):
@@ -232,6 +233,7 @@ class SyncMeshOperator(bpy.types.Operator):
         if returnto:
             bpy.ops.object.mode_set(mode=self.weird_mode_table[returnto] if returnto in self.weird_mode_table else returnto)
         update_all_polyzamboni_drawings(None, context)
+        update_all_page_layout_drawings(None, context)
         return { 'FINISHED' }
     
     @classmethod
@@ -246,11 +248,12 @@ class SeparateAllMaterialsOperator(bpy.types.Operator):
     def execute(self, context):
         operators_backend.add_cuts_between_different_materials(bpy.context.active_object.data)
         update_all_polyzamboni_drawings(None, context)
+        update_all_page_layout_drawings(None, context)
         return { 'FINISHED' }
     
     @classmethod
     def poll(cls, context):
-        return _active_object_is_mesh_with_paper_model(context)
+        return _active_object_is_mesh_with_paper_model(context) and not bpy.context.window_manager.polyzamboni_in_page_edit_mode
 
 class RemoveAllAutoCutsOperator(bpy.types.Operator):
     """ Removes all auto cuts from the selected paper model. """
@@ -260,11 +263,12 @@ class RemoveAllAutoCutsOperator(bpy.types.Operator):
     def execute(self, context):
         operators_backend.remove_auto_cuts(bpy.context.active_object.data)
         update_all_polyzamboni_drawings(None, context)
+        update_all_page_layout_drawings(None, context)
         return { 'FINISHED' }
     
     @classmethod
     def poll(cls, context):
-        return _active_object_is_mesh_with_paper_model(context)
+        return _active_object_is_mesh_with_paper_model(context) and not bpy.context.window_manager.polyzamboni_in_page_edit_mode
 
 class RecomputeFlapsOperator(bpy.types.Operator):
     """ Applies the current flap settings and recomputes all glue flaps """
@@ -274,11 +278,12 @@ class RecomputeFlapsOperator(bpy.types.Operator):
     def execute(self, context : bpy.types.Context):
         operators_backend.recompute_all_glue_flaps(context.active_object.data)
         update_all_polyzamboni_drawings(None, context)
+        update_all_page_layout_drawings(None, context)
         return { 'FINISHED' }
     
     @classmethod
     def poll(cls, context):
-        return _active_object_is_mesh_with_paper_model(context)
+        return _active_object_is_mesh_with_paper_model(context) and not bpy.context.window_manager.polyzamboni_in_page_edit_mode
 
 class FlipGlueFlapsOperator(bpy.types.Operator):
     """ Flip all glue flaps attached to the selected edges """
@@ -292,11 +297,12 @@ class FlipGlueFlapsOperator(bpy.types.Operator):
         selected_edges = [e.index for e in ao_bmesh.edges if e.select] 
         operators_backend.flip_glue_flaps(ao_mesh, selected_edges)
         update_all_polyzamboni_drawings(None, context)
+        update_all_page_layout_drawings(None, context)
         return { 'FINISHED' }
     
     @classmethod
     def poll(cls, context):
-        return _active_object_is_mesh_with_paper_model(context) and context.mode == 'EDIT_MESH'
+        return _active_object_is_mesh_with_paper_model(context) and context.mode == 'EDIT_MESH' and not bpy.context.window_manager.polyzamboni_in_page_edit_mode
 
 class ComputeBuildStepsOperator(bpy.types.Operator):
     """ Starting at the selected face, compute a polyzamboni build order of the current mesh """
@@ -313,7 +319,7 @@ class ComputeBuildStepsOperator(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        return _active_object_is_mesh_with_paper_model(context) and context.mode == 'EDIT_MESH'
+        return _active_object_is_mesh_with_paper_model(context) and context.mode == 'EDIT_MESH' and not bpy.context.window_manager.polyzamboni_in_page_edit_mode
 
 class ZamboniGlueFlapDesignOperator(bpy.types.Operator):
     """ Control the placement of glue flaps """
@@ -340,7 +346,7 @@ class ZamboniGlueFlapDesignOperator(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        return _active_object_is_mesh_with_paper_model(context) and context.mode == 'EDIT_MESH'
+        return _active_object_is_mesh_with_paper_model(context) and context.mode == 'EDIT_MESH' and not bpy.context.window_manager.polyzamboni_in_page_edit_mode
 
 class ZamboniCutDesignOperator(bpy.types.Operator):
     """ Add or remove cuts """
@@ -378,12 +384,13 @@ class ZamboniCutDesignOperator(bpy.types.Operator):
             selected_faces = [f.index for f in ao_bmesh.faces if f.select]
             operators_backend.add_cutout_region(ao_mesh, selected_faces)
         update_all_polyzamboni_drawings(None, context)
+        update_all_page_layout_drawings(None, context)
 
         return {"FINISHED"}
 
     @classmethod
     def poll(cls, context):
-        return _active_object_is_mesh_with_paper_model(context) and context.mode == 'EDIT_MESH'
+        return _active_object_is_mesh_with_paper_model(context) and context.mode == 'EDIT_MESH' and not bpy.context.window_manager.polyzamboni_in_page_edit_mode
 
 class AutoCutsOperator(bpy.types.Operator):
     """ Automatically generate cuts """
@@ -466,6 +473,7 @@ class AutoCutsOperator(bpy.types.Operator):
                     region.tag_redraw()
             if not self._running:
                 update_all_polyzamboni_drawings(None, context)
+                update_all_page_layout_drawings(None, context)
                 return {'FINISHED'}
         return {'RUNNING_MODAL'}
     
@@ -477,7 +485,7 @@ class AutoCutsOperator(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context : bpy.types.Context):
-        return _active_object_is_mesh_with_paper_model(context) and context.mode == 'EDIT_MESH'
+        return _active_object_is_mesh_with_paper_model(context) and context.mode == 'EDIT_MESH' and not bpy.context.window_manager.polyzamboni_in_page_edit_mode
 
 class ZamboniCutEditingPieMenu(bpy.types.Menu):
     """This is a custom pie menu for all Zamboni cut design operators"""
@@ -882,10 +890,22 @@ class PolyZamboniPageLayoutOperator(bpy.types.Operator):
     def poll(cls, context):
         return _active_object_is_mesh_with_paper_model(context)
 
+class PolyZamboniExitPageLayoutEditingOperator(bpy.types.Operator):
+    """ Exit the page layout editing mode """
+    bl_label = "Exit Page Editing"
+    bl_idname = "polyzamboni.exit_page_layout_editing_op"
+
+    def execute(self, context):
+        if context.window_manager.polyzamboni_in_page_edit_mode:
+            PolyZamboniPageLayoutEditingOperator._exit_on_next_event = True
+        return {'FINISHED'}
+
 class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
     """ Select, move and rotate your papermodel pieces """
     bl_label = "Edit Page Layout"
     bl_idname  = "polyzamboni.page_layout_editing_op"
+
+    _exit_on_next_event = False
 
     def invoke(self, context, event):
         ao = context.active_object
@@ -898,6 +918,7 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
         self.editing_state = operators_backend.PageEditorState.SELECT_PIECES
         self.active_page = None
         self.selected_component_id = None
+        PolyZamboniPageLayoutEditingOperator._exit_on_next_event = False
         self.paper_size = paper_sizes[self.general_mesh_props.paper_size]
         self.fold_angle_th = context.scene.polyzamboni_drawing_settings.hide_fold_edge_angle_th
 
@@ -917,6 +938,7 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
         for current_component_print_data in component_print_data:
             self.components_on_pages[page_numbers_per_components[current_component_print_data.og_component_id]][current_component_print_data.og_component_id] = current_component_print_data
         
+        context.window_manager.polyzamboni_in_page_edit_mode = True
         print("Entered page editing mode :)")
         context.window_manager.modal_handler_add(self)
         return {'RUNNING_MODAL'}
@@ -943,10 +965,14 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
     def exit_modal_mode(self, context):
         print("Exiting page editing mode :)")
         self.select_component(context, None)
+        context.window_manager.polyzamboni_in_page_edit_mode = False
         update_all_page_layout_drawings(None, context)
         return {"FINISHED"} 
 
     def modal(self, context, event : bpy.types.Event):
+        if PolyZamboniPageLayoutEditingOperator._exit_on_next_event:
+            print("Externally triggered exit!")
+            return self.exit_modal_mode(context)
         if context.region is None or context.region.view2d is None:
             print("Left the workspace!")
             return self.exit_modal_mode(context)
@@ -971,6 +997,9 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
             if event.type == "RIGHTMOUSE" and event.value == "PRESS":
                 self.select_component(context, None)
         return {'PASS_THROUGH'}
+
+    def __del__(self):
+        bpy.context.window_manager.polyzamboni_in_page_edit_mode = False # just to be super safe here
 
     @classmethod
     def poll(cls, context):
@@ -1004,6 +1033,7 @@ def register():
     bpy.utils.register_class(SelectNonTriangulatableFacesOperator)
     bpy.utils.register_class(PolyZamboniPageLayoutOperator)
     bpy.utils.register_class(PolyZamboniPageLayoutEditingOperator)
+    bpy.utils.register_class(PolyZamboniExitPageLayoutEditingOperator)
 
     bpy.types.TOPBAR_MT_file_export.append(menu_func_polyzamboni_export_pdf)
     bpy.types.TOPBAR_MT_file_export.append(menu_func_polyzamboni_export_svg)
@@ -1040,6 +1070,7 @@ def unregister():
     bpy.utils.unregister_class(SelectNonTriangulatableFacesOperator)
     bpy.utils.unregister_class(PolyZamboniPageLayoutOperator)
     bpy.utils.unregister_class(PolyZamboniPageLayoutEditingOperator)
+    bpy.utils.unregister_class(PolyZamboniExitPageLayoutEditingOperator)
 
     bpy.types.TOPBAR_MT_file_export.remove(menu_func_polyzamboni_export_pdf)
     bpy.types.TOPBAR_MT_file_export.remove(menu_func_polyzamboni_export_svg)
