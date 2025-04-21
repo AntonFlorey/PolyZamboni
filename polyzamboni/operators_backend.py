@@ -171,3 +171,8 @@ def find_papermodel_piece_under_mouse_position(pos_x, pos_y, print_data_on_pages
             if geometry.point_in_2d_triangle(np.array([pos_x, pos_y]) - page_anchor, *[current_print_data.page_transform * coord for coord in colored_triangle.coords]):
                 return current_print_data.og_component_id
     return None
+
+def find_page_under_papermodel_piece(component_print_data : ComponentPrintData, component_page, bonus_transform : geometry.AffineTransform2D, pages, paper_size, margin_between_pages = 1.0, pages_per_row = 2):
+    component_cog = component_print_data.get_cog()
+    image_space_cog = (bonus_transform @ component_print_data.page_transform) * component_cog + compute_page_anchor(component_page, pages_per_row, paper_size, margin_between_pages)
+    return find_page_under_mouse_position(image_space_cog[0], image_space_cog[1], pages, paper_size, margin_between_pages, pages_per_row)

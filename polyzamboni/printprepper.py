@@ -109,6 +109,12 @@ class ComponentPrintData():
         eigenvalues, eigenvectors = np.linalg.eigh(corr_mat)
         return np.mean(boundary_coords, axis=0), eigenvectors
 
+    def get_cog(self):
+        """ Center of gravity pre page transform """
+        cut_edge_first_coords = [cut_edge_data.coords[0] for cut_edge_data in self.cut_edges]
+        fold_edge_at_glue_flaps_first_coords = [fold_edge_at_flap_data.coords[0] for fold_edge_at_flap_data in self.fold_edges_at_flaps]
+        return np.mean(cut_edge_first_coords + fold_edge_at_glue_flaps_first_coords, axis=0)
+
     def align_horizontally_via_pca(self):
         boundary_cog, pca_basis = self.__pca()
         shift_cog_to_orig = AffineTransform2D(affine_part=-boundary_cog)

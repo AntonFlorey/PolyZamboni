@@ -9,7 +9,7 @@ from .properties import GeneralExportSettings, LineExportSettings, TextureExport
 from .drawing import *
 from . import exporters
 from . import printprepper
-from .geometry import compute_planarity_score
+from .geometry import compute_planarity_score, construct_orthogonal_basis_at_2d_edge
 from .autozamboni import greedy_auto_cuts
 from . import printprepper
 from . import operators_backend
@@ -909,15 +909,23 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
 
     def invoke(self, context, event):
         ao = context.active_object
-        mesh = ao.data
-        if not check_if_page_numbers_and_transforms_exist_for_all_components(mesh):
+        self.mesh = ao.data
+        if not check_if_page_numbers_and_transforms_exist_for_all_components(self.mesh):
             print("cancelled page editing operator")
             return { 'CANCELLED' }
-        self.general_mesh_props = mesh.polyzamboni_general_mesh_props
+        self.general_mesh_props = self.mesh.polyzamboni_general_mesh_props
 
         self.editing_state = operators_backend.PageEditorState.SELECT_PIECES
         self.active_page = None
         self.selected_component_id = None
+        self.page_of_selected_component = None
+        self.currently_edited_component = None
+        self.currently_edited_component_base_page_transform : AffineTransform2D = None
+        self.currently_edited_component_base_page = None
+        self.last_valid_editing_transform : AffineTransform2D = None
+        self.page_anchor_correction_transform : AffineTransform2D = None
+        self.edit_operation_mouse_start_pos = None
+        self.current_page_of_moving_component = None
         PolyZamboniPageLayoutEditingOperator._exit_on_next_event = False
         self.paper_size = paper_sizes[self.general_mesh_props.paper_size]
         self.fold_angle_th = context.scene.polyzamboni_drawing_settings.hide_fold_edge_angle_th
@@ -926,13 +934,13 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
         component_print_data = create_print_data_for_all_components(ao, self.general_mesh_props.model_scale)
 
         # read and set correct page transforms
-        page_transforms_per_component = io.read_page_transforms(mesh)
+        page_transforms_per_component = io.read_page_transforms(self.mesh)
         current_component_print_data : ComponentPrintData
         for current_component_print_data in component_print_data:
             current_component_print_data.page_transform = page_transforms_per_component[current_component_print_data.og_component_id]
 
         # create page layout
-        page_numbers_per_components = io.read_page_numbers(mesh)
+        page_numbers_per_components = io.read_page_numbers(self.mesh)
         self.num_pages = max(page_numbers_per_components.values()) + 1 if len(page_numbers_per_components) > 0 else 0
         self.components_on_pages = [{} for _ in range(self.num_pages)]
         for current_component_print_data in component_print_data:
@@ -955,17 +963,92 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
         mouse_x = event.mouse_region_x
         mouse_y = event.mouse_region_y
         return context.region.view2d.region_to_view(mouse_x, mouse_y)
-    
-    def select_component(self, context, component_id):
+
+    def start_an_edit_operator(self, context, event):
+        self.edit_operation_mouse_start_pos = self.get_mouse_image_coords(context, event)
+        self.currently_edited_component : ComponentPrintData = self.components_on_pages[self.page_of_selected_component][self.selected_component_id]
+        self.currently_edited_component_base_page = self.page_of_selected_component
+        self.currently_edited_component_base_page_transform = AffineTransform2D(self.currently_edited_component.page_transform.A, self.currently_edited_component.page_transform.t)
+        self.last_valid_editing_transform = AffineTransform2D()
+        self.page_anchor_correction_transform = AffineTransform2D()
+        self.current_page_of_moving_component = self.page_of_selected_component
+
+    def start_piece_rotation(self):
+        """ Must be called after 'start_an_edit_operator' """
+        self.currently_rotating_object_cog = self.currently_edited_component.page_transform * self.currently_edited_component.get_cog() 
+        self.rotation_center = self.currently_rotating_object_cog + operators_backend.compute_page_anchor(self.current_page_of_moving_component, 2, self.paper_size, 1)
+        if np.linalg.norm(self.rotation_center - np.array(self.edit_operation_mouse_start_pos)) <= 1e-2:
+            self.rotation_base_from = np.eye(2)
+        else:
+            self.rotation_base_from = np.array(construct_orthogonal_basis_at_2d_edge(self.rotation_center, np.array(self.edit_operation_mouse_start_pos)))
+
+    def collapse_empty_pages(self):
+        self.active_page = None # just to be save
+        collapsed_pages = []
+        for page in self.components_on_pages:
+            if len(page) != 0:
+                collapsed_pages.append(page)
+        self.components_on_pages = collapsed_pages
+        self.num_pages = len(collapsed_pages)
+
+    def exit_an_edit_operator(self, context):
+        self.page_of_selected_component = self.current_page_of_moving_component
+        self.edit_operation_mouse_start_pos = None
+        self.currently_edited_component = None
+        self.currently_edited_component_base_page = None
+        self.currently_edited_component_base_page_transform = None
+        self.last_valid_editing_transform = None
+        self.page_anchor_correction_transform = None
+        self.current_page_of_moving_component = None
+        self.collapse_empty_pages()
+        self.editing_state = operators_backend.PageEditorState.SELECT_PIECES
+        print("edit operator quit!")
+
+    def select_component(self, context, component_id, page):
         self.general_mesh_props.selected_component_id = component_id if component_id is not None else -1
-        if component_id != self.select_component:
+        if component_id != self.selected_component_id:
             self.selected_component_id = component_id
+            if component_id is not None and page is not None:
+                self.page_of_selected_component = page
             self.draw_current_page_layout(context)
+
+    def move_component_to_page(self, component : ComponentPrintData, prev_page_index, new_page_index):
+        if prev_page_index == new_page_index:
+            return
+        print("moving from page", prev_page_index, "to page", new_page_index)
+        prev_page_anchor = operators_backend.compute_page_anchor(prev_page_index, 2, self.paper_size, 1)
+        new_page_anchor = operators_backend.compute_page_anchor(new_page_index, 2, self.paper_size, 1)
+        anchor_translation = prev_page_anchor - new_page_anchor
+        self.page_anchor_correction_transform = AffineTransform2D(affine_part=anchor_translation) @ self.page_anchor_correction_transform
+        assert component.og_component_id in self.components_on_pages[prev_page_index].keys()
+        if len(self.components_on_pages) == new_page_index:
+            self.components_on_pages.append({})
+            self.num_pages += 1
+        self.components_on_pages[new_page_index][component.og_component_id] = component
+        del self.components_on_pages[prev_page_index][component.og_component_id]
+        # maybe delete page if it is the last one
+        if len(self.components_on_pages[-1]) == 0:
+            self.components_on_pages.pop()
+            self.num_pages -= 1
+        self.current_page_of_moving_component = new_page_index
+
+    def save_page_layout(self):
+        page_numbers = {}
+        page_transforms = {}
+        for page_num, components_on_page in enumerate(self.components_on_pages):
+            component_print_data : ComponentPrintData
+            for component_print_data in components_on_page.values():
+                page_numbers[component_print_data.og_component_id] = page_num
+                page_transforms[component_print_data.og_component_id] = component_print_data.page_transform
+        io.write_page_numbers(self.mesh, page_numbers)
+        io.write_page_transforms(self.mesh, page_transforms)
+        pass
 
     def exit_modal_mode(self, context):
         print("Exiting page editing mode :)")
-        self.select_component(context, None)
+        self.select_component(context, None, None)
         context.window_manager.polyzamboni_in_page_edit_mode = False
+        self.save_page_layout()
         update_all_page_layout_drawings(None, context)
         return {"FINISHED"} 
 
@@ -977,7 +1060,7 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
             print("Left the workspace!")
             return self.exit_modal_mode(context)
         if self.editing_state == operators_backend.PageEditorState.SELECT_PIECES:
-            if event.type in {'ESC', 'ENTER'}:
+            if event.type in {'ESC', 'RET'} and event.value == "PRESS":
                 return self.exit_modal_mode(context)
             mouse_x, mouse_y = event.mouse_x, event.mouse_y
             image_x, image_y = self.get_mouse_image_coords(context, event)
@@ -993,9 +1076,70 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
             if event.type == "LEFTMOUSE" and event.value == "PRESS":
                 page_hovered_over = operators_backend.find_page_under_mouse_position(image_x, image_y, self.num_pages, self.paper_size)
                 selected_component_id = operators_backend.find_papermodel_piece_under_mouse_position(image_x, image_y, self.components_on_pages, page_hovered_over, self.paper_size)
-                self.select_component(context, selected_component_id)
+                self.select_component(context, selected_component_id, page_hovered_over)
             if event.type == "RIGHTMOUSE" and event.value == "PRESS":
-                self.select_component(context, None)
+                self.select_component(context, None, None)
+            if event.type == "G" and event.value == "PRESS":
+                if self.selected_component_id is not None:
+                    self.editing_state = operators_backend.PageEditorState.MOVE_PIECE
+                    self.start_an_edit_operator(context, event)
+            if event.type == "R" and event.value == "PRESS":
+                if self.selected_component_id is not None:
+                    self.editing_state = operators_backend.PageEditorState.ROTATE_PIECE
+                    self.start_an_edit_operator(context, event)
+                    self.start_piece_rotation()
+        if self.editing_state == operators_backend.PageEditorState.MOVE_PIECE:
+            if event.type in {"RET", "LEFTMOUSE"} and event.value == "PRESS":
+                self.currently_edited_component.page_transform = self.last_valid_editing_transform @ self.page_anchor_correction_transform @ self.currently_edited_component_base_page_transform
+                self.exit_an_edit_operator(context)
+                self.draw_current_page_layout(context)
+            if event.type in {"ESC", "RIGHTMOUSE"} and event.value == "PRESS":
+                # revert the transform
+                self.move_component_to_page(self.currently_edited_component, self.current_page_of_moving_component, self.currently_edited_component_base_page)
+                self.currently_edited_component.page_transform = self.currently_edited_component_base_page_transform
+                self.exit_an_edit_operator(context)
+                self.draw_current_page_layout(context)
+            if event.type == "MOUSEMOVE":
+                image_x, image_y = self.get_mouse_image_coords(context, event)
+                translation = np.array([image_x, image_y]) - np.array(self.edit_operation_mouse_start_pos)
+                edit_transform = AffineTransform2D(affine_part=translation)
+                self.currently_edited_component.page_transform = edit_transform @ self.page_anchor_correction_transform @ self.currently_edited_component_base_page_transform
+                # check for page updates
+                page_under_piece = operators_backend.find_page_under_papermodel_piece(self.currently_edited_component, self.current_page_of_moving_component, AffineTransform2D(), self.num_pages, self.paper_size)
+                if page_under_piece is not None:
+                    self.last_valid_editing_transform = edit_transform
+                    self.active_page = page_under_piece
+                    if self.current_page_of_moving_component != page_under_piece:
+                        self.move_component_to_page(self.currently_edited_component, self.current_page_of_moving_component, page_under_piece)
+                        # update page transform for smooth behavior
+                        self.currently_edited_component.page_transform = edit_transform @ self.page_anchor_correction_transform @ self.currently_edited_component_base_page_transform
+                self.draw_current_page_layout(context)
+            return {'RUNNING_MODAL'}
+        if self.editing_state == operators_backend.PageEditorState.ROTATE_PIECE:
+            if event.type in {"RET", "LEFTMOUSE"} and event.value == "PRESS":
+                self.currently_edited_component.page_transform = self.last_valid_editing_transform @ self.page_anchor_correction_transform @ self.currently_edited_component_base_page_transform
+                self.exit_an_edit_operator(context)
+                self.draw_current_page_layout(context)
+            if event.type in {"ESC", "RIGHTMOUSE"} and event.value == "PRESS":
+                # revert the transform
+                self.currently_edited_component.page_transform = self.currently_edited_component_base_page_transform
+                self.exit_an_edit_operator(context)
+                self.draw_current_page_layout(context)
+            if event.type == "MOUSEMOVE":
+                image_x, image_y = self.get_mouse_image_coords(context, event)
+                mouse_pos_np = np.array([image_x, image_y])
+                if np.linalg.norm(self.rotation_center - mouse_pos_np) <= 1e-2:
+                    self.rotation_base_to = np.eye(2)
+                else:
+                    self.rotation_base_to = np.array(construct_orthogonal_basis_at_2d_edge(self.rotation_center, mouse_pos_np)).T
+                rotation = AffineTransform2D(linear_part=self.rotation_base_to @ self.rotation_base_from)
+                cog_to_orig = AffineTransform2D(affine_part=-self.currently_rotating_object_cog)
+                edit_transform = cog_to_orig.inverse() @ rotation @ cog_to_orig
+                self.last_valid_editing_transform = edit_transform
+                self.currently_edited_component.page_transform = edit_transform @ self.currently_edited_component_base_page_transform
+                self.draw_current_page_layout(context)
+            return {'RUNNING_MODAL'}
+
         return {'PASS_THROUGH'}
 
     def __del__(self):
