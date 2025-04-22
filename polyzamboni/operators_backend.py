@@ -109,6 +109,26 @@ def compute_build_step_numbers(mesh : Mesh, selected_start_face_ids):
 #      Page Layout Editing      #
 #################################
 
+def read_custom_page_layout(obj : Object):
+    mesh : Mesh = obj.data
+    general_mesh_props = mesh.polyzamboni_general_mesh_props
+    # collect all component print data
+    component_print_data = create_print_data_for_all_components(obj, general_mesh_props.model_scale)
+
+    # read and set correct page transforms
+    page_transforms_per_component = io.read_page_transforms(mesh)
+    current_component_print_data : ComponentPrintData
+    for current_component_print_data in component_print_data:
+        current_component_print_data.page_transform = page_transforms_per_component[current_component_print_data.og_component_id]
+
+    # create page layout
+    page_numbers_per_components = io.read_page_numbers(mesh)
+    num_pages = max(page_numbers_per_components.values()) + 1 if len(page_numbers_per_components) > 0 else 0
+    custom_components_on_pages = [[] for _ in range(num_pages)]
+    for current_component_print_data in component_print_data:
+        custom_components_on_pages[page_numbers_per_components[current_component_print_data.og_component_id]].append(current_component_print_data)
+    return custom_components_on_pages
+
 def compute_and_save_page_layout(obj : Object, scaling_factor, paper_size, page_margin, component_margin, separate_materials):
     page_size = paper_sizes[paper_size]
     component_print_data = create_print_data_for_all_components(obj, scaling_factor)

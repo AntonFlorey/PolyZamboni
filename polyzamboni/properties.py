@@ -56,6 +56,11 @@ class DrawSettings(bpy.types.PropertyGroup):
         subtype="ANGLE",
         update=update_all_page_layout_drawings
     )
+    show_component_colors: BoolProperty(
+        name="Display colors",
+        default=True,
+        update=update_all_page_layout_drawings
+    )
 
 class ZamboniGeneralMeshProps(bpy.types.PropertyGroup):
     has_attached_paper_model : BoolProperty(
@@ -136,6 +141,10 @@ linestyles = [
     ]
 
 class GeneralExportSettings(bpy.types.PropertyGroup):
+    use_custom_layout: BoolProperty(
+        name="Use custom layout",
+        default=False
+    )
     paper_size: EnumProperty(
         name="Page Size",
         items=[

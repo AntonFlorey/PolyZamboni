@@ -115,19 +115,25 @@ def deactivate_draw_callback(callback_handle, region_type='WINDOW'):
 def lines_2D_draw_callback(line_array, color, width=3):
     shader = gpu.shader.from_builtin("UNIFORM_COLOR")
     prev_line_width = gpu.state.line_width_get()
+    prev_blend = gpu.state.blend_get()
     gpu.state.line_width_set(width)
+    gpu.state.blend_set('ALPHA')
     batch = batch_for_shader(shader, 'LINES', {"pos" : line_array})
-    shader.bind()
+    shader.bind()   
     shader.uniform_float("color", color)
     batch.draw(shader)
     gpu.state.line_width_set(prev_line_width)
+    gpu.state.blend_set(prev_blend)
 
 def multicolored_triangles_2D_draw_callback(vertex_positions, vertex_colors):
     shader = gpu.shader.from_builtin('SMOOTH_COLOR')
+    prev_blend = gpu.state.blend_get()
+    gpu.state.blend_set('ALPHA')
     # prepare and draw batch
     batch = batch_for_shader(shader, 'TRIS', {"pos": vertex_positions, "color" : vertex_colors})
     shader.bind()
     batch.draw(shader)
+    gpu.state.blend_set(prev_blend)
 
 def triangles_2D_draw_callback(vertex_positions, color):
     shader = gpu.shader.from_builtin('UNIFORM_COLOR')
@@ -295,7 +301,7 @@ def pages_draw_callback(page_verts, selected_page_lines, other_pages_lines, comp
     # connected components
     component_draw_callback(component_triangle_verts, component_triangle_colors, component_lines, selected_component_lines)
 
-def show_pages(num_pages, components_per_page, paper_size = paper_sizes["A4"], selected_page = None, selected_component = None, margin_between_pages = 1.0, pages_per_row = 2, fold_angle_th = 0.0):
+def show_pages(num_pages, components_per_page, paper_size = paper_sizes["A4"], selected_page = None, selected_component = None, margin_between_pages = 1.0, pages_per_row = 2, fold_angle_th = 0.0, color_components = True):
     selected_page_lines = None if selected_page is None else []
     page_verts = []
     other_page_lines = []
@@ -358,6 +364,8 @@ def show_pages(num_pages, components_per_page, paper_size = paper_sizes["A4"], s
                     convex_lines += coords
                 else:
                     concave_lines += coords
+            if not color_components:
+                continue
             tri_data : ColoredTriangleData
             for tri_data in current_component.colored_triangles:
                 component_bg_verts += [page_anchor + page_transform * coord for coord in tri_data.coords]
@@ -434,7 +442,7 @@ def update_all_page_layout_drawings(self, context):
         components_on_pages[page_numbers_per_components[current_component_print_data.og_component_id]].append(current_component_print_data)
 
     # erstmal so
-    show_pages(num_pages, components_on_pages, paper_sizes[general_mesh_props.paper_size], None, fold_angle_th=draw_settings.hide_fold_edge_angle_th)
+    show_pages(num_pages, components_on_pages, paper_sizes[general_mesh_props.paper_size], None, fold_angle_th=draw_settings.hide_fold_edge_angle_th, color_components=draw_settings.show_component_colors)
     redraw_image_editor(context)
 
 def update_all_polyzamboni_drawings(self, context):

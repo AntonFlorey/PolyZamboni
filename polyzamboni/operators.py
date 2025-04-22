@@ -539,39 +539,46 @@ def export_draw_func(operator):
     # General settings
     layout.label(text="General print settings", icon="TOOL_SETTINGS")
     general_settings = layout.box()
-    # paper size
-    write_custom_split_property_row(general_settings, "Paper size", general_settings_props, "paper_size", 0.6)
 
-    # scaling mode
-    scaling_mode_row = general_settings.row().column_flow(columns=2, align=True)
-    scaling_mode_row.column(align=True).prop_enum(general_settings_props, "scaling_mode", "HEIGHT")
-    scaling_mode_row.column(align=True).prop_enum(general_settings_props, "scaling_mode", "SCALE")
+    # use custom layout
+    if operator.user_defined_page_layout_exists:
+        write_custom_split_property_row(general_settings, "Use custom layout", general_settings_props, "use_custom_layout", 0.6)
+        general_settings.separator(type="LINE")
 
-    if general_settings_props.scaling_mode == "HEIGHT":
-        # target model height
-        write_custom_split_property_row(general_settings, "Target height", general_settings_props, "target_model_height", 0.6)
-        curr_scale_factor = general_settings_props.target_model_height / operator.mesh_height
-        # set correct scaling
-        general_settings_props.sizing_scale = curr_scale_factor 
-    elif general_settings_props.scaling_mode == "SCALE":
-        write_custom_split_property_row(general_settings, "Model scale", general_settings_props, "sizing_scale", 0.6)
-        curr_scale_factor = general_settings_props.sizing_scale
-        # set target model height
-        general_settings_props.target_model_height = curr_scale_factor * operator.mesh_height
-    curr_page_size = exporters.paper_sizes[general_settings_props.paper_size]
+    if not (operator.user_defined_page_layout_exists and general_settings_props.use_custom_layout):
+        # paper size
+        write_custom_split_property_row(general_settings, "Paper size", general_settings_props, "paper_size", 0.6)
 
-    bu_to_cm_scale_factor =  100 * general_settings_props.target_model_height * operator.curr_len_scale / operator.mesh_height
-    page_margin_in_cm = 100 * operator.curr_len_scale * general_settings_props.page_margin
-    if operator.max_comp_with * bu_to_cm_scale_factor > curr_page_size[0] - 2 * page_margin_in_cm or operator.max_comp_height * bu_to_cm_scale_factor > curr_page_size[1] - 2 * page_margin_in_cm:
-        general_settings.row().label(icon="ERROR", text="A piece does not fit on one page!")
-    # margin
-    write_custom_split_property_row(general_settings, "Page margin", general_settings_props, "page_margin", 0.6)
-    # island spacing
-    write_custom_split_property_row(general_settings, "Island spacing", general_settings_props, "space_between_components", 0.6)
+        # scaling mode
+        scaling_mode_row = general_settings.row().column_flow(columns=2, align=True)
+        scaling_mode_row.column(align=True).prop_enum(general_settings_props, "scaling_mode", "HEIGHT")
+        scaling_mode_row.column(align=True).prop_enum(general_settings_props, "scaling_mode", "SCALE")
+
+        if general_settings_props.scaling_mode == "HEIGHT":
+            # target model height
+            write_custom_split_property_row(general_settings, "Target height", general_settings_props, "target_model_height", 0.6)
+            curr_scale_factor = general_settings_props.target_model_height / operator.mesh_height
+            # set correct scaling
+            general_settings_props.sizing_scale = curr_scale_factor 
+        elif general_settings_props.scaling_mode == "SCALE":
+            write_custom_split_property_row(general_settings, "Model scale", general_settings_props, "sizing_scale", 0.6)
+            curr_scale_factor = general_settings_props.sizing_scale
+            # set target model height
+            general_settings_props.target_model_height = curr_scale_factor * operator.mesh_height
+        curr_page_size = exporters.paper_sizes[general_settings_props.paper_size]
+
+        bu_to_cm_scale_factor =  100 * general_settings_props.target_model_height * operator.curr_len_scale / operator.mesh_height
+        page_margin_in_cm = 100 * operator.curr_len_scale * general_settings_props.page_margin
+        if operator.max_comp_with * bu_to_cm_scale_factor > curr_page_size[0] - 2 * page_margin_in_cm or operator.max_comp_height * bu_to_cm_scale_factor > curr_page_size[1] - 2 * page_margin_in_cm:
+            general_settings.row().label(icon="ERROR", text="A piece does not fit on one page!")
+        # margin
+        write_custom_split_property_row(general_settings, "Page margin", general_settings_props, "page_margin", 0.6)
+        # island spacing
+        write_custom_split_property_row(general_settings, "Island spacing", general_settings_props, "space_between_components", 0.6)
+        # one mat per page
+        write_custom_split_property_row(general_settings, "One material per page", general_settings_props, "one_material_per_page", 0.6)
     # side of prints
     write_custom_split_property_row(general_settings, "Prints inside", general_settings_props, "print_on_inside", 0.6)
-    # one mat per page
-    write_custom_split_property_row(general_settings, "One material per page", general_settings_props, "one_material_per_page", 0.6)
     # font settings
     general_settings.separator(factor=0.2)
     text_settings_row = general_settings.row().split(factor=0.55)
@@ -691,8 +698,16 @@ class PolyZamboniExportPDFOperator(bpy.types.Operator, ExportHelper):
         max_h_in_cm = 100 * self.curr_len_scale * self.max_comp_height
         curr_page_size = exporters.paper_sizes[self.general_settings.paper_size]
         max_scaling = min((curr_page_size[0] - 2 * page_margin_in_cm) / max_w_in_cm, (curr_page_size[1] - 2 * page_margin_in_cm) / max_h_in_cm)
-        self.general_settings.sizing_scale = 0.9 * max_scaling
-        self.general_settings.target_model_height = 0.9 * max_scaling * self.mesh_height
+        self.general_settings.sizing_scale = 0.99 * max_scaling
+        self.general_settings.target_model_height = 0.99 * max_scaling * self.mesh_height
+
+        # if it exists, load existing page layout
+        self.user_defined_page_layout_exists = check_if_page_numbers_and_transforms_exist_for_all_components(active_mesh)
+        if self.user_defined_page_layout_exists:
+            self.general_settings.use_custom_layout = True
+            self.general_settings.paper_size = active_mesh.polyzamboni_general_mesh_props.paper_size
+            # collect all component print data
+            self.custom_components_on_pages = operators_backend.read_custom_page_layout(ao)
 
         return super().invoke(context, event)
 
@@ -707,13 +722,15 @@ class PolyZamboniExportPDFOperator(bpy.types.Operator, ExportHelper):
             print("POLYZAMBONI WARNING: You exported a mesh that is not fully foldable yet!")
 
         # prepare everything
-        component_print_info = printprepper.create_print_data_for_all_components(ao, printprepper.compute_scaling_factor_for_target_model_height(ao_mesh, 100 * self.curr_len_scale * self.general_settings.target_model_height))
-        page_arrangement = printprepper.fit_components_on_pages(component_print_info,
-                                                                exporters.paper_sizes[self.general_settings.paper_size], 
-                                                                100 * self.curr_len_scale * self.general_settings.page_margin, 
-                                                                100 * self.curr_len_scale * self.general_settings.space_between_components, 
-                                                                self.general_settings.one_material_per_page)
-
+        if self.user_defined_page_layout_exists and self.general_settings.use_custom_layout:
+            page_arrangement = self.custom_components_on_pages
+        else:
+            component_print_info = printprepper.create_print_data_for_all_components(ao, printprepper.compute_scaling_factor_for_target_model_height(ao_mesh, 100 * self.curr_len_scale * self.general_settings.target_model_height))
+            page_arrangement = printprepper.fit_components_on_pages(component_print_info,
+                                                                    exporters.paper_sizes[self.general_settings.paper_size], 
+                                                                    100 * self.curr_len_scale * self.general_settings.page_margin, 
+                                                                    100 * self.curr_len_scale * self.general_settings.space_between_components, 
+                                                                    self.general_settings.one_material_per_page)
         # initialize exporter
         pdf_exporter = create_exporter_for_operator(self, "pdf")
         filename, extension = os.path.splitext(self.filepath)
@@ -766,8 +783,16 @@ class PolyZamboniExportSVGOperator(bpy.types.Operator, ExportHelper):
         max_h_in_cm = 100 * self.curr_len_scale * self.max_comp_height
         curr_page_size = exporters.paper_sizes[self.general_settings.paper_size]
         max_scaling = min((curr_page_size[0] - 2 * page_margin_in_cm) / max_w_in_cm, (curr_page_size[1] - 2 * page_margin_in_cm) / max_h_in_cm)
-        self.general_settings.sizing_scale = 0.9 * max_scaling
-        self.general_settings.target_model_height = 0.9 * max_scaling * self.mesh_height
+        self.general_settings.sizing_scale = 0.99 * max_scaling
+        self.general_settings.target_model_height = 0.99 * max_scaling * self.mesh_height
+
+        # if it exists, load existing page layout
+        self.user_defined_page_layout_exists = check_if_page_numbers_and_transforms_exist_for_all_components(active_mesh)
+        if self.user_defined_page_layout_exists:
+            self.general_settings.use_custom_layout = True
+            self.general_settings.paper_size = active_mesh.polyzamboni_general_mesh_props.paper_size
+            # collect all component print data
+            self.custom_components_on_pages = operators_backend.read_custom_page_layout(ao)
 
         return super().invoke(context, event)
 
@@ -782,12 +807,15 @@ class PolyZamboniExportSVGOperator(bpy.types.Operator, ExportHelper):
             print("POLYZAMBONI WARNING: You exported a mesh that is not fully foldable yet!")
 
         # prepare everything
-        component_print_info = printprepper.create_print_data_for_all_components(ao, printprepper.compute_scaling_factor_for_target_model_height(ao_mesh, 100 * self.curr_len_scale * self.general_settings.target_model_height))
-        page_arrangement = printprepper.fit_components_on_pages(component_print_info,
-                                                                exporters.paper_sizes[self.general_settings.paper_size], 
-                                                                100 * self.curr_len_scale * self.general_settings.page_margin, 
-                                                                100 * self.curr_len_scale * self.general_settings.space_between_components, 
-                                                                self.general_settings.one_material_per_page)
+        if self.user_defined_page_layout_exists and self.general_settings.use_custom_layout:
+            page_arrangement = self.custom_components_on_pages
+        else:
+            component_print_info = printprepper.create_print_data_for_all_components(ao, printprepper.compute_scaling_factor_for_target_model_height(ao_mesh, 100 * self.curr_len_scale * self.general_settings.target_model_height))
+            page_arrangement = printprepper.fit_components_on_pages(component_print_info,
+                                                                    exporters.paper_sizes[self.general_settings.paper_size], 
+                                                                    100 * self.curr_len_scale * self.general_settings.page_margin, 
+                                                                    100 * self.curr_len_scale * self.general_settings.space_between_components, 
+                                                                    self.general_settings.one_material_per_page)
 
         # initialize exporter
         svg_exporter = create_exporter_for_operator(self, "svg")
@@ -828,8 +856,8 @@ class PolyZamboniPageLayoutOperator(bpy.types.Operator):
         max_h_in_cm = 100 * self.curr_len_scale * self.max_comp_height
         curr_page_size = exporters.paper_sizes[self.page_layout_options.paper_size]
         max_scaling = min((curr_page_size[0] - 2 * page_margin_in_cm) / max_w_in_cm, (curr_page_size[1] - 2 * page_margin_in_cm) / max_h_in_cm)
-        self.page_layout_options.sizing_scale = 0.9 * max_scaling
-        self.page_layout_options.target_model_height = 0.9 * max_scaling * self.mesh_height
+        self.page_layout_options.sizing_scale = 0.99 * max_scaling
+        self.page_layout_options.target_model_height = 0.99 * max_scaling * self.mesh_height
 
         wm = context.window_manager
         return wm.invoke_props_dialog(self, title="Page Layout Options")
@@ -906,6 +934,19 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
     bl_idname  = "polyzamboni.page_layout_editing_op"
 
     _exit_on_next_event = False
+    _drawing_handle = None
+
+    def hide_all_drawings(self):
+        if PolyZamboniPageLayoutEditingOperator._drawing_handle is not None:
+            bpy.types.SpaceImageEditor.draw_handler_remove(PolyZamboniPageLayoutEditingOperator._drawing_handle, "WINDOW")
+        PolyZamboniPageLayoutEditingOperator._drawing_handle = None
+
+    def draw_rotation_tool(self, context : bpy.types.Context, event : bpy.types.Event):
+        self.hide_all_drawings()
+        screenspace_anchor_pos = np.array(context.region.view2d.view_to_region(self.rotation_center[0], self.rotation_center[1]))
+        screenspace_mouse_pos = np.array([event.mouse_region_x, event.mouse_region_y])
+        dotted_line_array = make_dotted_lines([screenspace_anchor_pos, screenspace_mouse_pos], 10.0)
+        PolyZamboniPageLayoutEditingOperator._drawing_handle = bpy.types.SpaceImageEditor.draw_handler_add(lines_2D_draw_callback, (dotted_line_array, ORANGE, 1), "WINDOW", "POST_PIXEL")
 
     def invoke(self, context, event):
         ao = context.active_object
@@ -914,7 +955,7 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
             print("cancelled page editing operator")
             return { 'CANCELLED' }
         self.general_mesh_props = self.mesh.polyzamboni_general_mesh_props
-
+        self.draw_settings = context.scene.polyzamboni_drawing_settings
         self.editing_state = operators_backend.PageEditorState.SELECT_PIECES
         self.active_page = None
         self.selected_component_id = None
@@ -928,7 +969,6 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
         self.current_page_of_moving_component = None
         PolyZamboniPageLayoutEditingOperator._exit_on_next_event = False
         self.paper_size = paper_sizes[self.general_mesh_props.paper_size]
-        self.fold_angle_th = context.scene.polyzamboni_drawing_settings.hide_fold_edge_angle_th
 
         # collect all component print data
         component_print_data = create_print_data_for_all_components(ao, self.general_mesh_props.model_scale)
@@ -956,7 +996,8 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
         num_display_pages = self.num_pages
         if self.active_page is not None and self.active_page == self.num_pages:
             num_display_pages += 1
-        show_pages(num_display_pages, components_per_page, self.paper_size, self.active_page, self.selected_component_id, fold_angle_th=self.fold_angle_th)
+        show_pages(num_display_pages, components_per_page, self.paper_size, self.active_page, self.selected_component_id, 
+                   fold_angle_th=self.draw_settings.hide_fold_edge_angle_th, color_components=self.draw_settings.show_component_colors)
         redraw_image_editor(context)
 
     def get_mouse_image_coords(self, context : bpy.types.Context, event :bpy.types.Event):
@@ -1001,6 +1042,7 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
         self.page_anchor_correction_transform = None
         self.current_page_of_moving_component = None
         self.collapse_empty_pages()
+        self.hide_all_drawings()
         self.editing_state = operators_backend.PageEditorState.SELECT_PIECES
         print("edit operator quit!")
 
@@ -1137,13 +1179,15 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
                 edit_transform = cog_to_orig.inverse() @ rotation @ cog_to_orig
                 self.last_valid_editing_transform = edit_transform
                 self.currently_edited_component.page_transform = edit_transform @ self.currently_edited_component_base_page_transform
+                self.draw_rotation_tool(context, event)
                 self.draw_current_page_layout(context)
             return {'RUNNING_MODAL'}
-
         return {'PASS_THROUGH'}
 
     def __del__(self):
-        bpy.context.window_manager.polyzamboni_in_page_edit_mode = False # just to be super safe here
+        # just to be super safe here
+        self.hide_all_drawings()
+        bpy.context.window_manager.polyzamboni_in_page_edit_mode = False 
 
     @classmethod
     def poll(cls, context):

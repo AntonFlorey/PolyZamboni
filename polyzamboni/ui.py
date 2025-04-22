@@ -176,24 +176,59 @@ class PageLayoutPanel(bpy.types.Panel):
         row.label(text="Page Layout Preview", icon="FUND")
         row = layout.row()
         row.operator("polyzamboni.page_layout_op")
-        row = layout.row()
+        editing_box = layout.box()
         if not context.window_manager.polyzamboni_in_page_edit_mode:
-            row.operator("polyzamboni.page_layout_editing_op")
+            editing_box.row().operator("polyzamboni.page_layout_editing_op")
         else:
-            row.operator("polyzamboni.exit_page_layout_editing_op")
+            editing_box.row().operator("polyzamboni.exit_page_layout_editing_op")
+            editing_box.row().label(text="Select piece with LMB", icon="MOUSE_LMB")
+            editing_box.row().label(text="Move selected piece with G", icon="VIEW_PAN")
+            editing_box.row().label(text="Rotate selected piece with R", icon="PREFERENCES")
+        row = layout.row()
+        col1 = row.column(align=True).column_flow(columns=2, align=True)
+        col11 = col1.column(align=True)
+        col12 = col1.column(align=True)
+        col3 = row.column()
+        col11.operator("polyzamboni.export_operator_pdf")
+        col12.operator("polyzamboni.export_operator_svg")
+        col3.label(icon="FILE_IMAGE")
+
+class PageLayoutDrawSettingsPanel(bpy.types.Panel):
+    bl_label = "Render Settings"
+    bl_idname = "POLYZAMBONI_PT_PageLayoutDrawSettingsPanel"
+    bl_space_type = "IMAGE_EDITOR"
+    bl_region_type = "UI"
+    bl_category = "PolyZamboni"
+    bl_parent_id = "POLYZAMBONI_PT_PageLayoutPanel"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context : bpy.types.Context):
+        scene = context.scene
+        drawing_settings = scene.polyzamboni_drawing_settings
+        layout = self.layout
         row = layout.row()
         row.prop(drawing_settings, "show_page_layout")
         row = layout.row()
-        row.prop(drawing_settings, "hide_fold_edge_angle_th")
+        col1 = row.column()
+        col2 = row.column()
+        col1.prop(drawing_settings, "show_component_colors")
+        col2.label(icon="COLOR")
+        row = layout.row()
+        col1 = row.column()
+        col2 = row.column()
+        col1.prop(drawing_settings, "hide_fold_edge_angle_th")
+        col2.label(icon="CON_ROTLIMIT")
 
 def register():
     bpy.utils.register_class(MainPanel)
     bpy.utils.register_class(GlueFlapSettingsPanel)
     bpy.utils.register_class(DrawSettingsPanel)
     bpy.utils.register_class(PageLayoutPanel)
+    bpy.utils.register_class(PageLayoutDrawSettingsPanel)
 
 def unregister():
     bpy.utils.unregister_class(MainPanel)
     bpy.utils.unregister_class(GlueFlapSettingsPanel)
     bpy.utils.unregister_class(DrawSettingsPanel)
     bpy.utils.unregister_class(PageLayoutPanel)
+    bpy.utils.unregister_class(PageLayoutDrawSettingsPanel)
