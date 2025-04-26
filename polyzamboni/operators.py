@@ -1027,6 +1027,8 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
         for page in self.components_on_pages:
             if len(page) != 0:
                 collapsed_pages.append(page)
+            if self.selected_component_id is not None and self.selected_component_id in page.keys():
+                self.page_of_selected_component = len(collapsed_pages) - 1
         self.components_on_pages = collapsed_pages
         self.num_pages = len(collapsed_pages)
 
