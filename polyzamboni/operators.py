@@ -952,7 +952,6 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
         ao = context.active_object
         self.mesh = ao.data
         if not check_if_page_numbers_and_transforms_exist_for_all_components(self.mesh):
-            print("cancelled page editing operator")
             return { 'CANCELLED' }
         self.general_mesh_props = self.mesh.polyzamboni_general_mesh_props
         self.draw_settings = context.scene.polyzamboni_drawing_settings
@@ -987,7 +986,6 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
             self.components_on_pages[page_numbers_per_components[current_component_print_data.og_component_id]][current_component_print_data.og_component_id] = current_component_print_data
         
         context.window_manager.polyzamboni_in_page_edit_mode = True
-        print("Entered page editing mode :)")
         context.window_manager.modal_handler_add(self)
         return {'RUNNING_MODAL'}
     
@@ -1044,7 +1042,6 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
         self.collapse_empty_pages()
         self.hide_all_drawings()
         self.editing_state = operators_backend.PageEditorState.SELECT_PIECES
-        print("edit operator quit!")
 
     def select_component(self, context, component_id, page):
         self.general_mesh_props.selected_component_id = component_id if component_id is not None else -1
@@ -1057,7 +1054,6 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
     def move_component_to_page(self, component : ComponentPrintData, prev_page_index, new_page_index):
         if prev_page_index == new_page_index:
             return
-        print("moving from page", prev_page_index, "to page", new_page_index)
         prev_page_anchor = operators_backend.compute_page_anchor(prev_page_index, 2, self.paper_size, 1)
         new_page_anchor = operators_backend.compute_page_anchor(new_page_index, 2, self.paper_size, 1)
         anchor_translation = prev_page_anchor - new_page_anchor
@@ -1087,7 +1083,6 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
         pass
 
     def exit_modal_mode(self, context):
-        print("Exiting page editing mode :)")
         self.select_component(context, None, None)
         context.window_manager.polyzamboni_in_page_edit_mode = False
         self.save_page_layout()
@@ -1096,10 +1091,8 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
 
     def modal(self, context, event : bpy.types.Event):
         if PolyZamboniPageLayoutEditingOperator._exit_on_next_event:
-            print("Externally triggered exit!")
             return self.exit_modal_mode(context)
         if context.region is None or context.region.view2d is None:
-            print("Left the workspace!")
             return self.exit_modal_mode(context)
         if self.editing_state == operators_backend.PageEditorState.SELECT_PIECES:
             if event.type in {'ESC', 'RET'} and event.value == "PRESS":

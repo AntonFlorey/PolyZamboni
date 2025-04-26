@@ -304,7 +304,7 @@ class PaperModel():
         if self.valid:
             self.write_back_mesh_data()
         else:
-            print("Paper Model data was invalid. Removed all data.")
+            print("POLYZAMBONI ERROR: Paper Model data was invalid. Removed all data.")
             io.remove_all_polyzamboni_data(self.mesh)
             self.zamboni_props.has_attached_paper_model = False
         self.bm.free()

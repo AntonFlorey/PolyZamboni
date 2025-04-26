@@ -314,7 +314,6 @@ def show_pages(num_pages, components_per_page, paper_size = paper_sizes["A4"], s
         ur = page_anchor + np.array([paper_size[0], paper_size[1]])
         ul = page_anchor + np.array([0.0, paper_size[1]])
         current_page_line_coords = [ll, lr, lr, ur, ur, ul, ul, ll]
-        # print(current_page_line_coords)
         if selected_page is not None and selected_page == page_index:
             selected_page_lines += current_page_line_coords
         else:
