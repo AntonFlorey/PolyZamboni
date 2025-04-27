@@ -176,6 +176,7 @@ class PageLayoutPanel(bpy.types.Panel):
         row.label(text="Page Layout Preview", icon="FUND")
         row = layout.row()
         row.operator("polyzamboni.page_layout_op")
+        row.active = not context.window_manager.polyzamboni_in_page_edit_mode
         editing_box = layout.box()
         if not context.window_manager.polyzamboni_in_page_edit_mode:
             editing_box.row().operator("polyzamboni.page_layout_editing_op")

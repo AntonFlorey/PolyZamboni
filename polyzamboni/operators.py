@@ -100,7 +100,7 @@ class InitializeCuttingOperator(bpy.types.Operator):
         if self.double_connected_face_pair_present:
             layout.row().label(text="Some faces touch at more than one edge!", icon="ERROR")
         if self.non_triangulatable_faces_present:
-            layout.row().label(text="Some faces cant be triangulated by PolyZamboni!", icon="ERROR")
+            layout.row().label(text="Some faces can't be triangulated by PolyZamboni!", icon="ERROR")
         if self.max_planarity_score > 0.1:
             layout.row().label(text="Some faces are highly non-planar! (err: {:.2f})".format(self.max_planarity_score))
             layout.row().label(text="This might crash the addon later...")
@@ -916,7 +916,7 @@ class PolyZamboniPageLayoutOperator(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        return _active_object_is_mesh_with_paper_model(context)
+        return _active_object_is_mesh_with_paper_model(context) and not context.window_manager.polyzamboni_in_page_edit_mode
 
 class PolyZamboniExitPageLayoutEditingOperator(bpy.types.Operator):
     """ Exit the page layout editing mode """
