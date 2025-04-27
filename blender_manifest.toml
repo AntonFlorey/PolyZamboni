@@ -26,6 +26,7 @@ wheels = [
   "./wheels/pyparsing-3.2.1-py3-none-any.whl",
   "./wheels/python_dateutil-2.9.0.post0-py2.py3-none-any.whl",
   "./wheels/six-1.17.0-py2.py3-none-any.whl",
+  "./wheels/fonttools-4.57.0-py3-none-any.whl",
   "./wheels/matplotlib-3.10.0-cp311-cp311-win_amd64.whl",
   "./wheels/matplotlib-3.10.0-cp311-cp311-macosx_11_0_arm64.whl",
   "./wheels/matplotlib-3.10.0-cp311-cp311-macosx_10_12_x86_64.whl",
