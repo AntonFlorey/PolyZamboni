@@ -622,6 +622,42 @@ def glue_flap_collisions_dict_valid(mesh : Mesh):
     return True
 _all_validity_check_functions.append(glue_flap_collisions_dict_valid)
 
+# number of the page the component is printed on (chacks omitted)
+
+def page_numbers_exist(mesh : Mesh):
+    return "polyzamboni_page_numbers" in mesh
+
+def write_page_numbers(mesh : Mesh, page_numbers_per_component):
+    mesh["polyzamboni_page_numbers"] = {str(component_id) : page_number for component_id, page_number in page_numbers_per_component.items()}
+
+def read_page_numbers(mesh : Mesh):
+    if not page_numbers_exist(mesh):
+        return None
+    return {int(component_id) : page_number for component_id, page_number in mesh["polyzamboni_page_numbers"].to_dict().items()}
+
+def remove_page_numbers(mesh : Mesh):
+    if page_numbers_exist(mesh):
+        del mesh["polyzamboni_page_numbers"]
+_all_removal_functions.append(remove_page_numbers)
+
+# page transforms per component (checks omitted)
+
+def page_transforms_exist(mesh : Mesh):
+    return "polyzamboni_page_transforms" in mesh
+
+def write_page_transforms(mesh : Mesh, page_transforms_per_component):
+    mesh["polyzamboni_page_transforms"] = {str(component_id) : serialize_affine_transform(page_transform) for component_id, page_transform in page_transforms_per_component.items()}
+
+def read_page_transforms(mesh : Mesh):
+    if not page_transforms_exist(mesh):
+        return None
+    return {int(component_id) : parse_affine_transform(page_transform) for component_id, page_transform in mesh["polyzamboni_page_transforms"].to_dict().items()}
+
+def remove_page_transforms(mesh : Mesh):
+    if page_transforms_exist(mesh):
+        del mesh["polyzamboni_page_transforms"]
+_all_removal_functions.append(remove_page_transforms)
+
 def remove_all_polyzamboni_data(mesh : Mesh):
     for removal_function in _all_removal_functions:
         removal_function(mesh)

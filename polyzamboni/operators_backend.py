@@ -2,12 +2,17 @@
 This file contains several high level functions that meaningful combine multiple polyzamboni operations.
 """
 
-from bpy.types import Mesh
+from bpy.types import Mesh, Object
 from bmesh.types import BMesh
+from enum import Enum
+import math
+import numpy as np
 
 from . import geometry
 from . import io
 from .papermodel import PaperModel
+from .printprepper import create_print_data_for_all_components, fit_components_on_pages, ComponentPrintData, ColoredTriangleData
+from .exporters import paper_sizes
 
 #################################
 #    Init, delete and update    #
@@ -99,3 +104,95 @@ def recompute_all_glue_flaps(mesh : Mesh):
 def compute_build_step_numbers(mesh : Mesh, selected_start_face_ids):
     with PaperModel.from_existing(mesh) as papermodel:
         papermodel.compute_build_step_numbers(selected_start_face_ids)
+
+#################################
+#      Page Layout Editing      #
+#################################
+
+def read_custom_page_layout(obj : Object):
+    mesh : Mesh = obj.data
+    general_mesh_props = mesh.polyzamboni_general_mesh_props
+    # collect all component print data
+    component_print_data = create_print_data_for_all_components(obj, general_mesh_props.model_scale)
+
+    # read and set correct page transforms
+    page_transforms_per_component = io.read_page_transforms(mesh)
+    current_component_print_data : ComponentPrintData
+    for current_component_print_data in component_print_data:
+        current_component_print_data.page_transform = page_transforms_per_component[current_component_print_data.og_component_id]
+
+    # create page layout
+    page_numbers_per_components = io.read_page_numbers(mesh)
+    num_pages = max(page_numbers_per_components.values()) + 1 if len(page_numbers_per_components) > 0 else 0
+    custom_components_on_pages = [[] for _ in range(num_pages)]
+    for current_component_print_data in component_print_data:
+        custom_components_on_pages[page_numbers_per_components[current_component_print_data.og_component_id]].append(current_component_print_data)
+    return custom_components_on_pages
+
+def compute_and_save_page_layout(obj : Object, scaling_factor, paper_size, page_margin, component_margin, separate_materials):
+    page_size = paper_sizes[paper_size]
+    component_print_data = create_print_data_for_all_components(obj, scaling_factor)
+    print_data_on_pages = fit_components_on_pages(component_print_data, page_size, page_margin, component_margin, separate_materials)
+    # store computed layout
+    mesh = obj.data
+    general_props = mesh.polyzamboni_general_mesh_props
+    general_props.model_scale = scaling_factor
+    general_props.paper_size = paper_size
+    page_numbers_per_component = {}
+    page_transforms_per_component = {}
+    for page_index, component_print_data_on_page in enumerate(print_data_on_pages):
+        current_print_data : ComponentPrintData
+        for current_print_data in component_print_data_on_page:
+            current_c_id = current_print_data.og_component_id
+            page_numbers_per_component[current_c_id] = page_index
+            page_transforms_per_component[current_c_id] = current_print_data.page_transform
+    io.write_page_numbers(mesh, page_numbers_per_component)
+    io.write_page_transforms(mesh, page_transforms_per_component)
+
+class PageEditorState(Enum):
+    SELECT_PIECES = 0
+    MOVE_PIECE = 1
+    ROTATE_PIECE = 2
+
+def find_page_under_mouse_position(pos_x, pos_y, pages, paper_size, margin_between_pages = 1.0, pages_per_row = 2):
+    row_grid_size = paper_size[0] + margin_between_pages
+    row_index = math.floor(pos_x / row_grid_size)
+    if pos_x < 0:
+        row_index -= 1
+    if row_index < 0 or row_index >= pages_per_row or pos_x - row_index * row_grid_size > paper_size[0]:
+        return None
+    transformed_pos_y = -(pos_y - paper_size[1])
+    col_grid_size = paper_size[1] + margin_between_pages
+    col_index = math.floor(transformed_pos_y / col_grid_size)
+    if transformed_pos_y < 0:
+        col_index -= 1
+    if col_index < 0 or transformed_pos_y - col_index * col_grid_size > paper_size[1]:
+        return None
+    # compute page index
+    hovered_page_index = pages_per_row * col_index + row_index
+    if hovered_page_index <= pages:
+        return hovered_page_index
+    else:
+        return None
+
+def compute_page_anchor(page_index, pages_per_row, paper_size, margin_between_pages):
+    row_index = page_index % pages_per_row
+    col_index = page_index // pages_per_row
+    return np.array([row_index * (paper_size[0] + margin_between_pages), -col_index * (paper_size[1] + margin_between_pages)])
+
+def find_papermodel_piece_under_mouse_position(pos_x, pos_y, print_data_on_pages, current_page_index, paper_size, pages_per_row = 2, margin_between_pages = 1):
+    if current_page_index is None or current_page_index >= len(print_data_on_pages):
+        return None
+    page_anchor = compute_page_anchor(current_page_index, pages_per_row, paper_size, margin_between_pages)
+    current_print_data : ComponentPrintData
+    for current_print_data in print_data_on_pages[current_page_index].values():
+        colored_triangle : ColoredTriangleData
+        for colored_triangle in current_print_data.colored_triangles:
+            if geometry.point_in_2d_triangle(np.array([pos_x, pos_y]) - page_anchor, *[current_print_data.page_transform * coord for coord in colored_triangle.coords]):
+                return current_print_data.og_component_id
+    return None
+
+def find_page_under_papermodel_piece(component_print_data : ComponentPrintData, component_page, bonus_transform : geometry.AffineTransform2D, pages, paper_size, margin_between_pages = 1.0, pages_per_row = 2):
+    component_cog = component_print_data.get_cog()
+    image_space_cog = (bonus_transform @ component_print_data.page_transform) * component_cog + compute_page_anchor(component_page, pages_per_row, paper_size, margin_between_pages)
+    return find_page_under_mouse_position(image_space_cog[0], image_space_cog[1], pages, paper_size, margin_between_pages, pages_per_row)

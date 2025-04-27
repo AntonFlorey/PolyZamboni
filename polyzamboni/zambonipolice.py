@@ -34,3 +34,21 @@ def check_if_build_step_numbers_exist_and_make_sense(mesh : Mesh):
     connected_components = io.read_connected_component_sets(mesh)
     return set(connected_components.keys()).issubset(build_step_numbers.keys()) and set(build_step_numbers.values()) == set(range(1, len(connected_components.keys()) + 1))
     
+def check_if_page_numbers_and_transforms_exist_for_all_components(mesh : Mesh):
+    """ Assumes that other polyzamboni data exists. """
+    if not io.page_numbers_exist(mesh):
+        return False
+    if not io.page_transforms_exist(mesh):
+        return False
+    if not io.connected_components_exist(mesh):
+        return False
+    if not io.components_with_cycles_set_exist(mesh):
+        return False
+    page_numbers = io.read_page_numbers(mesh)
+    page_transforms = io.read_page_transforms(mesh)
+    if set(page_numbers.keys()) != set(page_transforms.keys()):
+        return False
+    cyclic_components = io.read_components_with_cycles_set(mesh)
+    connected_components = io.read_connected_component_sets(mesh)
+    unfoldable_component_ids = set(connected_components.keys()).difference(cyclic_components)
+    return unfoldable_component_ids == set(page_numbers.keys())

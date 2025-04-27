@@ -50,8 +50,9 @@ class ComponentPrintData():
     """ Instances of this class store all data necessary to print a connected component. """ 
     
     def __init__(self):
-        self.lower_left = np.zeros(2)
-        self.upper_right = np.zeros(2)
+        self.og_component_id = 0
+        self.lower_left = np.inf * np.ones(2) # post page transform bounding box
+        self.upper_right = -np.inf * np.ones(2) # post page transform bounding box
         self.cut_edges = []
         self.fold_edges = []
         self.fold_edges_at_flaps = []
@@ -60,6 +61,7 @@ class ComponentPrintData():
         self.dominating_mat_index = 0 # we need this if different materials should be printed on different pages
         self.build_step_number = 0
         self.build_step_number_position = np.zeros(2)
+        self.page_transform : AffineTransform2D = AffineTransform2D()
         pass
     
     def __update_bb_after_adding_edge(self, edge_coords):
@@ -101,11 +103,17 @@ class ComponentPrintData():
         # collect all coords along cut edges (not glue flaps for now)
         cut_edge_first_coords = [cut_edge_data.coords[0] for cut_edge_data in self.cut_edges]
         fold_edge_at_glue_flap_first_coords = [fold_edge_at_flap_data.coords[0] for fold_edge_at_flap_data in self.fold_edges_at_flaps]
-        boundary_coords = np.array(cut_edge_first_coords + fold_edge_at_glue_flap_first_coords)
+        boundary_coords = np.array([self.page_transform * coord for coord in cut_edge_first_coords + fold_edge_at_glue_flap_first_coords])
         mean_shifted_coords = boundary_coords - np.mean(boundary_coords, axis=0)
         corr_mat = mean_shifted_coords.T @ mean_shifted_coords
         eigenvalues, eigenvectors = np.linalg.eigh(corr_mat)
         return np.mean(boundary_coords, axis=0), eigenvectors
+
+    def get_cog(self):
+        """ Center of gravity pre page transform """
+        cut_edge_first_coords = [cut_edge_data.coords[0] for cut_edge_data in self.cut_edges]
+        fold_edge_at_glue_flaps_first_coords = [fold_edge_at_flap_data.coords[0] for fold_edge_at_flap_data in self.fold_edges_at_flaps]
+        return np.mean(cut_edge_first_coords + fold_edge_at_glue_flaps_first_coords, axis=0)
 
     def align_horizontally_via_pca(self):
         boundary_cog, pca_basis = self.__pca()
@@ -115,7 +123,7 @@ class ComponentPrintData():
         PCA_B = np.column_stack([long_axis_eigvec, short_axis_eigvec])
         rotate_x_axis_to_long_axis = AffineTransform2D(linear_part=np.linalg.inv(PCA_B))
         horizontal_alignment_transform = shift_cog_to_orig.inverse() @ rotate_x_axis_to_long_axis @ shift_cog_to_orig
-        self.apply_affine_transform_to_all_coords(horizontal_alignment_transform)
+        self.concat_page_transform(horizontal_alignment_transform)
 
     def align_vertically_via_pca(self):
         boundary_cog, pca_basis = self.__pca()
@@ -124,23 +132,21 @@ class ComponentPrintData():
         short_axis_eigvec = np.array([-long_axis_eigvec[1], long_axis_eigvec[0]])
         rotate_y_axis_to_long_axis = AffineTransform2D(linear_part=np.linalg.inv(np.column_stack([-short_axis_eigvec, long_axis_eigvec])))
         vertical_alignment_transform = shift_cog_to_orig.inverse() @ rotate_y_axis_to_long_axis @ shift_cog_to_orig
-        self.apply_affine_transform_to_all_coords(vertical_alignment_transform)
+        self.concat_page_transform(vertical_alignment_transform)
 
-    def apply_affine_transform_to_all_coords(self, affine_transform):
+    def __adjust_bounding_box_to_page_trasform(self):
         self.lower_left = np.inf * np.ones(2)
         self.upper_right = -np.inf * np.ones(2)
-
-        # edges
         for edge_data in self.__all_edge_data():
-            edge_data.coords = tuple([affine_transform * coord for coord in edge_data.coords])
-            self.__update_bb_after_adding_edge(edge_data.coords)
+            transformed_edge = tuple([self.page_transform * coord for coord in edge_data.coords])
+            self.__update_bb_after_adding_edge(transformed_edge)
 
-        # triangles
-        for triangle_data in self.colored_triangles:
-            triangle_data.coords = tuple([affine_transform * coord for coord in triangle_data.coords])
+    def set_new_page_transform(self, new_page_transform):
+        self.page_transform = new_page_transform
+        self.__adjust_bounding_box_to_page_trasform()
 
-        # build step number
-        self.build_step_number_position = affine_transform * self.build_step_number_position
+    def concat_page_transform(self, latest_page_trasform):
+        self.set_new_page_transform(latest_page_trasform @ self.page_transform)
 
 class PagePartitionNode():
     def __init__(self, ll, ur):
@@ -167,6 +173,8 @@ def compute_max_print_component_dimensions(obj : Object):
     local_coordinate_systems = io.read_local_coordinate_systems_per_face(mesh)
     affine_transforms_to_root = io.read_affine_transforms_to_roots(mesh)
     glue_flap_triangles = io.read_glue_flap_geometry_per_edge_per_component(mesh)
+    glue_flap_halfedge_dict = io.read_glueflap_halfedge_dict(mesh)
+    halfedge_to_face_dict = utils.construct_halfedge_to_face_dict(bm)
 
     max_height = -np.inf
     max_width = -np.inf
@@ -190,7 +198,7 @@ def compute_max_print_component_dimensions(obj : Object):
                 vertex_coords_3d = [v.co for v in curr_edge.verts]    
                 vertex_coords_unfolded = [get_unfolded_vertex_coord(co_3d, face_index) for co_3d in vertex_coords_3d]
                 if curr_edge.is_boundary or utils.mesh_edge_is_cut(curr_edge.index, edge_constraints):
-                    if glueflaps.check_if_edge_has_flap_geometry_attached_to_it(mesh, c_id, curr_edge, glue_flap_triangles):
+                    if glueflaps.check_if_edge_of_face_has_glue_flap(curr_edge.index, face_index, glue_flap_halfedge_dict, halfedge_to_face_dict):
                         # this is a fold edge of a glue flap
                         curr_component_print_data.add_fold_edges_at_flaps(FoldEdgeAtGlueFlapData(tuple(vertex_coords_unfolded), curr_edge.is_convex, curr_edge.calc_face_angle(), curr_edge.index))
                     else:
@@ -238,6 +246,8 @@ def create_print_data_for_all_components(obj : Object, scaling_factor):
     unfolded_face_triangles = io.read_facewise_triangles_per_component(mesh)
     glue_flap_triangles = io.read_glue_flap_geometry_per_edge_per_component(mesh)
     build_step_numbers = io.read_build_step_numbers(mesh)
+    glue_flap_halfedge_dict = io.read_glueflap_halfedge_dict(mesh)
+    halfedge_to_face_dict = utils.construct_halfedge_to_face_dict(bm)
 
     all_print_data = [] 
     for c_id, curr_connected_component_faces in connected_components.items():
@@ -246,6 +256,7 @@ def create_print_data_for_all_components(obj : Object, scaling_factor):
         if c_id in cyclic_components:
             continue
         curr_component_print_data = ComponentPrintData()
+        curr_component_print_data.og_component_id = c_id
 
         def get_unfolded_vertex_coord(coord, face_index):
             return unfolding.get_globally_consistent_2d_coord_in_face(mesh, coord, face_index, c_id, local_coordinate_systems, affine_transforms_to_root)
@@ -279,7 +290,7 @@ def create_print_data_for_all_components(obj : Object, scaling_factor):
                 dist_cog_edge_sum += signed_point_dist_to_line(face_cog, vertex_coords_unfolded[0], vertex_coords_unfolded[1])
                 if curr_edge.is_boundary or utils.mesh_edge_is_cut(curr_edge.index, edge_constraints):
                     # check if this edge has a glue flap attached to it
-                    if glueflaps.check_if_edge_has_flap_geometry_attached_to_it(mesh, c_id, curr_edge.index, glue_flap_triangles):
+                    if glueflaps.check_if_edge_of_face_has_glue_flap(curr_edge.index, face_index, glue_flap_halfedge_dict, halfedge_to_face_dict):
                         # this is a fold edge of a glue flap
                         curr_component_print_data.add_fold_edges_at_flaps(FoldEdgeAtGlueFlapData(tuple(vertex_coords_unfolded), curr_edge.is_convex, curr_edge.calc_face_angle(), curr_edge.index))
                     else:
@@ -366,7 +377,7 @@ def partition_node_after_component_insertion(component : ComponentPrintData, nod
     if comp_width >= node.width and comp_height >= node.height:
         return # no splits
     
-    # split along longer edge (I dont know what is better here)
+    # split along longer edge (I dont know what is better here tbh)
     if comp_height >= comp_width:
         b1_ll = node.lower_left_corner + np.array([comp_width + component_margin, 0])
         b1_ur = node.upper_right_corner
@@ -399,8 +410,9 @@ def recursively_collect_all_page_components(node : PagePartitionNode, component_
         return
     if node.contained_component_id is not None:
         component_in_node : ComponentPrintData = component_list[node.contained_component_id]
-        translation =  AffineTransform2D(affine_part = node.lower_left_corner - component_in_node.lower_left)
-        target_list.append({"print data" : component_in_node, "page coord transform" : translation})
+        translation = AffineTransform2D(affine_part = node.lower_left_corner - component_in_node.lower_left)
+        component_in_node.concat_page_transform(translation)
+        target_list.append(component_in_node)
     recursively_collect_all_page_components(node.child_one, component_list, target_list)
     recursively_collect_all_page_components(node.child_two, component_list, target_list)
 
@@ -440,7 +452,7 @@ def fit_components_on_pages(components, page_size, page_margin, component_margin
                 # recursively search for free space
                 for page_root in page_list:
                     recursive_search_for_all_free_spaces(component_print_data, page_root, node_candidates)
-
+    
         if len(node_candidates) == 0:
             component_print_data.align_vertically_via_pca() # back to vertical alignment...
             # create a new page for this component
@@ -448,7 +460,7 @@ def fit_components_on_pages(components, page_size, page_margin, component_margin
             page_partitions.setdefault(component_mat_id, []).append(new_page)
             # add component to the created page
             if not component_fits_in_page_part_node(component_print_data, new_page):
-                print("POLYZAMBONI WARNING: Unfolded connected component does not fit on one page! ")
+                print("POLYZAMBONI WARNING: Unfolded connected component does not fit on one page!")
             new_page.contained_component_id = current_component_id
             partition_node_after_component_insertion(component_print_data, new_page, component_margin)
         else:
@@ -457,7 +469,6 @@ def fit_components_on_pages(components, page_size, page_margin, component_margin
             partition_node_after_component_insertion(component_print_data, smallest_viable_node, component_margin)
 
     # collect all components per page
-
     page_arrangement = []
     print("POLYZAMBONI INFO: Paper model instruction fits on", sum([len(roots) for roots in page_partitions.values()]), "pages.")
     for page_root_list in page_partitions.values():

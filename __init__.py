@@ -1,7 +1,7 @@
 bl_info = {
     "name": "PolyZamboni",
     "author": "Anton Florey",
-    "version": (1,0,1),
+    "version": (1,1,0),
     "blender": (4,1,0),
     "location": "View3D",
     "warning": "",
@@ -37,6 +37,7 @@ def register():
 
 def unregister():
     drawing.hide_all_drawings()
+    drawing.hide_pages()
     operators.unregister()
     ui.unregister()
     properties.unregister()

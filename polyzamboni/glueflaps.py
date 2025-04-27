@@ -39,10 +39,10 @@ def compute_3d_glue_flap_triangles_inside_face(mesh : Mesh, face_index, edge : b
     triangles_in_3d = [tuple(reversed([geometry.to_world_coords(edge_to_local_coords * local_coord, *local_coords) for local_coord in triangle])) for triangle in triangles_flipped]
     return triangles_in_3d
 
-def check_if_edge_has_flap_geometry_attached_to_it(mesh : Mesh, component_index, edge_index, 
-                                                   glue_flap_triangles_2d = None):
-    glue_flaps_per_edge = io.read_glue_flap_2d_triangles_of_component(mesh, component_index) if glue_flap_triangles_2d is None else glue_flap_triangles_2d[component_index]
-    return edge_index in glue_flaps_per_edge.keys()
+def check_if_edge_of_face_has_glue_flap(edge_index, face_index, glue_flap_halfedge_dict, halfedge_to_face_dict):
+    if edge_index not in glue_flap_halfedge_dict.keys():
+        return False
+    return face_index == halfedge_to_face_dict[glue_flap_halfedge_dict[edge_index]].index
 
 def component_has_overlapping_glue_flaps(mesh : Mesh, component_id, 
                                          glue_flap_collision_dict = None):

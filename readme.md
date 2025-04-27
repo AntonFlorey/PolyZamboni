@@ -52,7 +52,7 @@ PolyZamboni renders feedback on top of your models. Dotted lines on top of mesh 
 - **Green edges:** Manually glued edges (can't be automatically cut)
 - **Blue edges:** Atomatically added cuts
 
-All connected face regions, separated by cut edges, are visualized via colored patches on top of mesh faces. These regions colored based on their quality:
+All connected face regions, separated by cut edges, are visualized via colored patches on top of mesh faces. These regions are colored based on their quality:
 - **Red regions:** These regions can not be unfolded onto a piece of paper. If any of these regions exist, no paper model can be created.
 - **Orange regions:** Although all faces can be unfolded, they would overlap on the plane. This makes the resulting instructions fairly unusable in practice.
 - **Yellow regions:** Almost perfect regions. Only the flaps used to glue pieces together overlap on the final print.
@@ -64,8 +64,22 @@ Glue flaps are also visualized on top of faces at the position they will have in
     <img src ="images/SpotFeedbackAnnotated.png">
 </p>
 
+### Edit the page layout
+Before exporting the instructions for your model, PolyZamboni allows you to edit the final page layout. For this go to the `UV or Image-Editor` and open the sidebar. After clicking on `Create print review` and setting some layout options, a preview of all pages and papermodel pieces should appear on your screen.
+
+<p float="middle">
+    <img src ="images/PieceSelectionAnim.gif">
+</p>
+
+You can then edit the layout by clicking on `Edit page layout`. Here you can do the following things:
+- Select pieces by left-clicking on them.
+- Move a selected piece by pressing `g`. Behaves similar to Blender's move operator.
+- Rotate a selected piece by pressing `r`. Behaves similar to Blender's rotate operator.
+
+**Note:** Changes to the papermodel cuts will remove all existing page layout information. Make sure you are happy with your cuts and resulting pieces before you finalize the page layout.
+
 ### Exporting instruction sheets 
-Once you are satisfied with your edits, you can export the paper model instruction. Go to **File-><ins>E</ins>xport->Polyzamboni Export PDF/SVG** or just click in the respective buttons in the side panel. PolyZamboni lets you fully customize the instructions appearance. Here is a list of export options:
+Once you are satisfied with your edits, you can export the paper model instruction. Go to **File-><ins>E</ins>xport->Polyzamboni Export PDF/SVG** or just click in the respective buttons in the sidebar. PolyZamboni lets you fully customize the instructions appearance. Here is a list of export options:
 - Size of the final model. You can either specify a target model height or directly define the model scale.
 - Paper size, page margin and distance between mesh pieces.
 - Font sizes and colors.
