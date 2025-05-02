@@ -150,8 +150,8 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
             line.zorder = zorder
         ax.add_line(line)
 
-    def __write_text(self, ax : axes.Axes, text, coord, text_size, color, page_transform : AffineTransform2D):
-        page_coord_text = self.__transform_component_coord_to_page_coord(coord, page_transform, self.prints_on_model_inside)
+    def __write_text(self, ax : axes.Axes, text, coord, text_size, color, page_transform : AffineTransform2D, page_flipped = False):
+        page_coord_text = self.__transform_component_coord_to_page_coord(coord, page_transform, page_flipped)
         if text == "6" or text == "9":
             text += "."
         ax.text(page_coord_text[0], page_coord_text[1], text, fontsize=text_size, ha="center", va="center", color=color)
@@ -174,25 +174,25 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
                 rotation=np.rad2deg(angle), rotation_mode="anchor",
                 color=color)
 
-    def __draw_cut_edge(self, ax : axes.Axes, cut_edge_data : CutEdgeData, page_transform : AffineTransform2D):
+    def __draw_cut_edge(self, ax : axes.Axes, cut_edge_data : CutEdgeData, page_transform : AffineTransform2D, page_flipped = False):
         # transform line coords and draw
-        page_coords = self.__transform_component_line_coords_to_page_coord(cut_edge_data.coords, page_transform, self.prints_on_model_inside)
+        page_coords = self.__transform_component_line_coords_to_page_coord(cut_edge_data.coords, page_transform, page_flipped)
         self.__draw_line(ax, page_coords, self.cut_edge_linestyle, color=self.__linear_to_srgb(self.color_of_lines))
 
         # add edge number
         if not self.show_edge_numbers:
             return
-        self.__write_text_along_line(ax, page_coords, str(cut_edge_data.edge_index), self.edge_number_font_size, color=self.__linear_to_srgb(self.color_of_edge_numbers), offset_cm=self.edge_number_offset, flipped=self.prints_on_model_inside)
+        self.__write_text_along_line(ax, page_coords, str(cut_edge_data.edge_index), self.edge_number_font_size, color=self.__linear_to_srgb(self.color_of_edge_numbers), offset_cm=self.edge_number_offset, flipped=page_flipped)
 
-    def __draw_fold_edge(self, ax : axes.Axes, fold_edge_data : FoldEdgeData, page_transform : AffineTransform2D):
+    def __draw_fold_edge(self, ax : axes.Axes, fold_edge_data : FoldEdgeData, page_transform : AffineTransform2D, page_flipped = False):
         if fold_edge_data.fold_angle <= self.fold_hide_threshold_angle:
             return # dont draw almost flat folds
         # transform line coords
-        page_coords = self.__transform_component_line_coords_to_page_coord(fold_edge_data.coords, page_transform, self.prints_on_model_inside)
+        page_coords = self.__transform_component_line_coords_to_page_coord(fold_edge_data.coords, page_transform, page_flipped)
         self.__draw_line(ax, page_coords, self.convex_fold_edge_linestyle if fold_edge_data.is_convex else self.concave_fold_edge_linestyle, color=self.__linear_to_srgb(self.color_of_lines))
 
-    def __draw_fold_edge_at_glue_flap(self, ax : axes.Axes, fold_edge_at_flap_data : FoldEdgeAtGlueFlapData, page_transform : AffineTransform2D):
-        page_coords = self.__transform_component_line_coords_to_page_coord(fold_edge_at_flap_data.coords, page_transform, self.prints_on_model_inside)
+    def __draw_fold_edge_at_glue_flap(self, ax : axes.Axes, fold_edge_at_flap_data : FoldEdgeAtGlueFlapData, page_transform : AffineTransform2D, page_flipped = False):
+        page_coords = self.__transform_component_line_coords_to_page_coord(fold_edge_at_flap_data.coords, page_transform, page_flipped)
         if fold_edge_at_flap_data.fold_angle <= self.fold_hide_threshold_angle:
             self.__draw_line(ax, page_coords, self.cut_edge_linestyle, color=self.__linear_to_srgb(self.color_of_lines))
         else:
@@ -200,11 +200,11 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
         # add edge number
         if not self.show_edge_numbers:
             return
-        self.__write_text_along_line(ax, page_coords, str(fold_edge_at_flap_data.edge_index), self.edge_number_font_size, color=self.__linear_to_srgb(self.color_of_edge_numbers), offset_cm=self.edge_number_offset, flipped=self.prints_on_model_inside)
+        self.__write_text_along_line(ax, page_coords, str(fold_edge_at_flap_data.edge_index), self.edge_number_font_size, color=self.__linear_to_srgb(self.color_of_edge_numbers), offset_cm=self.edge_number_offset, flipped=page_flipped)
 
-    def __draw_glue_flap_edge(self, ax : axes.Axes, glue_flap_edge_data : GlueFlapEdgeData, page_transform : AffineTransform2D):
+    def __draw_glue_flap_edge(self, ax : axes.Axes, glue_flap_edge_data : GlueFlapEdgeData, page_transform : AffineTransform2D, page_flipped = False):
         # transform line coords and draw
-        page_coords = self.__transform_component_line_coords_to_page_coord(glue_flap_edge_data.coords, page_transform, self.prints_on_model_inside)
+        page_coords = self.__transform_component_line_coords_to_page_coord(glue_flap_edge_data.coords, page_transform, page_flipped)
         self.__draw_line(ax, page_coords, self.glue_flap_linestyle, color=self.__linear_to_srgb(self.color_of_lines), zorder=-2)
 
     def __create_thickened_triangle_coords(self, triangle_coords, eps):
@@ -271,11 +271,11 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
         draw_polygon = patches.Polygon(triangle_coords, closed=True, fill=True, facecolor=tuple(color))
         ax.add_patch(draw_polygon)
 
-    def __draw_colored_triangle(self, ax : axes.Axes, colored_tri_data : ColoredTriangleData, page_transform : AffineTransform2D):
+    def __draw_colored_triangle(self, ax : axes.Axes, colored_tri_data : ColoredTriangleData, page_transform : AffineTransform2D, page_flipped = False):
         if colored_tri_data.absolute_texture_path is None and colored_tri_data.color is None:
             return # nothing to draw here
         
-        triangle_page_coords = self.__transform_component_triangle_coords_to_page_coords(colored_tri_data.coords, page_transform, self.prints_on_model_inside)
+        triangle_page_coords = self.__transform_component_triangle_coords_to_page_coords(colored_tri_data.coords, page_transform, page_flipped)
         thickened_triangle_coords = self.__create_thickened_triangle_coords(triangle_page_coords, 0.05)
 
         if colored_tri_data.absolute_texture_path is not None:
@@ -291,10 +291,10 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
         fig, ax = self.__create_new_page()
         
         component_print_data : ComponentPrintData
-        if only_textures:
+        if draw_textures and only_textures:
             for component_print_data in components_on_page:
                 for colored_triangle_data in component_print_data.colored_triangles:
-                    self.__draw_colored_triangle(ax, colored_triangle_data, component_print_data.page_transform)
+                    self.__draw_colored_triangle(ax, colored_triangle_data, component_print_data.page_transform, page_flipped=(not self.prints_on_model_inside))
             return fig, ax
 
         # draw all lines and text and maybe colored triangles
@@ -304,23 +304,24 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
                                 component_print_data.build_step_number_position,
                                 self.build_step_number_font_size,
                                 self.__linear_to_srgb(self.builf_step_number_color),
-                                component_print_data.page_transform)
+                                component_print_data.page_transform,
+                                self.prints_on_model_inside)
 
             for cut_edge_print_data in component_print_data.cut_edges:
-                self.__draw_cut_edge(ax, cut_edge_print_data, component_print_data.page_transform)
+                self.__draw_cut_edge(ax, cut_edge_print_data, component_print_data.page_transform, self.prints_on_model_inside)
             
             for fold_edge_print_data in component_print_data.fold_edges:
-                self.__draw_fold_edge(ax, fold_edge_print_data, component_print_data.page_transform)
+                self.__draw_fold_edge(ax, fold_edge_print_data, component_print_data.page_transform, self.prints_on_model_inside)
 
             for fold_edge_at_flap_print_data in component_print_data.fold_edges_at_flaps:
-                self.__draw_fold_edge_at_glue_flap(ax, fold_edge_at_flap_print_data, component_print_data.page_transform)
+                self.__draw_fold_edge_at_glue_flap(ax, fold_edge_at_flap_print_data, component_print_data.page_transform, self.prints_on_model_inside)
 
             for glue_flap_edge_data in component_print_data.glue_flap_edges:
-                self.__draw_glue_flap_edge(ax, glue_flap_edge_data, component_print_data.page_transform)
+                self.__draw_glue_flap_edge(ax, glue_flap_edge_data, component_print_data.page_transform, self.prints_on_model_inside)
 
             if draw_textures:
                 for colored_triangle_data in component_print_data.colored_triangles:
-                    self.__draw_colored_triangle(ax, colored_triangle_data, component_print_data.page_transform)
+                    self.__draw_colored_triangle(ax, colored_triangle_data, component_print_data.page_transform, self.prints_on_model_inside)
         return fig, ax
 
     def export(self, print_ready_pages, output_file_name_prefix):
