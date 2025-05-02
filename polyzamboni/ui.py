@@ -215,6 +215,8 @@ class PageLayoutDrawSettingsPanel(bpy.types.Panel):
         col1.prop(drawing_settings, "show_component_colors")
         col2.label(icon="COLOR")
         row = layout.row()
+        row.prop(drawing_settings, "show_build_step_numbers")
+        row = layout.row()
         col1 = row.column()
         col2 = row.column()
         col1.prop(drawing_settings, "hide_fold_edge_angle_th")

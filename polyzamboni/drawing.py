@@ -5,9 +5,11 @@ Handling of all the user feedback rendering.
 import bpy
 import bmesh
 import gpu
+import blf
 import numpy as np
 from gpu_extras.batch import batch_for_shader
 import time
+from enum import Enum
 
 from . import drawing_backend
 from . import io
@@ -51,6 +53,7 @@ _drawing_handle_auto_completed_cuts = None
 _drawing_handle_region_quality_triangles = None
 _drawing_handle_glue_flaps = None
 _drawing_handle_pages = None
+_drawing_handle_step_numbers = None
 
 class ColorGenerator():
     """ A simple color generator"""
@@ -76,33 +79,6 @@ class ColorGenerator():
         col = self.colors[self.index]
         self.index = (self.index + 1) % len(self.colors)
         return col
-    
-def make_dotted_lines(line_array, target_line_length, max_segments = 100, linestyle = (1,1)):
-    if target_line_length <= 0:
-        return line_array
-    dotted_lines_array = []
-    line_index = 0
-    while line_index < len(line_array):
-        v_from = np.asarray(line_array[line_index])
-        v_to = np.asarray(line_array[line_index + 1])
-
-        line_len = np.linalg.norm(v_from - v_to)
-        segments = min(int(line_len / target_line_length), max_segments)
-        
-        total_segments = 2 * segments + 1
-        segment_start_index = 0
-        style_len = len(linestyle)
-        assert (style_len % 2) == 0
-        style_index = 0
-        while segment_start_index < total_segments:
-            t_from = segment_start_index / total_segments
-            t_to = min((segment_start_index + linestyle[style_index]) / total_segments, 1.0)
-            dotted_lines_array.append((1.0 - t_from) * v_from + t_from * v_to)
-            dotted_lines_array.append((1.0 - t_to) * v_from + t_to * v_to)
-            segment_start_index += linestyle[style_index] + linestyle[style_index + 1]
-            style_index = (style_index + 2) % style_len
-        line_index += 2
-    return dotted_lines_array
 
 #################################
 #     General Draw Callbacks    #
@@ -183,7 +159,7 @@ def show_user_provided_cuts(cuts_as_line_array, dotted_line_length = 0.1):
     hide_user_provided_cuts()
     global _drawing_handle_user_provided_cuts
     user_cuts_color = RED
-    dotted_cuts = make_dotted_lines(cuts_as_line_array, dotted_line_length)
+    dotted_cuts = drawing_backend.make_dotted_lines(cuts_as_line_array, dotted_line_length)
     _drawing_handle_user_provided_cuts = bpy.types.SpaceView3D.draw_handler_add(lines_draw_callback, (dotted_cuts, user_cuts_color), "WINDOW", "POST_VIEW")
 
 #################################
@@ -199,7 +175,7 @@ def show_locked_edges(cuts_as_line_array, dotted_line_length = 0.1):
     hide_locked_edges()
     global _drawing_handle_locked_edges
     locked_edges_color = GREEN
-    dotted_cuts = make_dotted_lines(cuts_as_line_array, dotted_line_length)
+    dotted_cuts = drawing_backend.make_dotted_lines(cuts_as_line_array, dotted_line_length)
     _drawing_handle_locked_edges = bpy.types.SpaceView3D.draw_handler_add(lines_draw_callback, (dotted_cuts, locked_edges_color), "WINDOW", "POST_VIEW")
 
 #################################
@@ -215,7 +191,7 @@ def show_auto_completed_cuts(cuts_as_line_array, dotted_line_length = 0.1):
     hide_auto_completed_cuts() 
     global _drawing_handle_auto_completed_cuts
     auto_cuts_color = TEAL
-    dotted_auto_cuts = make_dotted_lines(cuts_as_line_array, dotted_line_length)
+    dotted_auto_cuts = drawing_backend.make_dotted_lines(cuts_as_line_array, dotted_line_length)
     _drawing_handle_auto_completed_cuts = bpy.types.SpaceView3D.draw_handler_add(lines_draw_callback, (dotted_auto_cuts, auto_cuts_color), "WINDOW", "POST_VIEW")
 
 #################################
@@ -279,9 +255,13 @@ def show_glue_flaps(flaps_by_quality):
 
 def hide_pages():
     global _drawing_handle_pages
+    global _drawing_handle_step_numbers
     if _drawing_handle_pages is not None:
         bpy.types.SpaceImageEditor.draw_handler_remove(_drawing_handle_pages, "WINDOW")
         _drawing_handle_pages = None
+    if _drawing_handle_step_numbers is not None:
+        bpy.types.SpaceImageEditor.draw_handler_remove(_drawing_handle_step_numbers, "WINDOW")
+        _drawing_handle_step_numbers = None
 
 def page_bg_draw_callback(page_verts, selected_page_lines, other_pages_lines):
     triangles_2D_draw_callback(page_verts, WHITE)
@@ -295,88 +275,53 @@ def component_draw_callback(component_triangle_verts, component_triangle_colors,
     if selected_component_lines is not None:
         lines_2D_draw_callback(selected_component_lines, ORANGE, 2)
 
-def pages_draw_callback(page_verts, selected_page_lines, other_pages_lines, component_triangle_verts, component_triangle_colors, component_lines, selected_component_lines):
+def build_step_numbers_draw_callback(numbers_with_positions, font_size):
+    scale = 0.01
+    blf.color(0, 0, 0, 0, 1)
+    blf.size(0, font_size / scale)
+    blf.shadow(0, 0, 0, 0, 0, 1)
+    with gpu.matrix.push_pop():
+        gpu.matrix.scale_uniform(scale)
+        for num_with_pos in numbers_with_positions:
+            step_number = num_with_pos[0]
+            dim = blf.dimensions(0, str(step_number))
+            position = num_with_pos[1] / scale - np.array([dim[0] / 2, dim[1] / 2])
+            blf.position(0, position[0], position[1], 0)
+            blf.draw(0, str(step_number))
+
+def pages_draw_callback(page_verts, selected_page_lines, other_pages_lines, component_triangle_verts, component_triangle_colors, component_lines, 
+                        selected_component_lines, numbers_with_positions, font_size):
     # pages in the backgound
     page_bg_draw_callback(page_verts, selected_page_lines, other_pages_lines)
     # connected components
     component_draw_callback(component_triangle_verts, component_triangle_colors, component_lines, selected_component_lines)
+    # build step numbers
+    build_step_numbers_draw_callback(numbers_with_positions, font_size)
 
-def show_pages(num_pages, components_per_page, paper_size = paper_sizes["A4"], selected_page = None, selected_component = None, margin_between_pages = 1.0, pages_per_row = 2, fold_angle_th = 0.0, color_components = True):
-    selected_page_lines = None if selected_page is None else []
-    page_verts = []
-    other_page_lines = []
-    for page_index in range(num_pages):
-        row_index = page_index % pages_per_row
-        col_index = page_index // pages_per_row
-        page_anchor = np.array([row_index * (paper_size[0] + margin_between_pages), -col_index * (paper_size[1] + margin_between_pages)])
-        ll = page_anchor 
-        lr = page_anchor + np.array([paper_size[0], 0.0])
-        ur = page_anchor + np.array([paper_size[0], paper_size[1]])
-        ul = page_anchor + np.array([0.0, paper_size[1]])
-        current_page_line_coords = [ll, lr, lr, ur, ur, ul, ul, ll]
-        if selected_page is not None and selected_page == page_index:
-            selected_page_lines += current_page_line_coords
-        else:
-            other_page_lines += current_page_line_coords
-        page_verts += [ll, lr, ur, ll, ur, ul]
-    
-    # components on pages
-    full_lines = []
-    convex_lines = []
-    concave_lines = []
-    component_bg_verts = []
-    component_bg_colors = []
-    selected_component_lines = None if selected_component is None else []
-
-    assert num_pages >= len(components_per_page)
-    for page_index, components_on_page in enumerate(components_per_page):
-        row_index = page_index % pages_per_row
-        col_index = page_index // pages_per_row
-        page_anchor = np.array([row_index * (paper_size[0] + margin_between_pages), -col_index * (paper_size[1] + margin_between_pages)])
-
-        current_component : ComponentPrintData
-        for current_component in components_on_page:
-            this_is_the_selected_component = selected_component is not None and current_component.og_component_id == selected_component
-            page_transform = current_component.page_transform
-            for cut_edge_data in current_component.cut_edges + current_component.glue_flap_edges:
-                coords = [page_anchor + page_transform * coord for coord in cut_edge_data.coords]
-                if this_is_the_selected_component:
-                    selected_component_lines += coords
-                else:
-                    full_lines += coords
-            fold_edge_data : FoldEdgeData
-            for fold_edge_data in current_component.fold_edges:
-                if fold_edge_data.fold_angle <= fold_angle_th:
-                    continue
-                coords = [page_anchor + page_transform * coord for coord in fold_edge_data.coords]
-                if fold_edge_data.is_convex:
-                    convex_lines += coords
-                else:
-                    concave_lines += coords
-            fold_edge_at_flap : FoldEdgeAtGlueFlapData
-            for fold_edge_at_flap in current_component.fold_edges_at_flaps:
-                coords = [page_anchor + page_transform * coord for coord in fold_edge_at_flap.coords]
-                if fold_edge_at_flap.fold_angle <= fold_angle_th:
-                    full_lines += coords
-                    continue
-                if fold_edge_at_flap.is_convex:
-                    convex_lines += coords
-                else:
-                    concave_lines += coords
-            if not color_components:
-                continue
-            tri_data : ColoredTriangleData
-            for tri_data in current_component.colored_triangles:
-                component_bg_verts += [page_anchor + page_transform * coord for coord in tri_data.coords]
-                component_bg_colors += [tri_data.color] * 3
-    convex_lines = make_dotted_lines(convex_lines, 0.2)
-    concave_lines = make_dotted_lines(concave_lines, 0.2, linestyle=[1,1,4,1])
-    component_lines = full_lines + convex_lines + concave_lines
+def show_pages_with_procomputed_render_data(render_data_per_component, num_pages, paper_size = paper_sizes["A4"], selected_page = None, selected_component = None, 
+                                            margin_between_pages = 1.0, pages_per_row = 2, color_components = True, show_step_numbers = True):
+    page_verts, selected_page_lines, other_page_lines = drawing_backend.compute_backgound_paper_render_data(num_pages, paper_size, selected_page, margin_between_pages, pages_per_row)
+    combined_render_data = drawing_backend.combine_layout_render_data_of_all_components(render_data_per_component, selected_component, color_components, show_step_numbers)
 
     hide_pages()
     global _drawing_handle_pages
     _drawing_handle_pages = bpy.types.SpaceImageEditor.draw_handler_add(pages_draw_callback, 
-                                                                        (page_verts, selected_page_lines, other_page_lines, component_bg_verts, component_bg_colors, component_lines, selected_component_lines), 
+                                                                        (page_verts, selected_page_lines, other_page_lines, *combined_render_data, 1), 
+                                                                        "WINDOW", "POST_VIEW")
+
+def show_pages(num_pages, components_per_page, paper_size = paper_sizes["A4"], selected_page = None, selected_component = None, margin_between_pages = 1.0, 
+               pages_per_row = 2, fold_angle_th = 0.0, color_components = True, show_step_numbers = True):
+
+    page_verts, selected_page_lines, other_page_lines = drawing_backend.compute_backgound_paper_render_data(num_pages, paper_size, selected_page, margin_between_pages, pages_per_row)
+    
+    # components on pages
+    render_data_per_component = drawing_backend.compute_page_layout_render_data_of_all_components(components_per_page, paper_size, margin_between_pages, pages_per_row, fold_angle_th)
+    combined_render_data = drawing_backend.combine_layout_render_data_of_all_components(render_data_per_component, selected_component, color_components, show_step_numbers)
+
+    hide_pages()
+    global _drawing_handle_pages
+    _drawing_handle_pages = bpy.types.SpaceImageEditor.draw_handler_add(pages_draw_callback, 
+                                                                        (page_verts, selected_page_lines, other_page_lines, *combined_render_data, 1), 
                                                                         "WINDOW", "POST_VIEW")
 
 #################################
@@ -441,7 +386,10 @@ def update_all_page_layout_drawings(self, context):
         components_on_pages[page_numbers_per_components[current_component_print_data.og_component_id]].append(current_component_print_data)
 
     # erstmal so
-    show_pages(num_pages, components_on_pages, paper_sizes[general_mesh_props.paper_size], None, fold_angle_th=draw_settings.hide_fold_edge_angle_th, color_components=draw_settings.show_component_colors)
+    show_pages(num_pages, components_on_pages, paper_sizes[general_mesh_props.paper_size], None, 
+               fold_angle_th=draw_settings.hide_fold_edge_angle_th, 
+               color_components=draw_settings.show_component_colors, 
+               show_step_numbers=draw_settings.show_build_step_numbers)
     redraw_image_editor(context)
 
 def update_all_polyzamboni_drawings(self, context):

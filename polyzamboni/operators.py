@@ -7,6 +7,7 @@ from bpy.props import StringProperty, PointerProperty
 from bpy_extras.io_utils import ExportHelper
 from .properties import GeneralExportSettings, LineExportSettings, TextureExportSettings, ZamboniGeneralMeshProps, PageLayoutCreationSettings
 from .drawing import *
+from . import drawing_backend
 from . import exporters
 from . import printprepper
 from .geometry import compute_planarity_score, construct_orthogonal_basis_at_2d_edge
@@ -945,7 +946,7 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
         self.hide_all_drawings()
         screenspace_anchor_pos = np.array(context.region.view2d.view_to_region(self.rotation_center[0], self.rotation_center[1]))
         screenspace_mouse_pos = np.array([event.mouse_region_x, event.mouse_region_y])
-        dotted_line_array = make_dotted_lines([screenspace_anchor_pos, screenspace_mouse_pos], 10.0)
+        dotted_line_array = drawing_backend.make_dotted_lines([screenspace_anchor_pos, screenspace_mouse_pos], 10.0)
         PolyZamboniPageLayoutEditingOperator._drawing_handle = bpy.types.SpaceImageEditor.draw_handler_add(lines_2D_draw_callback, (dotted_line_array, ORANGE, 1), "WINDOW", "POST_PIXEL")
 
     def invoke(self, context, event):
@@ -985,17 +986,20 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
         for current_component_print_data in component_print_data:
             self.components_on_pages[page_numbers_per_components[current_component_print_data.og_component_id]][current_component_print_data.og_component_id] = current_component_print_data
         
+        # compute render data
+        self.render_data_per_component = drawing_backend.compute_page_layout_render_data_of_all_components([list(d.values()) for d in self.components_on_pages], self.paper_size, 
+                                                                                                           fold_angle_th=self.draw_settings.hide_fold_edge_angle_th)
+
         context.window_manager.polyzamboni_in_page_edit_mode = True
         context.window_manager.modal_handler_add(self)
         return {'RUNNING_MODAL'}
     
     def draw_current_page_layout(self, context):
-        components_per_page = [list(page_contents.values()) for page_contents in self.components_on_pages]
         num_display_pages = self.num_pages
         if self.active_page is not None and self.active_page == self.num_pages:
             num_display_pages += 1
-        show_pages(num_display_pages, components_per_page, self.paper_size, self.active_page, self.selected_component_id, 
-                   fold_angle_th=self.draw_settings.hide_fold_edge_angle_th, color_components=self.draw_settings.show_component_colors)
+        show_pages_with_procomputed_render_data(self.render_data_per_component, num_display_pages, self.paper_size, self.active_page, self.selected_component_id,
+                                                color_components=self.draw_settings.show_component_colors, show_step_numbers=self.draw_settings.show_build_step_numbers)
         redraw_image_editor(context)
 
     def get_mouse_image_coords(self, context : bpy.types.Context, event :bpy.types.Event):
@@ -1024,13 +1028,30 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
     def collapse_empty_pages(self):
         self.active_page = None # just to be save
         collapsed_pages = []
+        collapse_happened = False
         for page in self.components_on_pages:
             if len(page) != 0:
                 collapsed_pages.append(page)
+            else:
+                collapse_happened = True
             if self.selected_component_id is not None and self.selected_component_id in page.keys():
                 self.page_of_selected_component = len(collapsed_pages) - 1
+            if not collapse_happened:
+                continue
+            # update the render data of all pieces affected by the collapse
+            for component_id, component_print_data in page.items():
+                self.render_data_per_component[component_id] = drawing_backend.compute_page_layout_render_data_of_component(component_print_data,
+                                                                                                                            self.paper_size, self.draw_settings.hide_fold_edge_angle_th,
+                                                                                                                            len(collapsed_pages) - 1)
         self.components_on_pages = collapsed_pages
         self.num_pages = len(collapsed_pages)
+
+    def update_render_data_of_currently_edited_component(self):
+        if self.currently_edited_component is None:
+            return
+        self.render_data_per_component[self.currently_edited_component.og_component_id] = drawing_backend.compute_page_layout_render_data_of_component(self.currently_edited_component,
+                                                                                                                                                       self.paper_size, self.draw_settings.hide_fold_edge_angle_th,
+                                                                                                                                                       self.current_page_of_moving_component)
 
     def exit_an_edit_operator(self, context):
         self.page_of_selected_component = self.current_page_of_moving_component
@@ -1128,12 +1149,14 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
         if self.editing_state == operators_backend.PageEditorState.MOVE_PIECE:
             if event.type in {"RET", "LEFTMOUSE"} and event.value == "PRESS":
                 self.currently_edited_component.page_transform = self.last_valid_editing_transform @ self.page_anchor_correction_transform @ self.currently_edited_component_base_page_transform
+                self.update_render_data_of_currently_edited_component()
                 self.exit_an_edit_operator(context)
                 self.draw_current_page_layout(context)
             if event.type in {"ESC", "RIGHTMOUSE"} and event.value == "PRESS":
                 # revert the transform
                 self.move_component_to_page(self.currently_edited_component, self.current_page_of_moving_component, self.currently_edited_component_base_page)
                 self.currently_edited_component.page_transform = self.currently_edited_component_base_page_transform
+                self.update_render_data_of_currently_edited_component()
                 self.exit_an_edit_operator(context)
                 self.draw_current_page_layout(context)
             if event.type == "MOUSEMOVE":
@@ -1150,16 +1173,19 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
                         self.move_component_to_page(self.currently_edited_component, self.current_page_of_moving_component, page_under_piece)
                         # update page transform for smooth behavior
                         self.currently_edited_component.page_transform = edit_transform @ self.page_anchor_correction_transform @ self.currently_edited_component_base_page_transform
+                self.update_render_data_of_currently_edited_component()
                 self.draw_current_page_layout(context)
             return {'RUNNING_MODAL'}
         if self.editing_state == operators_backend.PageEditorState.ROTATE_PIECE:
             if event.type in {"RET", "LEFTMOUSE"} and event.value == "PRESS":
                 self.currently_edited_component.page_transform = self.last_valid_editing_transform @ self.page_anchor_correction_transform @ self.currently_edited_component_base_page_transform
+                self.update_render_data_of_currently_edited_component()
                 self.exit_an_edit_operator(context)
                 self.draw_current_page_layout(context)
             if event.type in {"ESC", "RIGHTMOUSE"} and event.value == "PRESS":
                 # revert the transform
                 self.currently_edited_component.page_transform = self.currently_edited_component_base_page_transform
+                self.update_render_data_of_currently_edited_component()
                 self.exit_an_edit_operator(context)
                 self.draw_current_page_layout(context)
             if event.type == "MOUSEMOVE":
@@ -1175,6 +1201,7 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
                 self.last_valid_editing_transform = edit_transform
                 self.currently_edited_component.page_transform = edit_transform @ self.currently_edited_component_base_page_transform
                 self.draw_rotation_tool(context, event)
+                self.update_render_data_of_currently_edited_component()
                 self.draw_current_page_layout(context)
             return {'RUNNING_MODAL'}
         return {'PASS_THROUGH'}

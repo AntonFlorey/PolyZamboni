@@ -12,9 +12,37 @@ import time
 
 from . import io
 from . import utils
-from .geometry import triangulate_3d_polygon, face_corner_convex_3d, solve_for_weird_intersection_point
+from .geometry import AffineTransform2D, triangulate_3d_polygon, face_corner_convex_3d, solve_for_weird_intersection_point
 from .utils import mesh_edge_is_cut, find_bmesh_edge_of_halfedge
 from .glueflaps import component_has_overlapping_glue_flaps, flap_is_overlapping, compute_3d_glue_flap_triangles_inside_face
+from .printprepper import ComponentPrintData, CutEdgeData, FoldEdgeData, FoldEdgeAtGlueFlapData, ColoredTriangleData
+
+def make_dotted_lines(line_array, target_line_length, max_segments = 100, linestyle = (1,1)):
+    if target_line_length <= 0:
+        return line_array
+    dotted_lines_array = []
+    line_index = 0
+    while line_index < len(line_array):
+        v_from = np.asarray(line_array[line_index])
+        v_to = np.asarray(line_array[line_index + 1])
+
+        line_len = np.linalg.norm(v_from - v_to)
+        segments = min(int(line_len / target_line_length), max_segments)
+        
+        total_segments = 2 * segments + 1
+        segment_start_index = 0
+        style_len = len(linestyle)
+        assert (style_len % 2) == 0
+        style_index = 0
+        while segment_start_index < total_segments:
+            t_from = segment_start_index / total_segments
+            t_to = min((segment_start_index + linestyle[style_index]) / total_segments, 1.0)
+            dotted_lines_array.append((1.0 - t_from) * v_from + t_from * v_to)
+            dotted_lines_array.append((1.0 - t_to) * v_from + t_to * v_to)
+            segment_start_index += linestyle[style_index] + linestyle[style_index + 1]
+            style_index = (style_index + 2) % style_len
+        line_index += 2
+    return dotted_lines_array
 
 class ComponentQuality(Enum):
     PERFECT_REGION = 0
@@ -256,3 +284,112 @@ def get_lines_array_per_glue_flap_quality(mesh : Mesh, bmesh : BMesh, face_offse
         # TODO Flaps that are to large... maybe not needed ... maybe add this in the future
         quality_dict[GlueFlapQuality.GLUE_FLAP_NO_OVERLAPS] += flap_line_array
     return quality_dict
+
+def compute_backgound_paper_render_data(num_pages, paper_size, selected_page = None, margin_between_pages = 1.0, pages_per_row = 2.0):
+    selected_page_lines = []
+    page_verts = []
+    other_page_lines = []
+    for page_index in range(num_pages):
+        row_index = page_index % pages_per_row
+        col_index = page_index // pages_per_row
+        page_anchor = np.array([row_index * (paper_size[0] + margin_between_pages), -col_index * (paper_size[1] + margin_between_pages)])
+        ll = page_anchor 
+        lr = page_anchor + np.array([paper_size[0], 0.0])
+        ur = page_anchor + np.array([paper_size[0], paper_size[1]])
+        ul = page_anchor + np.array([0.0, paper_size[1]])
+        current_page_line_coords = [ll, lr, lr, ur, ur, ul, ul, ll]
+        if selected_page is not None and selected_page == page_index:
+            selected_page_lines += current_page_line_coords
+        else:
+            other_page_lines += current_page_line_coords
+        page_verts += [ll, lr, ur, ll, ur, ul]
+    return page_verts, selected_page_lines, other_page_lines
+
+class LayoutRenderData(Enum):
+    FULL_LINES = 0
+    CONVEX_LINES = 1
+    CONCAVE_LINES = 2
+    BG_VERTS = 3
+    BG_COLORS = 4
+    STEP_NUMBER = 5
+
+def compute_page_layout_render_data_of_component(component : ComponentPrintData, paper_size, fold_angle_th, page_index, pages_per_row = 2.0, margin_between_pages = 1.0):
+    row_index = page_index % pages_per_row
+    col_index = page_index // pages_per_row
+    page_anchor = np.array([row_index * (paper_size[0] + margin_between_pages), -col_index * (paper_size[1] + margin_between_pages)])
+    full_transform = AffineTransform2D(affine_part=page_anchor) @ component.page_transform
+
+    render_data = {}
+    full_lines = []
+    convex_lines = []
+    concave_lines = []
+    bg_verts = []
+    bg_colors = []
+
+    for cut_edge_data in component.cut_edges + component.glue_flap_edges:
+        coords = [full_transform * coord for coord in cut_edge_data.coords]
+        full_lines += coords
+    fold_edge_data : FoldEdgeData
+    for fold_edge_data in component.fold_edges:
+        if fold_edge_data.fold_angle <= fold_angle_th:
+            continue
+        coords = [full_transform * coord for coord in fold_edge_data.coords]
+        if fold_edge_data.is_convex:
+            convex_lines += coords
+        else:
+            concave_lines += coords
+    fold_edge_at_flap : FoldEdgeAtGlueFlapData
+    for fold_edge_at_flap in component.fold_edges_at_flaps:
+        coords = [full_transform * coord for coord in fold_edge_at_flap.coords]
+        if fold_edge_at_flap.fold_angle <= fold_angle_th:
+            full_lines += coords
+            continue
+        if fold_edge_at_flap.is_convex:
+            convex_lines += coords
+        else:
+            concave_lines += coords
+    view_coords = full_transform * component.build_step_number_position
+    render_data[LayoutRenderData.STEP_NUMBER] = (component.build_step_number, view_coords)
+    tri_data : ColoredTriangleData
+    for tri_data in component.colored_triangles:
+        bg_verts += [full_transform * coord for coord in tri_data.coords]
+        bg_colors += [tri_data.color] * 3
+
+    render_data[LayoutRenderData.FULL_LINES] = full_lines
+    render_data[LayoutRenderData.CONVEX_LINES] = make_dotted_lines(convex_lines, 0.2)
+    render_data[LayoutRenderData.CONCAVE_LINES] = make_dotted_lines(concave_lines, 0.2, linestyle=[1,1,4,1])
+    render_data[LayoutRenderData.BG_VERTS] = bg_verts
+    render_data[LayoutRenderData.BG_COLORS] = bg_colors
+
+    return render_data
+
+def compute_page_layout_render_data_of_all_components(components_per_page, paper_size, margin_between_pages = 1.0, pages_per_row = 2, fold_angle_th = 0.0,):
+    render_data_per_component = {}
+    for page_index, components_on_page in enumerate(components_per_page):
+        current_component : ComponentPrintData
+        for current_component in components_on_page:
+            render_data_per_component[current_component.og_component_id] = compute_page_layout_render_data_of_component(current_component, paper_size, fold_angle_th,
+                                                                                                                        page_index, pages_per_row, margin_between_pages)
+    return render_data_per_component
+
+def combine_layout_render_data_of_all_components(render_data_per_component, selected_component = None, color_components = True, show_step_numbers = True):
+    component_bg_verts = []
+    component_bg_colors = []
+    selected_component_lines = []
+    other_component_lines = []
+    build_step_numbers = []
+
+    for component_id, render_data in render_data_per_component.items():
+        if selected_component is not None and component_id == selected_component:
+            selected_component_lines += render_data[LayoutRenderData.FULL_LINES]
+        else:
+            other_component_lines += render_data[LayoutRenderData.FULL_LINES]
+        other_component_lines += render_data[LayoutRenderData.CONCAVE_LINES]
+        other_component_lines += render_data[LayoutRenderData.CONVEX_LINES]
+        if color_components:
+            component_bg_verts += render_data[LayoutRenderData.BG_VERTS]
+            component_bg_colors += render_data[LayoutRenderData.BG_COLORS]
+        if show_step_numbers:
+            build_step_numbers.append(render_data[LayoutRenderData.STEP_NUMBER])
+
+    return component_bg_verts, component_bg_colors, other_component_lines, selected_component_lines, build_step_numbers

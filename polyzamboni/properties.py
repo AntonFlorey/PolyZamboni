@@ -61,6 +61,11 @@ class DrawSettings(bpy.types.PropertyGroup):
         default=True,
         update=update_all_page_layout_drawings
     )
+    show_build_step_numbers: BoolProperty(
+        name="Build step numbers",
+        default=True,
+        update=update_all_page_layout_drawings
+    )
 
 class ZamboniGeneralMeshProps(bpy.types.PropertyGroup):
     has_attached_paper_model : BoolProperty(
