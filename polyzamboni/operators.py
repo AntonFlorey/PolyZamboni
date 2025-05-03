@@ -1172,6 +1172,7 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
             return self.exit_modal_mode(context)
         if PolyZamboniPageLayoutEditingOperator._refresh_step_numbers_on_next_event:
             self.refresh_step_numbers_for_rendering()
+            self.draw_current_page_layout(context)
         if self.editing_state == operators_backend.PageEditorState.SELECT_PIECES:
             if event.type in {'ESC', 'RET'} and event.value == "PRESS":
                 return self.exit_modal_mode(context)
