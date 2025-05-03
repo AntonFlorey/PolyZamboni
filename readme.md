@@ -75,6 +75,7 @@ You can then edit the layout by clicking on `Edit page layout`. Here you can do 
 - Select pieces by left-clicking on them.
 - Move a selected piece by pressing `g`. Behaves similar to Blender's move operator.
 - Rotate a selected piece by pressing `r`. Behaves similar to Blender's rotate operator.
+- Change the build step number of a selected piece by pressing `f`.
 
 **Note:** Changes to the papermodel cuts will remove all existing page layout information. Make sure you are happy with your cuts and resulting pieces before you finalize the page layout.
 

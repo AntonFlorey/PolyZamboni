@@ -43,3 +43,4 @@ def update_glueflap_geometry_callback(self, context : bpy.types.Context):
 @persistent
 def redraw_callback(dummy):
     update_all_polyzamboni_drawings(None, bpy.context)
+    
