@@ -944,9 +944,10 @@ class PolyZamboniStepNumberEditOperator(bpy.types.Operator):
     def invoke(self, context, event):
         self.mesh = context.active_object.data
         self.build_step_numbers = io.read_build_step_numbers(self.mesh)
+        if self.build_step_numbers is None:
+            self.build_step_numbers = {}
         self.selected_component_id = self.mesh.polyzamboni_general_mesh_props.selected_component_id
-        print("Selected component id when invoking step number operator:", self.selected_component_id)
-        self.step_number = self.build_step_numbers[self.selected_component_id]
+        self.step_number = self.build_step_numbers.setdefault(self.selected_component_id, 0)
         wm = context.window_manager
         return wm.invoke_props_dialog(self, title="Choose a new build step number")
 
@@ -954,11 +955,18 @@ class PolyZamboniStepNumberEditOperator(bpy.types.Operator):
         layout : bpy.types.UILayout = self.layout
         write_custom_split_property_row(layout, "Step number", self.properties, "step_number", 0.6)
 
+
     def execute(self, context):
         self.build_step_numbers[self.selected_component_id] = self.step_number
         io.write_build_step_numbers(self.mesh, self.build_step_numbers)
         PolyZamboniPageLayoutEditingOperator._refresh_step_numbers_on_next_event = True
         return { 'FINISHED' }
+
+    def cancel(self, context):
+        PolyZamboniPageLayoutEditingOperator._refresh_step_numbers_on_next_event = True
+
+    def __del__(self):
+        PolyZamboniPageLayoutEditingOperator._refresh_step_numbers_on_next_event = True
 
     @classmethod
     def poll(self, context):
@@ -1171,6 +1179,7 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
         if context.region is None or context.region.view2d is None:
             return self.exit_modal_mode(context)
         if PolyZamboniPageLayoutEditingOperator._refresh_step_numbers_on_next_event:
+            self.editing_state = operators_backend.PageEditorState.SELECT_PIECES
             self.refresh_step_numbers_for_rendering()
             self.draw_current_page_layout(context)
         if self.editing_state == operators_backend.PageEditorState.SELECT_PIECES:
@@ -1201,7 +1210,7 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
                     self.start_piece_rotation()
             if event.type == "F" and event.value == "PRESS":
                 if self.selected_component_id is not None:
-                    print("calling build step editing operator")
+                    self.editing_state = operators_backend.PageEditorState.EDIT_BUILD_STEP_NUMBER
                     bpy.ops.polyzamboni.build_step_number_op('INVOKE_DEFAULT')
         if self.editing_state == operators_backend.PageEditorState.MOVE_PIECE:
             if event.type in {"RET", "LEFTMOUSE"} and event.value == "PRESS":
@@ -1261,6 +1270,8 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
                 self.update_render_data_of_currently_edited_component()
                 self.draw_current_page_layout(context)
             return {'RUNNING_MODAL'}
+        if self.editing_state == operators_backend.PageEditorState.EDIT_BUILD_STEP_NUMBER:
+            {'PASS_THROUGH'}
         return {'PASS_THROUGH'}
 
     def __del__(self):

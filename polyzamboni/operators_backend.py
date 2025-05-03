@@ -153,6 +153,7 @@ class PageEditorState(Enum):
     SELECT_PIECES = 0
     MOVE_PIECE = 1
     ROTATE_PIECE = 2
+    EDIT_BUILD_STEP_NUMBER = 3
 
 def find_page_under_mouse_position(pos_x, pos_y, pages, paper_size, margin_between_pages = 1.0, pages_per_row = 2):
     row_grid_size = paper_size[0] + margin_between_pages

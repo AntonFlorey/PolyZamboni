@@ -45,6 +45,8 @@ def make_dotted_lines(line_array, target_line_length, max_segments = 100, linest
     return dotted_lines_array
 
 def linear_to_srgb(linear_color):
+    if linear_color is None:
+        return None
     linear_color = np.array(linear_color)
     srgb_color = np.where(linear_color <= 0.0031308, 12.92 * linear_color, 1.055 * np.power(linear_color, 1/2.4) - 0.055)
     return srgb_color
@@ -358,7 +360,7 @@ def compute_page_layout_render_data_of_component(component : ComponentPrintData,
     tri_data : ColoredTriangleData
     for tri_data in component.colored_triangles:
         bg_verts += [full_transform * coord for coord in tri_data.coords]
-        bg_colors += [linear_to_srgb(tri_data.color)] * 3
+        bg_colors += [linear_to_srgb(tri_data.color if tri_data.color is not None else (1,1,1,1))] * 3
 
     render_data[LayoutRenderData.FULL_LINES] = full_lines
     render_data[LayoutRenderData.CONVEX_LINES] = make_dotted_lines(convex_lines, 0.2)
