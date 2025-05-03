@@ -3,7 +3,7 @@ import bmesh
 import numpy as np
 import os
 import threading
-from bpy.props import StringProperty, PointerProperty
+from bpy.props import StringProperty, PointerProperty, IntProperty
 from bpy_extras.io_utils import ExportHelper
 from .properties import GeneralExportSettings, LineExportSettings, TextureExportSettings, ZamboniGeneralMeshProps, PageLayoutCreationSettings
 from .drawing import *
@@ -316,6 +316,7 @@ class ComputeBuildStepsOperator(bpy.types.Operator):
         ao_bmesh = bmesh.from_edit_mesh(ao_mesh)
         selected_faces = [f.index for f in ao_bmesh.faces if f.select]
         operators_backend.compute_build_step_numbers(ao_mesh, selected_faces)
+        update_all_page_layout_drawings(None, context)
         return { 'FINISHED' }
 
     @classmethod
@@ -839,6 +840,7 @@ class PolyZamboniPageLayoutOperator(bpy.types.Operator):
     page_layout_options : PointerProperty(type=PageLayoutCreationSettings)
 
     def invoke(self, context, event):
+        print("invoked step number operator")
         # do stuff
         ao = context.active_object
         active_mesh = ao.data
@@ -929,6 +931,40 @@ class PolyZamboniExitPageLayoutEditingOperator(bpy.types.Operator):
             PolyZamboniPageLayoutEditingOperator._exit_on_next_event = True
         return {'FINISHED'}
 
+class PolyZamboniStepNumberEditOperator(bpy.types.Operator):
+    """ Edit the build step number of a selected piece """
+    bl_label = "Edit build step number"
+    bl_idname  = "polyzamboni.build_step_number_op"
+
+    step_number : IntProperty(
+        name="Step Number",
+        min=0
+    )
+
+    def invoke(self, context, event):
+        self.mesh = context.active_object.data
+        self.build_step_numbers = io.read_build_step_numbers(self.mesh)
+        self.selected_component_id = self.mesh.polyzamboni_general_mesh_props.selected_component_id
+        print("Selected component id when invoking step number operator:", self.selected_component_id)
+        self.step_number = self.build_step_numbers[self.selected_component_id]
+        wm = context.window_manager
+        return wm.invoke_props_dialog(self, title="Choose a new build step number")
+
+    def draw(self, context):
+        layout : bpy.types.UILayout = self.layout
+        write_custom_split_property_row(layout, "Step number", self.properties, "step_number", 0.6)
+
+    def execute(self, context):
+        self.build_step_numbers[self.selected_component_id] = self.step_number
+        io.write_build_step_numbers(self.mesh, self.build_step_numbers)
+        PolyZamboniPageLayoutEditingOperator._refresh_step_numbers_on_next_event = True
+        return { 'FINISHED' }
+
+    @classmethod
+    def poll(self, context):
+        selected_component_id = context.active_object.data.polyzamboni_general_mesh_props.selected_component_id
+        return _active_object_is_mesh_with_paper_model(context) and context.window_manager.polyzamboni_in_page_edit_mode and selected_component_id != -1
+
 class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
     """ Select, move and rotate your papermodel pieces """
     bl_label = "Edit Page Layout"
@@ -936,6 +972,7 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
 
     _exit_on_next_event = False
     _drawing_handle = None
+    _refresh_step_numbers_on_next_event = False
 
     def hide_all_drawings(self):
         if PolyZamboniPageLayoutEditingOperator._drawing_handle is not None:
@@ -993,7 +1030,7 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
         context.window_manager.polyzamboni_in_page_edit_mode = True
         context.window_manager.modal_handler_add(self)
         return {'RUNNING_MODAL'}
-    
+
     def draw_current_page_layout(self, context):
         num_display_pages = self.num_pages
         if self.active_page is not None and self.active_page == self.num_pages:
@@ -1002,10 +1039,26 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
                                                 color_components=self.draw_settings.show_component_colors, show_step_numbers=self.draw_settings.show_build_step_numbers)
         redraw_image_editor(context)
 
+    def refresh_step_numbers_for_rendering(self):
+        fresh_step_numbers = io.read_build_step_numbers(self.mesh)
+        for component_id, step_number in fresh_step_numbers.items():
+            if component_id in self.render_data_per_component:
+                old_step_num_info = self.render_data_per_component[component_id][drawing_backend.LayoutRenderData.STEP_NUMBER]
+                self.render_data_per_component[component_id][drawing_backend.LayoutRenderData.STEP_NUMBER] = (step_number, old_step_num_info[1])
+        PolyZamboniPageLayoutEditingOperator._refresh_step_numbers_on_next_event = False
+
     def get_mouse_image_coords(self, context : bpy.types.Context, event :bpy.types.Event):
         mouse_x = event.mouse_region_x
         mouse_y = event.mouse_region_y
         return context.region.view2d.region_to_view(mouse_x, mouse_y)
+
+    def check_if_mouse_is_inside_image_editor(self, context : bpy.types.Context, event):
+        mouse_x, mouse_y = event.mouse_x, event.mouse_y
+        region_x = context.region.x
+        region_y = context.region.y
+        if mouse_x < region_x or mouse_x > region_x + context.region.width or mouse_y < region_y or mouse_y > region_y + context.region.height:
+            return False
+        return True
 
     def start_an_edit_operator(self, context, event):
         self.edit_operation_mouse_start_pos = self.get_mouse_image_coords(context, event)
@@ -1117,14 +1170,13 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
             return self.exit_modal_mode(context)
         if context.region is None or context.region.view2d is None:
             return self.exit_modal_mode(context)
+        if PolyZamboniPageLayoutEditingOperator._refresh_step_numbers_on_next_event:
+            self.refresh_step_numbers_for_rendering()
         if self.editing_state == operators_backend.PageEditorState.SELECT_PIECES:
             if event.type in {'ESC', 'RET'} and event.value == "PRESS":
                 return self.exit_modal_mode(context)
-            mouse_x, mouse_y = event.mouse_x, event.mouse_y
             image_x, image_y = self.get_mouse_image_coords(context, event)
-            region_x = context.region.x
-            region_y = context.region.y
-            if mouse_x < region_x or mouse_x > region_x + context.region.width or mouse_y < region_y or mouse_y > region_y + context.region.height:
+            if not self.check_if_mouse_is_inside_image_editor(context, event):
                 return {'PASS_THROUGH'}
             if event.type == "MOUSEMOVE":
                 page_hovered_over = operators_backend.find_page_under_mouse_position(image_x, image_y, self.num_pages, self.paper_size)
@@ -1146,6 +1198,10 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
                     self.editing_state = operators_backend.PageEditorState.ROTATE_PIECE
                     self.start_an_edit_operator(context, event)
                     self.start_piece_rotation()
+            if event.type == "F" and event.value == "PRESS":
+                if self.selected_component_id is not None:
+                    print("calling build step editing operator")
+                    bpy.ops.polyzamboni.build_step_number_op('INVOKE_DEFAULT')
         if self.editing_state == operators_backend.PageEditorState.MOVE_PIECE:
             if event.type in {"RET", "LEFTMOUSE"} and event.value == "PRESS":
                 self.currently_edited_component.page_transform = self.last_valid_editing_transform @ self.page_anchor_correction_transform @ self.currently_edited_component_base_page_transform
@@ -1244,6 +1300,7 @@ def register():
     bpy.utils.register_class(PolyZamboniPageLayoutOperator)
     bpy.utils.register_class(PolyZamboniPageLayoutEditingOperator)
     bpy.utils.register_class(PolyZamboniExitPageLayoutEditingOperator)
+    bpy.utils.register_class(PolyZamboniStepNumberEditOperator)
 
     bpy.types.TOPBAR_MT_file_export.append(menu_func_polyzamboni_export_pdf)
     bpy.types.TOPBAR_MT_file_export.append(menu_func_polyzamboni_export_svg)
@@ -1281,6 +1338,7 @@ def unregister():
     bpy.utils.unregister_class(PolyZamboniPageLayoutOperator)
     bpy.utils.unregister_class(PolyZamboniPageLayoutEditingOperator)
     bpy.utils.unregister_class(PolyZamboniExitPageLayoutEditingOperator)
+    bpy.utils.unregister_class(PolyZamboniStepNumberEditOperator)
 
     bpy.types.TOPBAR_MT_file_export.remove(menu_func_polyzamboni_export_pdf)
     bpy.types.TOPBAR_MT_file_export.remove(menu_func_polyzamboni_export_svg)

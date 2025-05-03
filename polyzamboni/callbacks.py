@@ -38,6 +38,7 @@ def update_glueflap_geometry_callback(self, context : bpy.types.Context):
         if zamboni_props.has_attached_paper_model:
             update_all_flap_geometry(active_mesh)
             update_all_polyzamboni_drawings(self, context)
+            update_all_page_layout_drawings(self, context)
 
 @persistent
 def redraw_callback(dummy):
