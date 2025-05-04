@@ -365,7 +365,6 @@ def update_all_page_layout_drawings(self, context):
     general_mesh_props = active_mesh.polyzamboni_general_mesh_props
 
     if not check_if_page_numbers_and_transforms_exist_for_all_components(active_mesh):
-        print("DEBUG: No page layout to draw found!")
         redraw_image_editor(context)
         return
     

@@ -840,7 +840,6 @@ class PolyZamboniPageLayoutOperator(bpy.types.Operator):
     page_layout_options : PointerProperty(type=PageLayoutCreationSettings)
 
     def invoke(self, context, event):
-        print("invoked step number operator")
         # do stuff
         ao = context.active_object
         active_mesh = ao.data
