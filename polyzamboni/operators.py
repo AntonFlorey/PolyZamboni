@@ -374,7 +374,6 @@ class ZamboniCutDesignOperator(bpy.types.Operator):
         ao_mesh = ao.data
         ao_bmesh = bmesh.from_edit_mesh(ao_mesh)
         selected_edges = [e.index for e in ao_bmesh.edges if e.select]
-        ao_bmesh.free()
 
         if self.design_actions == "ADD_CUT":
             operators_backend.cut_edges(ao_mesh, selected_edges)
@@ -385,6 +384,8 @@ class ZamboniCutDesignOperator(bpy.types.Operator):
         elif self.design_actions == "REGION_CUTOUT":
             selected_faces = [f.index for f in ao_bmesh.faces if f.select]
             operators_backend.add_cutout_region(ao_mesh, selected_faces)
+        
+        ao_bmesh.free()
         update_all_polyzamboni_drawings(None, context)
         update_all_page_layout_drawings(None, context)
 
