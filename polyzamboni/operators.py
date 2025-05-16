@@ -332,18 +332,32 @@ class ZamboniGlueFlapDesignOperator(bpy.types.Operator):
         name="actions",
         description="Select an action",
         items=[
-            ("FLIP_FLAPS", "Flip Glue Flaps", "Flip all glue flaps attached to the selected edges", "AREA_SWAP", 0),
-            ("RECOMPUTE_FLAPS", "Recompute all Glue Flaps", "Automatically place glue flaps at all cut edges", "FILE_SCRIPT", 1)
+            ("FLIP_FLAPS", "Flip glue flaps", "Flip all glue flaps attached to the selected edges", "AREA_SWAP", 0),
+            ("SMART_TRIM_FLAPS", "Smart trim glue flaps ", "Automatically shrinks glue flaps to fit on the piece it will be glued onto", "SELECT_INTERSECT", 1),
+            ("ADD_FLAPS", "Add glue flaps", "Adds glue flaps to the selected edges", "ADD", 2),
+            ("REMOVE_FLAPS", "Remove glue flaps", "Removes all glue flaps attached to the selected edges", "REMOVE", 3)            
         ]
     )
 
     def execute(self, context):
+        ao = context.active_object
+        ao_mesh = ao.data
+        ao_bmesh = bmesh.from_edit_mesh(ao_mesh)
+        selected_edges = [e.index for e in ao_bmesh.edges if e.select]
 
         if self.design_actions == "FLIP_FLAPS":
-            bpy.ops.polyzamboni.flip_flap_op()
-            return {"FINISHED"}
-        elif self.design_actions == "RECOMPUTE_FLAPS":
-            bpy.ops.polyzamboni.flaps_recompute_op()
+            operators_backend.flip_glue_flaps(ao_mesh, selected_edges)
+        elif self.design_actions == "SMART_TRIM_FLAPS":
+            operators_backend.smart_trim_glue_flaps(ao_mesh, selected_edges)
+        elif self.design_actions == "ADD_FLAPS":
+            operators_backend.add_glue_flaps(ao_mesh, selected_edges)
+        elif self.design_actions == "REMOVE_FLAPS":
+            operators_backend.remove_glue_flaps(ao_mesh, selected_edges)
+
+        ao_bmesh.free()
+        update_all_polyzamboni_drawings(None, context)
+        update_all_page_layout_drawings(None, context)
+        
         return {"FINISHED"}
 
     @classmethod

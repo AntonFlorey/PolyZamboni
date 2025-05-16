@@ -73,7 +73,13 @@ class ConnectedComponent():
         instance.glueflap_geometry = {}
         instance.glueflap_collisions = {}
         return instance
-    
+
+    def get_unfolded_vertex_coordinates(self, vertex_coords_3d, face_index, local_coords_per_face):
+        """ Maps a 3D point on a given face to the unfolded face in 2D """
+        face_cs = local_coords_per_face[face_index]
+        face_transform_to_root = self.unfolding_affine_transforms[face_index]
+        return face_transform_to_root * geometry.to_local_coords(vertex_coords_3d, *face_cs)
+
     def compute_2d_glue_flap_triangles(self, face_index, edge : bmesh.types.BMEdge, flap_angle, flap_height, inner_face_affine_transforms):
         triangles_in_local_edge_coords = glueflaps.compute_2d_glue_flap_triangles_edge_local(edge, flap_angle, flap_height)
         edge_to_root = self.unfolding_affine_transforms[face_index] @ inner_face_affine_transforms[face_index][edge.index]
@@ -138,6 +144,7 @@ class ConnectedComponent():
         return collision_detected
 
     def add_glue_flap(self, flap_edge_index, flap_triangles):
+        self.glueflap_collisions.setdefault(flap_edge_index, set())
         collision_occured = self.check_for_flap_collisions(flap_edge_index, flap_triangles, store_collisions=True)
         self.glueflap_geometry[flap_edge_index] = flap_triangles
         return collision_occured
@@ -219,7 +226,7 @@ class PaperModel():
             print("POLYZAMBONI ERROR: Exception occured while working on the paper model!")
             self.valid = False
         self.close()
-        return True 
+        #return True 
 
     def __init_mesh_data(self, mesh : Mesh):
         self.mesh = mesh
@@ -235,6 +242,7 @@ class PaperModel():
         self.zigzag_flaps = zamboni_props.prefer_alternating_flaps
         self.flap_height = zamboni_props.glue_flap_height
         self.flap_angle = zamboni_props.glue_flap_angle
+        self.smart_flap_trimming_enabled = zamboni_props.smart_trim_glue_flaps
 
     def write_back_mesh_data(self):
         # write geometric data
@@ -305,8 +313,8 @@ class PaperModel():
             self.write_back_mesh_data()
         else:
             print("POLYZAMBONI ERROR: Paper Model data was invalid. Removed all data.")
-            io.remove_all_polyzamboni_data(self.mesh)
-            self.zamboni_props.has_attached_paper_model = False
+            # io.remove_all_polyzamboni_data(self.mesh)
+            # self.zamboni_props.has_attached_paper_model = False
         self.bm.free()
 
     #################################
@@ -409,6 +417,14 @@ class PaperModel():
     def compute_all_glueflaps_greedily(self):
         self.__place_all_glue_flaps_via_greedy_dfs()
 
+    def remove_glue_flaps_around_edges(self, edge_indices):
+        for edge_index in edge_indices:
+            self.__remove_glue_flap(edge_index)
+
+    def add_glue_flaps_around_edges(self, edge_indices):
+        for edge_index in edge_indices:
+            self.__add_some_glueflap_to_edge(edge_index)
+
     def flip_glue_flaps_around_edges(self, edge_indices):
         for edge_index in edge_indices:
             self.__flip_glue_flap(edge_index)
@@ -421,9 +437,12 @@ class PaperModel():
     def update_all_flap_geometry(self):
         self.__recompute_all_flap_geometry()
 
-    def test_if_two_touching_unfolded_components_overlap(self, component_id_1, component_id_2, join_face_index_1, join_face_index_2, join_verts_1, join_verts_2):
-        """ Test if two components undoldings would overlap if they were merged at the given faces. """
+    def smart_trim_glue_edges_at_selected_edges(self, edge_indices):
+        for edge_index in edge_indices:
+            self.__smart_trim_glue_flap(edge_index)
 
+    def compute_affine_transform_between_touching_components(self, component_id_1, component_id_2, join_face_index_1, join_face_index_2, join_verts_1, join_verts_2):
+        """ compute affine transformation from unfolding 1 to unfolding 2 """
         assert join_verts_1[0].index == join_verts_2[1].index
         assert join_verts_1[1].index == join_verts_2[0].index
 
@@ -445,7 +464,14 @@ class PaperModel():
         basis_mat_2 = np.array([x_ax_2, y_ax_2]).T
         rotate_edges_together = geometry.AffineTransform2D(linear_part=basis_mat_2 @ np.linalg.inv(basis_mat_1))
         # full transformation
-        transform_first_unfolding = orig_to_join_point_2 @ rotate_edges_together @ join_point_1_to_orig
+        transform_first_unfolding : geometry.AffineTransform2D = orig_to_join_point_2 @ rotate_edges_together @ join_point_1_to_orig
+        return transform_first_unfolding
+
+    def test_if_two_touching_unfolded_components_overlap(self, component_id_1, component_id_2, join_face_index_1, join_face_index_2, join_verts_1, join_verts_2):
+        """ Test if two components undoldings would overlap if they were merged at the given faces. """
+        component_1 : ConnectedComponent = self.connected_components[component_id_1]
+        component_2 : ConnectedComponent = self.connected_components[component_id_2]
+        transform_first_unfolding = self.compute_affine_transform_between_touching_components(component_id_1, component_id_2, join_face_index_1, join_face_index_2, join_verts_1, join_verts_2)
 
         # make a picture for debugging
         # all_triangles_combined = []
@@ -595,6 +621,28 @@ class PaperModel():
         # assertion for testing
         assert nx.number_connected_components(subgraph_with_cuts_applied) == len(self.connected_components.keys())
 
+    def __remove_glue_flap(self, edge_index):
+        if edge_index not in self.glueflap_dict:
+            return
+        halfedge_with_flap = self.glueflap_dict[edge_index]
+        component_with_flap : ConnectedComponent = self.connected_components[self.face_to_component_index_dict[self.halfedge_to_face_dict[halfedge_with_flap].index]]
+        component_with_flap.remove_glue_flap(edge_index)
+        del self.glueflap_dict[edge_index]
+
+    def __add_some_glueflap_to_edge(self, edge_index):
+        if edge_index in self.glueflap_dict:
+            return
+        if not utils.mesh_edge_is_cut(edge_index, self.edge_constraints):
+            return
+        if self.bm.edges[edge_index].is_boundary:
+            return
+        flap_halfedge = tuple([v.index for v in self.bm.edges[edge_index].verts])
+        connected_component_1 : ConnectedComponent = self.connected_components[self.face_to_component_index_dict[self.halfedge_to_face_dict[flap_halfedge].index]]
+        connected_component_2 : ConnectedComponent = self.connected_components[self.face_to_component_index_dict[self.halfedge_to_face_dict[tuple(reversed(flap_halfedge))].index]]
+        if connected_component_1.cyclic or connected_component_2.cyclic:
+            return
+        self.__add_glueflap_to_one_halfedge(flap_halfedge)
+
     def __add_glueflap_to_one_halfedge(self, preferred_halfedge):
         """ Returns: The used halfedge, no new overlaps (bool) """
         bm_edge : bmesh.types.BMEdge = utils.find_bmesh_edge_of_halfedge(self.bm, preferred_halfedge)
@@ -607,7 +655,7 @@ class PaperModel():
         
         preferred_mesh_face = self.halfedge_to_face_dict[preferred_halfedge]
         preferred_component : ConnectedComponent = self.connected_components[self.face_to_component_index_dict[preferred_mesh_face.index]]
-        preferred_triangles = preferred_component.compute_2d_glue_flap_triangles(preferred_mesh_face.index, bm_edge, self.flap_angle, self.flap_height, self.inner_face_transforms)
+        preferred_triangles = self.__compute_glue_flap_geometry(bm_edge.index, preferred_halfedge)
         if not preferred_component.check_for_flap_collisions(bm_edge.index, preferred_triangles, store_collisions=False):
             self.glueflap_dict[bm_edge.index] = preferred_halfedge
             preferred_component.add_glue_flap(bm_edge.index, preferred_triangles)
@@ -616,7 +664,7 @@ class PaperModel():
         other_halfedge = (preferred_halfedge[1], preferred_halfedge[0])
         other_face = self.halfedge_to_face_dict[other_halfedge]
         other_component : ConnectedComponent = self.connected_components[self.face_to_component_index_dict[other_face.index]]
-        other_triangles = other_component.compute_2d_glue_flap_triangles(other_face.index, bm_edge, self.flap_angle, self.flap_height, self.inner_face_transforms)
+        other_triangles = self.__compute_glue_flap_geometry(bm_edge.index, other_halfedge)
         if not other_component.check_for_flap_collisions(bm_edge.index, other_triangles, store_collisions=False):
             self.glueflap_dict[bm_edge.index] = other_halfedge
             other_component.add_glue_flap(bm_edge.index, other_triangles)
@@ -635,7 +683,7 @@ class PaperModel():
         opp_halfedge = (curr_halfedge[1], curr_halfedge[0])
         opp_bm_face = self.halfedge_to_face_dict[opp_halfedge]
         opp_component : ConnectedComponent = self.connected_components[self.face_to_component_index_dict[opp_bm_face.index]]
-        opp_triangles = opp_component.compute_2d_glue_flap_triangles(opp_bm_face.index, self.bm.edges[edge_index], self.flap_angle, self.flap_height, self.inner_face_transforms)
+        opp_triangles = self.__compute_glue_flap_geometry(edge_index, opp_halfedge)
         opp_component.add_glue_flap(edge_index, opp_triangles)
         self.glueflap_dict[edge_index] = opp_halfedge
 
@@ -691,6 +739,7 @@ class PaperModel():
                         continue
                     dfs_stack.append((v1, nb_v, curr_flap_01))
 
+        self.__assert_that_all_glue_flap_data_is_valid()
         return no_overlaps_introduced
 
     def __greedy_update_flaps_after_touching_edges(self, touched_edge_ids):
@@ -698,9 +747,7 @@ class PaperModel():
         updated_components = set()
         for touched_edge_index in touched_edge_ids:
             linked_face_ids = [f.index for f in self.bm.edges[touched_edge_index].link_faces]
-            if len(linked_face_ids) == 1:
-                continue # boundary edge does nothing
-            assert len(linked_face_ids) == 2 # manifold mesh please!
+            assert len(linked_face_ids) <= 2 # manifold mesh please!
             for f_id in linked_face_ids:
                 updated_components.add(self.face_to_component_index_dict[f_id])
             
@@ -774,7 +821,7 @@ class PaperModel():
                         component_index_with_flap = self.face_to_component_index_dict[face_with_flap.index]
                         component_with_flap : ConnectedComponent = self.connected_components[component_index_with_flap]
                         if component_index_with_flap in updated_components:
-                            flap_triangles = component_with_flap.compute_2d_glue_flap_triangles(face_with_flap.index, curr_e, self.flap_angle, self.flap_height, self.inner_face_transforms)
+                            flap_triangles = self.__compute_glue_flap_geometry(curr_e.index, he_with_flap)
                             collision_occured = component_with_flap.add_glue_flap(curr_e.index, flap_triangles)
                             if collision_occured:
                                 no_flap_overlaps = False
@@ -791,6 +838,7 @@ class PaperModel():
                         continue
                     dfs_stack.append((v1, nb_v, curr_flap_01))
 
+        self.__assert_that_all_glue_flap_data_is_valid()
         return no_flap_overlaps
 
     def __recompute_all_flap_geometry(self):
@@ -799,5 +847,174 @@ class PaperModel():
         for edge_index, glueflap_halfedge in self.glueflap_dict.items():
             curr_bm_face = self.halfedge_to_face_dict[glueflap_halfedge]
             curr_component : ConnectedComponent = self.connected_components[self.face_to_component_index_dict[curr_bm_face.index]]
-            curr_triangles = curr_component.compute_2d_glue_flap_triangles(curr_bm_face.index, self.bm.edges[edge_index], self.flap_angle, self.flap_height, self.inner_face_transforms)
+            curr_triangles = self.__compute_glue_flap_geometry(edge_index, glueflap_halfedge)
             curr_component.add_glue_flap(edge_index, curr_triangles)
+        self.__assert_that_all_glue_flap_data_is_valid()
+
+    def __compute_glue_flap_geometry(self, edge_index, halfedge):
+        if self.smart_flap_trimming_enabled:
+            res =  self.__compute_trimmed_glue_flap_geometry(edge_index, halfedge)
+        else:
+            res = self.__compute_non_trimmed_glue_flap_geometry(edge_index, halfedge)
+        for triangle in res:
+            assert geometry.signed_triangle_area(*triangle) > 0
+        return res
+
+    def __compute_non_trimmed_glue_flap_geometry(self, edge_index, halfedge):
+        curr_bm_face = self.halfedge_to_face_dict[halfedge]
+        curr_component : ConnectedComponent = self.connected_components[self.face_to_component_index_dict[curr_bm_face.index]]
+        return curr_component.compute_2d_glue_flap_triangles(curr_bm_face.index, self.bm.edges[edge_index], self.flap_angle, self.flap_height, self.inner_face_transforms)
+
+    def __compute_trimmed_glue_flap_geometry(self, edge_index, halfedge):
+        curr_bm_face = self.halfedge_to_face_dict[halfedge]
+        curr_component_index = self.face_to_component_index_dict[curr_bm_face.index]
+        curr_component : ConnectedComponent = self.connected_components[curr_component_index]
+        opp_halfedge = (halfedge[1], halfedge[0])
+        opp_bm_face = self.halfedge_to_face_dict[opp_halfedge]
+        opp_component_index = self.face_to_component_index_dict[opp_bm_face.index]
+        opp_component : ConnectedComponent = self.connected_components[opp_component_index]
+
+        if curr_component.cyclic or opp_component.cyclic:
+            print("POLYZAMBONI WARNING: Tried to compute glue flap geometry between cyclic components!")
+            return None
+
+        # get face boundary and its unfolded geometry
+        opp_face_edges = []
+        boundary_coordinates_dict = {}
+        for e in opp_bm_face.edges:
+            opp_face_edges.append(e)
+            for v in e.verts:
+                boundary_coordinates_dict[v.index] = opp_component.get_unfolded_vertex_coordinates(v.co, opp_bm_face.index, self.local_coord_system_per_face)
+
+        # find the two edges incident to the edge with glue flap
+        e0 : bmesh.types.BMEdge = None
+        e1 : bmesh.types.BMEdge = None
+        e : bmesh.types.BMEdge
+        for e in opp_face_edges:
+            if e.index == edge_index:
+                continue
+            edge_vert_ids = [v.index for v in e.verts]
+            if opp_halfedge[0] in edge_vert_ids:
+                e0 = e
+            if opp_halfedge[1] in edge_vert_ids:
+                e1 = e
+        if not (e0 is not None and e1 is not None and e0.index != e1.index):
+            print("Edges incident to glueflap edge:", e0, e1)
+            v0 = self.bm.verts[opp_halfedge[0]]
+            v1 = self.bm.verts[opp_halfedge[1]]
+            selected_line = [boundary_coordinates_dict[v0.index], boundary_coordinates_dict[v1.index]]
+            boundary_lines = []
+            for e in opp_face_edges:
+                boundary_lines.append([boundary_coordinates_dict[e.verts[0].index], boundary_coordinates_dict[e.verts[1].index]])
+            geometry.debug_draw_component_outline_with_selected_edge(boundary_lines, selected_line, "glueflap_debugging_img")
+
+            all_triangles_combined = []
+            for component_triangles_1 in curr_component.unfolded_face_geometry.values():
+                all_triangles_combined += component_triangles_1
+            geometry.debug_draw_polygons_2d(all_triangles_combined, "glueflap_trimming_debug_img")
+
+        assert e0 is not None and e1 is not None and e0.index != e1.index
+
+        # compute the angles between the glue flap edge and the two incident edges
+        v0 = self.bm.verts[opp_halfedge[0]]
+        incident_v0 = e0.other_vert(v0)
+        v1 = self.bm.verts[opp_halfedge[1]]
+        incident_v1 = e1.other_vert(v1)
+        v0_coords = boundary_coordinates_dict[v0.index]
+        v1_coords = boundary_coordinates_dict[v1.index]
+        incident_v0_coords = boundary_coordinates_dict[incident_v0.index]
+        incident_v1_coords = boundary_coordinates_dict[incident_v1.index]
+        angle0 = geometry.compute_angle_between_2d_vectors_atan2(v1_coords - v0_coords, incident_v0_coords - v0_coords)
+        angle1 = geometry.compute_angle_between_2d_vectors_atan2(incident_v1_coords - v1_coords, v0_coords - v1_coords)
+        angle0 = max(angle0 - np.deg2rad(1), 0.95 * angle0)
+        angle1 = max(angle1 - np.deg2rad(1), 0.95 * angle1)
+        optimal_angle = glueflaps.compute_optimal_flap_angle(self.bm.edges[edge_index], self.flap_angle, self.flap_height)
+        flap_angle_0 = angle0 if angle0 > 0 and angle0 < optimal_angle else optimal_angle
+        flap_angle_1 = angle1 if angle1 > 0 and angle1 < optimal_angle else optimal_angle
+
+        # compute edge target positions
+        flap_t0_edge_local, flap_t1_edge_local = glueflaps.compute_2d_glue_flap_endpoints_edge_local(self.bm.edges[edge_index], flap_angle_0, flap_angle_1)
+        flap_t0 = opp_component.unfolding_affine_transforms[opp_bm_face.index] @ self.inner_face_transforms[opp_bm_face.index][edge_index] * flap_t0_edge_local
+        flap_t1 = opp_component.unfolding_affine_transforms[opp_bm_face.index] @ self.inner_face_transforms[opp_bm_face.index][edge_index] * flap_t1_edge_local
+        vec0 = flap_t0 - v0_coords
+        flap_t0 = v0_coords + (vec0 / np.linalg.norm(vec0))
+        vec1 = flap_t1 - v1_coords
+        flap_t1 = v1_coords + (vec1 / np.linalg.norm(vec1))
+
+        # compute all intersections
+        intersection_times_0 = [self.flap_height / np.sin(flap_angle_0)]
+        intersection_times_1 = [self.flap_height / np.sin(flap_angle_1)]
+        for e in opp_face_edges:
+            if e.index == edge_index:
+                continue
+            curr_e_v0 = boundary_coordinates_dict[e.verts[0].index]
+            curr_e_v1 =  boundary_coordinates_dict[e.verts[1].index]
+            if e.index != e0.index:
+                curr_e0_t, component_edge_t = geometry.solve_2d_line_line_intersection(v0_coords, flap_t0, curr_e_v0, curr_e_v1)
+                if curr_e0_t is not None and component_edge_t >= 0 and component_edge_t <= 1 and curr_e0_t > 0:
+                    intersection_times_0.append(curr_e0_t)
+            if e.index != e1.index:
+                curr_e1_t, component_edge_t = geometry.solve_2d_line_line_intersection(v1_coords, flap_t1, curr_e_v0, curr_e_v1)
+                if curr_e1_t is not None and component_edge_t >= 0 and component_edge_t <= 1 and curr_e1_t > 0:
+                    intersection_times_1.append(curr_e1_t)
+
+        first_intersection_time_0 = min(intersection_times_0)
+        first_intersection_time_1 = min(intersection_times_1)
+
+        # compute intersection of both flap edges
+        flap_intersection_t_0, flap_intersection_t_1 = geometry.solve_2d_line_line_intersection(v0_coords, flap_t0, v1_coords, flap_t1)
+
+        # create 2d flap triangles in opp component
+        flap_triangles_in_opp_component = []
+        if flap_intersection_t_0 is not None and (first_intersection_time_0 + 1e-4 >= flap_intersection_t_0 or first_intersection_time_1 + 1e-4 >= flap_intersection_t_1):
+            # only one triangle
+            triangle_tip = v0_coords + flap_intersection_t_0 * (flap_t0 - v0_coords)
+            flap_triangles_in_opp_component.append([v1_coords, triangle_tip, v0_coords])
+        else:
+            # two triangles for the glue flap
+            flap_v0 = v0_coords + first_intersection_time_0 * (flap_t0 - v0_coords)
+            flap_v1 = v1_coords + first_intersection_time_1 * (flap_t1 - v1_coords)
+            flap_triangles_in_opp_component += [[v1_coords, flap_v1, flap_v0], [v1_coords, flap_v0, v0_coords]]
+
+        # get coordinates of flap triangles in the curr component
+        join_verts = [self.bm.verts[v_id] for v_id in halfedge]
+        to_curr_transform = self.compute_affine_transform_between_touching_components(opp_component_index, curr_component_index, opp_bm_face.index, curr_bm_face.index, list(reversed(join_verts)), join_verts)
+        flap_triangles_in_curr_component = [tuple([to_curr_transform * coord for coord in triangle]) for triangle in flap_triangles_in_opp_component]
+
+        # debugging
+        for triangle in flap_triangles_in_curr_component:
+            if geometry.signed_triangle_area(*triangle) <= 0:
+                all_triangles_combined = []
+                for component_triangles_1 in curr_component.unfolded_face_geometry.values():
+                    all_triangles_combined += component_triangles_1
+                all_triangles_combined += flap_triangles_in_curr_component
+                geometry.debug_draw_polygons_2d(all_triangles_combined, "glueflap_trimming_debug_img")
+                assert False
+
+        return flap_triangles_in_curr_component
+
+    def __smart_trim_glue_flap(self, edge_index):
+        if edge_index not in self.glueflap_dict:
+            return
+        curr_halfedge = self.glueflap_dict[edge_index]
+        curr_bm_face = self.halfedge_to_face_dict[curr_halfedge]
+        curr_component_index = self.face_to_component_index_dict[curr_bm_face.index]
+        curr_component : ConnectedComponent = self.connected_components[curr_component_index]
+        glueflap_geometry = self.__compute_trimmed_glue_flap_geometry(edge_index, curr_halfedge)
+        # delete old flap and add new one
+        curr_component.remove_glue_flap(edge_index)
+        curr_component.add_glue_flap(edge_index, glueflap_geometry)
+        self.__assert_that_all_glue_flap_data_is_valid()
+
+    def __assert_that_all_glue_flap_data_is_valid(self):
+        for edge_index, glueflap_he in self.glueflap_dict.items():
+            curr_bm_face = self.halfedge_to_face_dict[glueflap_he]
+            curr_component_index = self.face_to_component_index_dict[curr_bm_face.index]
+            curr_component : ConnectedComponent = self.connected_components[curr_component_index]
+            opp_halfedge = (glueflap_he[1], glueflap_he[0])
+            opp_bm_face = self.halfedge_to_face_dict[opp_halfedge]
+            opp_component_index = self.face_to_component_index_dict[opp_bm_face.index]
+            opp_component : ConnectedComponent = self.connected_components[opp_component_index]
+            assert not (curr_component.cyclic or opp_component.cyclic)
+            assert edge_index in curr_component.glueflap_geometry.keys()
+            assert edge_index in curr_component.glueflap_collisions.keys()

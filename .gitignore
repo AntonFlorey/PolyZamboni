@@ -162,3 +162,5 @@ cython_debug/
 # local debug images
 triangulation_crash_report.png
 adjacent_components_debug_img.png
+glueflap_debugging_img.png
+glueflap_trimming_debug_img.png

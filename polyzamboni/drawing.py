@@ -437,5 +437,6 @@ def update_all_polyzamboni_drawings(self, context):
                                                                                        general_mesh_props.glue_flap_height, connected_components, face_to_component_dict)
         show_glue_flaps(glue_flap_quality_dict)
 
+    bm.free()
     # Trigger a redraw of all screen areas
     redraw_view_3d(context)

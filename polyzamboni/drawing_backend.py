@@ -3,7 +3,7 @@ Functions in this file provide all data necessary for rendering feedback.
 """
 
 from bpy.types import Mesh
-from bmesh.types import BMesh
+from bmesh.types import BMesh, BMFace
 import numpy as np
 import mathutils
 import math
@@ -14,7 +14,7 @@ from . import io
 from . import utils
 from .geometry import AffineTransform2D, triangulate_3d_polygon, face_corner_convex_3d, solve_for_weird_intersection_point
 from .utils import mesh_edge_is_cut, find_bmesh_edge_of_halfedge
-from .glueflaps import component_has_overlapping_glue_flaps, flap_is_overlapping, compute_3d_glue_flap_triangles_inside_face
+from .glueflaps import component_has_overlapping_glue_flaps, flap_is_overlapping, compute_3d_glue_flap_coords_in_glued_face
 from .printprepper import ComponentPrintData, CutEdgeData, FoldEdgeData, FoldEdgeAtGlueFlapData, ColoredTriangleData
 
 def make_dotted_lines(line_array, target_line_length, max_segments = 100, linestyle = (1,1)):
@@ -254,11 +254,14 @@ def get_lines_array_per_glue_flap_quality(mesh : Mesh, bmesh : BMesh, face_offse
                                           connected_components = None,
                                           face_to_component_dict = None):
     glue_flaps_dict = io.read_glueflap_halfedge_dict(mesh)
+    glueflap_geometry = io.read_glue_flap_geometry_per_edge_per_component(mesh)
     glue_flap_collision_dict = io.read_glue_flap_collisions_dict(mesh)
-    halfedge_to_face_dict = utils.construct_halfedge_to_face_dict(bmesh)
+    unfolding_affine_transforms = io.read_affine_transforms_to_roots(mesh)
+    local_coord_system_per_face = io.read_local_coordinate_systems_per_face(mesh)
     if connected_components is None:
         connected_components, face_to_component_dict = io.read_connected_components(mesh)
     cyclic_components = io.read_components_with_cycles_set(mesh)
+    halfedge_to_face_dict = utils.construct_halfedge_to_face_dict(bmesh)
 
     bmesh.edges.ensure_lookup_table()
     quality_dict = {
@@ -268,13 +271,15 @@ def get_lines_array_per_glue_flap_quality(mesh : Mesh, bmesh : BMesh, face_offse
         }
     for edge_index, halfedge in glue_flaps_dict.items():
         opp_halfedge = (halfedge[1], halfedge[0])
-        component_id_of_halfedge = face_to_component_dict[halfedge_to_face_dict[halfedge].index]
-        face_of_opp_halfedge = halfedge_to_face_dict[opp_halfedge]
+        face_of_halfedge : BMFace = halfedge_to_face_dict[halfedge]
+        component_id_of_halfedge = face_to_component_dict[face_of_halfedge.index]
+        face_of_opp_halfedge : BMFace = halfedge_to_face_dict[opp_halfedge]
         component_id_of_opp_halfedge = face_to_component_dict[face_of_opp_halfedge.index]
 
         if component_id_of_opp_halfedge in cyclic_components:
             continue # there is no valid unfolding of the opposite component
-        flap_triangles_3d = compute_3d_glue_flap_triangles_inside_face(mesh, face_of_opp_halfedge.index, utils.find_bmesh_edge_of_halfedge(bmesh, halfedge), flap_angle, flap_height)
+        flap_triangles_3d = compute_3d_glue_flap_coords_in_glued_face(bmesh, component_id_of_halfedge, face_of_halfedge.index, bmesh.edges[edge_index], halfedge, component_id_of_opp_halfedge, face_of_opp_halfedge.index,
+                                                                      glueflap_geometry, unfolding_affine_transforms, local_coord_system_per_face)
         flap_line_array = []
         if len(flap_triangles_3d) == 1:
             tri = flap_triangles_3d[0]
@@ -282,7 +287,7 @@ def get_lines_array_per_glue_flap_quality(mesh : Mesh, bmesh : BMesh, face_offse
         else:
             tri_0 = flap_triangles_3d[0]
             tri_1 = flap_triangles_3d[1]
-            flap_line_array = [tri_0[0], tri_0[1], tri_0[1], tri_0[2], tri_1[0], tri_1[1]]
+            flap_line_array = [tri_0[0], tri_0[1], tri_0[1], tri_0[2], tri_1[1], tri_1[2]]
         # apply offset
         flap_line_array = [world_matrix @ (mathutils.Vector(v) + 1.5 * face_offset * face_of_opp_halfedge.normal) for v in flap_line_array]
         if flap_is_overlapping(mesh, component_id_of_halfedge, edge_index, glue_flap_collision_dict):

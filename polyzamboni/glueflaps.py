@@ -10,6 +10,20 @@ import numpy as np
 from . import io
 from . import geometry
 
+def compute_optimal_flap_angle(edge : bmesh.types.BMEdge, flap_angle, flap_height):
+    x = flap_height / np.tan(flap_angle)
+    h = flap_height
+    l = edge.calc_length()
+    if l <= 2 * abs(x):
+        return np.arctan(2 * h / l)
+    return flap_angle
+
+def compute_2d_glue_flap_endpoints_edge_local(edge : bmesh.types.BMEdge, flap_angle_0, flap_angle_1):
+    l = edge.calc_length()
+    target_0 = np.array([np.cos(flap_angle_0), np.sin(flap_angle_0)])
+    target_1 = np.array([-np.cos(flap_angle_1), np.sin(flap_angle_1)]) + np.array([l, 0])
+    return target_0, target_1
+
 def compute_2d_glue_flap_triangles_edge_local(edge : bmesh.types.BMEdge, flap_angle, flap_height):
     x = flap_height / np.tan(flap_angle)
     h = flap_height
@@ -30,14 +44,42 @@ def compute_2d_glue_flap_triangles_edge_local(edge : bmesh.types.BMEdge, flap_an
     p_4_local_edge = np.array([l if convex_flap else l + x, 0])
     return [(p_1_local_edge, p_2_local_edge, p_3_local_edge), (p_1_local_edge, p_3_local_edge, p_4_local_edge)]
 
-def compute_3d_glue_flap_triangles_inside_face(mesh : Mesh, face_index, edge : bmesh.types.BMEdge, flap_angle, flap_height,
-                                               inner_face_affine_transforms = None, local_coordinate_systems = None):
-    triangles_in_local_edge_coords = compute_2d_glue_flap_triangles_edge_local(edge, flap_angle, flap_height)
-    triangles_flipped = [tuple([np.array([local_coord[0], -local_coord[1]]) for local_coord in triangle]) for triangle in triangles_in_local_edge_coords]
-    local_coords = io.read_local_coordinate_system_of_face(mesh, face_index) if local_coordinate_systems is None else local_coordinate_systems[face_index]
-    edge_to_local_coords = io.read_inner_affine_transform_of_edge_in_face(mesh, edge.index, face_index) if inner_face_affine_transforms is None else inner_face_affine_transforms[face_index][edge.index]
-    triangles_in_3d = [tuple(reversed([geometry.to_world_coords(edge_to_local_coords * local_coord, *local_coords) for local_coord in triangle])) for triangle in triangles_flipped]
-    return triangles_in_3d
+def compute_affine_transform_between_touching_components(component_id_1, component_id_2, join_face_index_1, join_face_index_2, join_verts,
+                                                         unfolding_affine_transforms, local_coord_system_per_face):
+        """ compute affine transformation from unfolding 1 to unfolding 2 """
+        join_verts_1 = join_verts
+        join_verts_2 = list(reversed(join_verts))
+        # translations
+        join_point_1 = unfolding_affine_transforms[component_id_1][join_face_index_1] * geometry.to_local_coords(join_verts_1[1].co, *local_coord_system_per_face[join_face_index_1])
+        join_point_2 = unfolding_affine_transforms[component_id_2][join_face_index_2] * geometry.to_local_coords(join_verts_2[0].co, *local_coord_system_per_face[join_face_index_2])
+        join_point_1_to_orig = geometry.AffineTransform2D(affine_part=-join_point_1)
+        orig_to_join_point_2 = geometry.AffineTransform2D(affine_part=join_point_2)
+        # rotation
+        other_join_point_1 = unfolding_affine_transforms[component_id_1][join_face_index_1] * geometry.to_local_coords(join_verts_1[0].co, *local_coord_system_per_face[join_face_index_1])
+        other_join_point_2 = unfolding_affine_transforms[component_id_2][join_face_index_2] * geometry.to_local_coords(join_verts_2[1].co, *local_coord_system_per_face[join_face_index_2])
+        x_ax_1, y_ax_1 = geometry.construct_orthogonal_basis_at_2d_edge(join_point_1, other_join_point_1)
+        x_ax_2, y_ax_2 = geometry.construct_orthogonal_basis_at_2d_edge(join_point_2, other_join_point_2)
+        basis_mat_1 = np.array([x_ax_1, y_ax_1]).T
+        basis_mat_2 = np.array([x_ax_2, y_ax_2]).T
+        rotate_edges_together = geometry.AffineTransform2D(linear_part=basis_mat_2 @ np.linalg.inv(basis_mat_1))
+        # full transformation
+        transform_first_unfolding : geometry.AffineTransform2D = orig_to_join_point_2 @ rotate_edges_together @ join_point_1_to_orig
+        return transform_first_unfolding
+
+def compute_3d_glue_flap_coords_in_glued_face(bm : bmesh.types.BMesh, component_index, face_index, edge : bmesh.types.BMEdge, halfedge,
+                                              opp_component_index, opp_face_index,
+                                              glueflap_geometry, unfolding_affine_transforms, local_coord_system_per_face):
+    # read the 2d flap triangles
+    glueflap_triangles_2d = glueflap_geometry[component_index][edge.index]
+
+    # transform to 3d world coords
+    bm.verts.ensure_lookup_table()
+    affine_transform_to_opp_unfolding = compute_affine_transform_between_touching_components(component_index, opp_component_index, face_index, opp_face_index, [bm.verts[v_id] for v_id in halfedge], 
+                                                                                             unfolding_affine_transforms, local_coord_system_per_face)
+    affine_transform_to_opp_local_face_coords = unfolding_affine_transforms[opp_component_index][opp_face_index].inverse() @ affine_transform_to_opp_unfolding
+    local_opp_face_coords = local_coord_system_per_face[opp_face_index]
+    glueflap_triangles_3d = [tuple([geometry.to_world_coords(affine_transform_to_opp_local_face_coords * coord, *local_opp_face_coords) for coord in triangle]) for triangle in glueflap_triangles_2d]
+    return glueflap_triangles_3d
 
 def check_if_edge_of_face_has_glue_flap(edge_index, face_index, glue_flap_halfedge_dict, halfedge_to_face_dict):
     if edge_index not in glue_flap_halfedge_dict.keys():

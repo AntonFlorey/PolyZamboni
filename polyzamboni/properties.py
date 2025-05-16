@@ -85,7 +85,7 @@ class ZamboniGeneralMeshProps(bpy.types.PropertyGroup):
         description="Determines the shape of all glue flaps",
         default=np.pi / 4,
         min=np.deg2rad(10),
-        max=np.deg2rad(170),
+        max=np.deg2rad(90),
         subtype="ANGLE",
         update=update_glueflap_geometry_callback
     )
@@ -94,10 +94,11 @@ class ZamboniGeneralMeshProps(bpy.types.PropertyGroup):
         description="If glue flaps should alternate along a patch boundary",
         default=True
     )
-    lock_glue_flaps : BoolProperty(
-        name="Lock Flap Positions",
-        description="Determines if glue flaps are allowed to be relocated when applying new settings",
-        default=False
+    smart_trim_glue_flaps : BoolProperty(
+        name="Smart flap trimming",
+        description="Glue flaps get automatically trimmed to fit on the piece it is glued onto",
+        default=True,
+        update=update_glueflap_geometry_callback
     )
     multi_touching_faces_present : BoolProperty(
         name="Multi touching faces present",

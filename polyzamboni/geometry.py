@@ -43,6 +43,22 @@ def debug_draw_polygons_2d(polygons_2d, filename):
     plt.savefig(filename)
     plt.close(fig)
 
+def debug_draw_component_outline_with_selected_edge(lines_2d, selected_line, filename):
+    fig, ax = plt.subplots()
+
+    for line in lines_2d:
+        ax.plot([line[0][0], line[1][0]], [line[0][1], line[1][1]], color="blue")
+    ax.plot([selected_line[0][0], selected_line[1][0]], [selected_line[0][1], selected_line[1][1]], color="red")
+
+    plt.axis('equal')
+    plt.xlabel('X-Achse')
+    plt.ylabel('Y-Achse')
+    plt.title('Connected component boundary with selected edge')
+    plt.grid(False)
+    plt.savefig(filename)
+    plt.close(fig)
+
+
 class AffineTransform2D():
     """ Affine Transformation in 2D Space """
     def __init__(self, linear_part = np.eye(2), affine_part = np.zeros(2)):
@@ -129,6 +145,14 @@ def construct_2d_space_along_face_edge(v_3d_from, v_3d_to, n_3d):
     y_ax = y_ax / np.linalg.norm(y_ax)
     orig = np.array(v_3d_from)
     return (orig, x_ax, y_ax)
+
+def compute_angle_between_2d_vectors_atan2(vec_1, vec_2):
+    v1, v1_orth = construct_orthogonal_basis_at_2d_edge(np.zeros(2), vec_1)
+    v2 = np.array(vec_2)
+    v2 = v2 / np.linalg.norm(v2)
+    # rotate v1 to (1,0) and apply the same rotation to v2
+    v2_rot = np.linalg.inv(np.array([v1, v1_orth]).T) @ v2
+    return np.arctan2(v2_rot[1], v2_rot[0])
 
 def affine_2d_transformation_between_two_2d_spaces_on_same_plane(space_a, space_b):
     """ Returns a 2d affine transformation that maps from space b to space a """
@@ -281,6 +305,18 @@ def solve_for_weird_intersection_point(center_point_3d, prev_point_3d, next_poin
     weird_p_2d = np.linalg.solve(M, rhs)
 
     return to_world_coords(weird_p_2d, *local_basis)
+
+def solve_2d_line_line_intersection(a0, a1, b0, b1):
+    a_dir = a1 - a0
+    b_dir = b1 - b0
+    M = np.array([a_dir, -b_dir]).T
+    det = np.linalg.det(M)
+    if abs(det) <= 1e-4:
+        # skip intersection test for near parallel lines
+        return None, None
+    intersection_times = np.linalg.solve(M, b0 - a0)
+    return intersection_times[0], intersection_times[1]
+
 
 def triangle_intersection_test_2d(t1_a, t1_b, t1_c, t2_a, t2_b, t2_c):
     if determinant_2d(t1_b - t1_a, t1_c - t1_a) <= 0:

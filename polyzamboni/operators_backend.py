@@ -89,6 +89,14 @@ def update_all_flap_geometry(mesh : Mesh):
     with PaperModel.from_existing(mesh) as papermodel:
         papermodel.update_all_flap_geometry()
 
+def add_glue_flaps(mesh : Mesh, edge_indices):
+    with PaperModel.from_existing(mesh) as papermodel:
+        papermodel.add_glue_flaps_around_edges(edge_indices)
+
+def remove_glue_flaps(mesh : Mesh, edge_indices):
+    with PaperModel.from_existing(mesh) as papermodel:
+        papermodel.remove_glue_flaps_around_edges(edge_indices)
+
 def flip_glue_flaps(mesh : Mesh, edge_indices):
     with PaperModel.from_existing(mesh) as papermodel:
         papermodel.flip_glue_flaps_around_edges(edge_indices)
@@ -96,6 +104,10 @@ def flip_glue_flaps(mesh : Mesh, edge_indices):
 def recompute_all_glue_flaps(mesh : Mesh):
     with PaperModel.from_existing(mesh) as papermodel:
         papermodel.compute_all_glueflaps_greedily()
+
+def smart_trim_glue_flaps(mesh : Mesh, edge_indices):
+    with PaperModel.from_existing(mesh) as papermodel:
+        papermodel.smart_trim_glue_edges_at_selected_edges(edge_indices)
 
 #################################
 #           Build Steps         #

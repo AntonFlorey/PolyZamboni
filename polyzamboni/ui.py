@@ -86,11 +86,6 @@ class MainPanel(bpy.types.Panel):
                         row = editing_box.row()
                         col1 = row.column()
                         col2 = row.column()
-                        col1.operator("polyzamboni.flaps_recompute_op")
-                        col2.prop(zamboni_props, "prefer_alternating_flaps", icon="RIGID_BODY", icon_only=True)
-                        row = editing_box.row()
-                        col1 = row.column()
-                        col2 = row.column()
                         col1.operator("polyzamboni.build_order_op")
                         col2.label(icon="MOD_BUILD")
                 else:
@@ -108,8 +103,8 @@ class MainPanel(bpy.types.Panel):
                 col3.label(icon="FILE_IMAGE")
 
 class GlueFlapSettingsPanel(bpy.types.Panel):
-    bl_label = "Glue Flap Settings"
-    bl_idname  = "POLYZAMBONI_PT_GlueFlapSettingsPanel"
+    bl_label = "Glue Flap Editing"
+    bl_idname  = "POLYZAMBONI_PT_GlueFlapEditingPanel"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_category = "PolyZamboni"
@@ -127,6 +122,11 @@ class GlueFlapSettingsPanel(bpy.types.Panel):
                 row = layout.row()
                 col1 = row.column()
                 col2 = row.column()
+                col1.operator("polyzamboni.flaps_recompute_op")
+                col2.prop(zamboni_props, "prefer_alternating_flaps", icon="RIGID_BODY", icon_only=True)
+                row = layout.row()
+                col1 = row.column()
+                col2 = row.column()
                 col1.prop(zamboni_props, "glue_flap_height", icon="DRIVER_DISTANCE")
                 col2.label(icon="DRIVER_DISTANCE")
                 row = layout.row()
@@ -134,6 +134,8 @@ class GlueFlapSettingsPanel(bpy.types.Panel):
                 col2 = row.column()
                 col1.prop(zamboni_props, "glue_flap_angle", icon="DRIVER_ROTATIONAL_DIFFERENCE")
                 col2.label(icon="DRIVER_ROTATIONAL_DIFFERENCE")
+                row = layout.row()
+                row.prop(zamboni_props, "smart_trim_glue_flaps")
             else: 
                 layout.label(text="No Cutgraph selected", icon="GHOST_DISABLED")
 
