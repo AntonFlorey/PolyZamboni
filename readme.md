@@ -44,7 +44,7 @@ To transform your 3D model into printable mesh pieces that can be glued together
 - `Remove Auto Cuts` removes all automatically added cuts. In case you are not happy with the results of the previously listed operation.
 - `Recompute Flaps` places glue flaps at all cut edges. The greedy algorithm tries to avoid overlaps of the printed pieces. There is also a toggle next to the button that lets you decide whether flaps should alternate along patch boundaries.
 - `Alt+C` opens the manual cuts pie menu. Here you can cut, clear or glue all selected edges. Glued edges can not be cut by the `Auto Unfold` operator and have no other purpose. You can also select multiple faces and mark them as one connected region via the `Define Region` operator. This automatically cuts all edges between selected and non-selected faces.
-- `Alt+X` opens the glue flaps pie menu. Here you can flip the glue flaps attached to all selected edges. 
+- `Alt+X` opens the glue flaps pie menu. Here you can add, remove and flip the glue flaps attached to all selected edges. 
 
 ### Intuitive feedback
 PolyZamboni renders feedback on top of your models. Dotted lines on top of mesh edges indicate one of the following:

@@ -180,7 +180,7 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
         self.__draw_line(ax, page_coords, self.cut_edge_linestyle, color=self.__linear_to_srgb(self.color_of_lines))
 
         # add edge number
-        if not self.show_edge_numbers:
+        if not self.show_edge_numbers or cut_edge_data.is_boundary:
             return
         self.__write_text_along_line(ax, page_coords, str(cut_edge_data.edge_index), self.edge_number_font_size, color=self.__linear_to_srgb(self.color_of_edge_numbers), offset_cm=self.edge_number_offset, flipped=page_flipped)
 

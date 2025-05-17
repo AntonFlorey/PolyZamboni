@@ -125,7 +125,7 @@ class ConnectedComponent():
         # first check against all triangles in the face
         for unfold_triangle in [triangle for triangle_list in self.unfolded_face_geometry.values() for triangle in triangle_list]:
             for flap_triangle in flap_triangles:
-                if geometry.triangle_intersection_test_2d(*unfold_triangle, *flap_triangle):
+                if geometry.triangle_intersection_test_2d(*unfold_triangle, *flap_triangle, eps=1e-3):
                     collision_detected = True
                     if store_collisions:
                         self.__store_glueflap_mesh_collision(flap_edge_index)
@@ -135,7 +135,7 @@ class ConnectedComponent():
         for other_edge_index, other_flap_triangles in self.glueflap_geometry.items():
             for other_flap_triangle in other_flap_triangles:
                 for flap_triangle in flap_triangles:
-                    if geometry.triangle_intersection_test_2d(*other_flap_triangle, *flap_triangle):
+                    if geometry.triangle_intersection_test_2d(*other_flap_triangle, *flap_triangle, eps=1e-3):
                         collision_detected = True
                         if store_collisions:
                             self.__store_glueflap_glueflap_collision(flap_edge_index, other_edge_index)
@@ -898,20 +898,20 @@ class PaperModel():
                 e0 = e
             if opp_halfedge[1] in edge_vert_ids:
                 e1 = e
-        if not (e0 is not None and e1 is not None and e0.index != e1.index):
-            print("Edges incident to glueflap edge:", e0, e1)
-            v0 = self.bm.verts[opp_halfedge[0]]
-            v1 = self.bm.verts[opp_halfedge[1]]
-            selected_line = [boundary_coordinates_dict[v0.index], boundary_coordinates_dict[v1.index]]
-            boundary_lines = []
-            for e in opp_face_edges:
-                boundary_lines.append([boundary_coordinates_dict[e.verts[0].index], boundary_coordinates_dict[e.verts[1].index]])
-            geometry.debug_draw_component_outline_with_selected_edge(boundary_lines, selected_line, "glueflap_debugging_img")
+        # if not (e0 is not None and e1 is not None and e0.index != e1.index):
+        #     print("Edges incident to glueflap edge:", e0, e1)
+        #     v0 = self.bm.verts[opp_halfedge[0]]
+        #     v1 = self.bm.verts[opp_halfedge[1]]
+        #     selected_line = [boundary_coordinates_dict[v0.index], boundary_coordinates_dict[v1.index]]
+        #     boundary_lines = []
+        #     for e in opp_face_edges:
+        #         boundary_lines.append([boundary_coordinates_dict[e.verts[0].index], boundary_coordinates_dict[e.verts[1].index]])
+        #     geometry.debug_draw_component_outline_with_selected_edge(boundary_lines, selected_line, "glueflap_debugging_img")
 
-            all_triangles_combined = []
-            for component_triangles_1 in curr_component.unfolded_face_geometry.values():
-                all_triangles_combined += component_triangles_1
-            geometry.debug_draw_polygons_2d(all_triangles_combined, "glueflap_trimming_debug_img")
+        #     all_triangles_combined = []
+        #     for component_triangles_1 in curr_component.unfolded_face_geometry.values():
+        #         all_triangles_combined += component_triangles_1
+        #     geometry.debug_draw_polygons_2d(all_triangles_combined, "glueflap_trimming_debug_img")
 
         assert e0 is not None and e1 is not None and e0.index != e1.index
 
@@ -982,14 +982,14 @@ class PaperModel():
         flap_triangles_in_curr_component = [tuple([to_curr_transform * coord for coord in triangle]) for triangle in flap_triangles_in_opp_component]
 
         # debugging
-        for triangle in flap_triangles_in_curr_component:
-            if geometry.signed_triangle_area(*triangle) <= 0:
-                all_triangles_combined = []
-                for component_triangles_1 in curr_component.unfolded_face_geometry.values():
-                    all_triangles_combined += component_triangles_1
-                all_triangles_combined += flap_triangles_in_curr_component
-                geometry.debug_draw_polygons_2d(all_triangles_combined, "glueflap_trimming_debug_img")
-                assert False
+        # for triangle in flap_triangles_in_curr_component:
+        #     if geometry.signed_triangle_area(*triangle) <= 0:
+        #         all_triangles_combined = []
+        #         for component_triangles_1 in curr_component.unfolded_face_geometry.values():
+        #             all_triangles_combined += component_triangles_1
+        #         all_triangles_combined += flap_triangles_in_curr_component
+        #         geometry.debug_draw_polygons_2d(all_triangles_combined, "glueflap_trimming_debug_img")
+        #         assert False
 
         return flap_triangles_in_curr_component
 

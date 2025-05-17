@@ -17,9 +17,10 @@ from . import utils
 from . import io
 
 class CutEdgeData():
-    def __init__(self, coords, edge_index):
+    def __init__(self, coords, edge_index, is_boundary):
         self.coords = coords
         self.edge_index = edge_index
+        self.is_boundary = is_boundary
 
 class FoldEdgeData():
     def __init__(self, coords, convex, fold_angle):
@@ -203,7 +204,7 @@ def compute_max_print_component_dimensions(obj : Object):
                         curr_component_print_data.add_fold_edges_at_flaps(FoldEdgeAtGlueFlapData(tuple(vertex_coords_unfolded), curr_edge.is_convex, curr_edge.calc_face_angle(), curr_edge.index))
                     else:
                         # this is a cut edge
-                        curr_component_print_data.add_cut_edge(CutEdgeData(tuple(vertex_coords_unfolded), curr_edge.index))
+                        curr_component_print_data.add_cut_edge(CutEdgeData(tuple(vertex_coords_unfolded), curr_edge.index, curr_edge.is_boundary))
 
         # collect edges for glue flaps
         for flap_triangles in glue_flap_triangles[c_id].values():
@@ -295,7 +296,7 @@ def create_print_data_for_all_components(obj : Object, scaling_factor):
                         curr_component_print_data.add_fold_edges_at_flaps(FoldEdgeAtGlueFlapData(tuple(vertex_coords_unfolded), curr_edge.is_convex, curr_edge.calc_face_angle(), curr_edge.index))
                     else:
                         # this is a cut edge
-                        curr_component_print_data.add_cut_edge(CutEdgeData(tuple(vertex_coords_unfolded), curr_edge.index))
+                        curr_component_print_data.add_cut_edge(CutEdgeData(tuple(vertex_coords_unfolded), curr_edge.index, curr_edge.is_boundary))
                 elif curr_edge.index not in fold_edge_index_set:
                     # this is a fold edge
                     fold_edge_index_set.add(curr_edge.index)

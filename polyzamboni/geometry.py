@@ -171,8 +171,7 @@ def signed_point_dist_to_line(point, v_a, v_b):
 def determinant_2d(col_1, col_2):
     return col_1[0] * col_2[1] - col_1[1] * col_2[0]
 
-def point_on_rhs_of_line_2d_exclusive(point, v_a, v_b):
-    eps = 1e-4
+def point_on_rhs_of_line_2d_exclusive(point, v_a, v_b, eps = 1e-4):
     return determinant_2d(v_b - v_a, point - v_a) < eps
 
 def point_in_2d_triangle(point, v_a, v_b, v_c, eps=0.0):
@@ -318,7 +317,7 @@ def solve_2d_line_line_intersection(a0, a1, b0, b1):
     return intersection_times[0], intersection_times[1]
 
 
-def triangle_intersection_test_2d(t1_a, t1_b, t1_c, t2_a, t2_b, t2_c):
+def triangle_intersection_test_2d(t1_a, t1_b, t1_c, t2_a, t2_b, t2_c, eps = 1e-4):
     if determinant_2d(t1_b - t1_a, t1_c - t1_a) <= 0:
         print("POLYZAMBONI ERROR: Faulty triangle detected with determinant", determinant_2d(t1_b - t1_a, t1_c - t1_a))
     if determinant_2d(t2_b - t2_a, t2_c - t2_a) <= 0:
@@ -328,10 +327,10 @@ def triangle_intersection_test_2d(t1_a, t1_b, t1_c, t2_a, t2_b, t2_c):
     assert determinant_2d(t2_b - t2_a, t2_c - t2_a) > 0
         
     for e_t1 in [(t1_a, t1_b), (t1_b, t1_c), (t1_c, t1_a)]:
-        if point_on_rhs_of_line_2d_exclusive(t2_a, *e_t1) and point_on_rhs_of_line_2d_exclusive(t2_b, *e_t1) and point_on_rhs_of_line_2d_exclusive(t2_c, *e_t1):
+        if point_on_rhs_of_line_2d_exclusive(t2_a, *e_t1, eps) and point_on_rhs_of_line_2d_exclusive(t2_b, *e_t1, eps) and point_on_rhs_of_line_2d_exclusive(t2_c, *e_t1, eps):
             return False
     for e_t2 in [(t2_a, t2_b), (t2_b, t2_c), (t2_c, t2_a)]:
-        if point_on_rhs_of_line_2d_exclusive(t1_a, *e_t2) and point_on_rhs_of_line_2d_exclusive(t1_b, *e_t2) and point_on_rhs_of_line_2d_exclusive(t1_c, *e_t2):
+        if point_on_rhs_of_line_2d_exclusive(t1_a, *e_t2, eps) and point_on_rhs_of_line_2d_exclusive(t1_b, *e_t2, eps) and point_on_rhs_of_line_2d_exclusive(t1_c, *e_t2, eps):
             return False
         
     return True
