@@ -751,7 +751,7 @@ class PolyZamboniExportPDFOperator(bpy.types.Operator, ExportHelper):
         # initialize exporter
         pdf_exporter = create_exporter_for_operator(self, "pdf")
         filename, extension = os.path.splitext(self.filepath)
-        
+
         # export file
         pdf_exporter.export(page_arrangement, filename)
 

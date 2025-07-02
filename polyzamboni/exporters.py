@@ -194,7 +194,8 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
     def __draw_fold_edge_at_glue_flap(self, ax : axes.Axes, fold_edge_at_flap_data : FoldEdgeAtGlueFlapData, page_transform : AffineTransform2D, page_flipped = False):
         page_coords = self.__transform_component_line_coords_to_page_coord(fold_edge_at_flap_data.coords, page_transform, page_flipped)
         if fold_edge_at_flap_data.fold_angle <= self.fold_hide_threshold_angle:
-            self.__draw_line(ax, page_coords, self.cut_edge_linestyle, color=self.__linear_to_srgb(self.color_of_lines))
+            pass
+            #self.__draw_line(ax, page_coords, self.cut_edge_linestyle, color=self.__linear_to_srgb(self.color_of_lines))
         else:
             self.__draw_line(ax, page_coords, self.convex_fold_edge_linestyle if fold_edge_at_flap_data.is_convex else self.concave_fold_edge_linestyle, color=self.__linear_to_srgb(self.color_of_lines))
         # add edge number
@@ -225,7 +226,7 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
 
     def __affine_transform_from_uv_to_vertices(self, vertices, uvs):
         a_t, b_t, c_t = tuple(np.asarray(v) for v in vertices)
-        a_uv, b_uv, c_uv = tuple(np.asarray(uv) for uv in uvs)
+        a_uv, b_uv, c_uv = tuple(uvs)
 
         o_t = a_t
         o_uv = a_uv
@@ -237,6 +238,9 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
         A_t = np.hstack((x_t.reshape((2,1)), y_t.reshape((2,1))))
         A_uv = np.hstack((x_uv.reshape((2,1)), y_uv.reshape((2,1))))
 
+        if np.allclose(np.linalg.det(A_uv), 0):
+            print("POLYZAMBONI ERROR: Bad UVs")
+            print("Debug data:", uvs, a_uv, b_uv, c_uv)
         # linear part
         linear_transform = A_t @ np.linalg.inv(A_uv)
 
@@ -289,10 +293,11 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
     def __create_page_figure(self, components_on_page, draw_textures = True, only_textures=False):
         # create a new figure for this page
         fig, ax = self.__create_new_page()
-        
+
         component_print_data : ComponentPrintData
         if draw_textures and only_textures:
             for component_print_data in components_on_page:
+                colored_triangle_data : ColoredTriangleData
                 for colored_triangle_data in component_print_data.colored_triangles:
                     self.__draw_colored_triangle(ax, colored_triangle_data, component_print_data.page_transform, page_flipped=(not self.prints_on_model_inside))
             return fig, ax

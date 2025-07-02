@@ -43,7 +43,7 @@ class ColoredTriangleData():
 
     def __init__(self, coords, uvs, abs_texture_path, color=None):
         self.coords = coords
-        self.uvs = uvs
+        self.uvs = [np.array(uv) for uv in uvs]
         self.absolute_texture_path = abs_texture_path # for textured faces 
         self.color = color # for monocolored faces
 

@@ -3,6 +3,5 @@ all = [
     "ui",
     "properties",
     "drawing",
-    "globals",
     "callbacks"
 ]
