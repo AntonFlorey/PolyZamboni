@@ -21,7 +21,7 @@ from .printprepper import ComponentPrintData, ColoredTriangleData, CutEdgeData, 
 if platform.system() == "Darwin":
     import matplotlib
     matplotlib.use("agg") # try to use a different backend 
-    
+
 # feel free to add more paper sizes (in cm)
 paper_sizes = {
     "A0" : (84.1, 118.8),
@@ -68,9 +68,10 @@ class PolyzamboniExporter(ABC):
                  color_of_lines = [0,0,0],
                  color_of_edge_numbers = [0,0,0],
                  color_of_build_steps = [0,0,0],
-                 build_step_font_size = 10):
+                 build_step_font_size = 10,
+                 triangle_bleed = 0.01):
         self.output_format = output_format
-        self.paper_size = paper_sizes[paper_size]
+        self.paper_size = paper_sizes[paper_size] if isinstance(paper_size, str) else paper_size
         self.line_width = line_width
         self.cut_edge_linestyle = cut_edge_ls
         self.convex_fold_edge_linestyle = convex_fold_edge_ls
@@ -88,6 +89,7 @@ class PolyzamboniExporter(ABC):
         self.color_of_edge_numbers = color_of_edge_numbers
         self.build_step_number_font_size = build_step_font_size
         self.builf_step_number_color = color_of_build_steps
+        self.triangle_bleed = triangle_bleed
 
         self.texture_images = {}
 
@@ -259,16 +261,14 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
         if image_path not in self.texture_images.keys():
             img = mpimg.imread(image_path)
             self.texture_images[image_path] = img
-        return self.texture_images[image_path]
 
     def __draw_textured_triangle(self, ax : axes.Axes, triangle_coords, triangle_uvs, image_path):
         clip_polygon = patches.Polygon(triangle_coords, closed=True, fill=None, transform=ax.transData)
-        # add the image texture
-
-        texture_image = self.__retrieve_texture_image(image_path)
+        # make sure the image texture exists
+        self.__retrieve_texture_image(image_path)
         texture_transform = self.__affine_transform_from_uv_to_vertices(triangle_coords, triangle_uvs)
         image_transform = texture_transform + ax.transData
-        im = ax.imshow(texture_image, origin='upper', extent = [0,1,0,1], transform=image_transform, zorder=-1)
+        im = ax.imshow(self.texture_images[image_path], origin='upper', extent = [0,1,0,1], transform=image_transform, zorder=-1)
         im.set_clip_path(clip_polygon)
 
     def __draw_solid_color_triangle(self, ax : axes.Axes, triangle_coords, color):
@@ -280,7 +280,7 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
             return # nothing to draw here
         
         triangle_page_coords = self.__transform_component_triangle_coords_to_page_coords(colored_tri_data.coords, page_transform, page_flipped)
-        thickened_triangle_coords = self.__create_thickened_triangle_coords(triangle_page_coords, 0.05)
+        thickened_triangle_coords = self.__create_thickened_triangle_coords(triangle_page_coords, self.triangle_bleed)
 
         if colored_tri_data.absolute_texture_path is not None:
             # draw texture

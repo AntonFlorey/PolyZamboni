@@ -385,7 +385,15 @@ def update_all_page_layout_drawings(self, context):
         components_on_pages[page_numbers_per_components[current_component_print_data.og_component_id]].append(current_component_print_data)
 
     # erstmal so
-    show_pages(num_pages, components_on_pages, paper_sizes[general_mesh_props.paper_size], None, 
+    if general_mesh_props.paper_size != "Custom":
+        paper_size = paper_sizes[general_mesh_props.paper_size]
+    else:
+        len_scale = context.scene.unit_settings.scale_length
+        paper_size = (100 * len_scale * general_mesh_props.custom_page_width, 100 * len_scale * general_mesh_props.custom_page_height)
+
+    show_pages(num_pages, components_on_pages, 
+               paper_size, 
+               None, 
                fold_angle_th=draw_settings.hide_fold_edge_angle_th, 
                color_components=draw_settings.show_component_colors, 
                show_step_numbers=draw_settings.show_build_step_numbers)

@@ -2,6 +2,7 @@
 This file contains several high level functions that meaningful combine multiple polyzamboni operations.
 """
 
+import bpy
 from bpy.types import Mesh, Object
 from bmesh.types import BMesh
 from enum import Enum
@@ -142,14 +143,22 @@ def read_custom_page_layout(obj : Object):
     return custom_components_on_pages
 
 def compute_and_save_page_layout(obj : Object, scaling_factor, paper_size, page_margin, component_margin, separate_materials):
-    page_size = paper_sizes[paper_size]
+    if isinstance(paper_size, str):
+        page_size = paper_sizes[paper_size]
+    else:
+        page_size = paper_size
     component_print_data = create_print_data_for_all_components(obj, scaling_factor)
     print_data_on_pages = fit_components_on_pages(component_print_data, page_size, page_margin, component_margin, separate_materials)
     # store computed layout
     mesh = obj.data
     general_props = mesh.polyzamboni_general_mesh_props
     general_props.model_scale = scaling_factor
-    general_props.paper_size = paper_size
+    if isinstance(paper_size, str):
+        general_props.paper_size = paper_size
+    else:
+        general_props.paper_size = "Custom"
+        general_props.custom_page_width = page_size[0] / (100 * bpy.context.scene.unit_settings.scale_length)
+        general_props.custom_page_height = page_size[1] / (100 * bpy.context.scene.unit_settings.scale_length)
     page_numbers_per_component = {}
     page_transforms_per_component = {}
     for page_index, component_print_data_on_page in enumerate(print_data_on_pages):

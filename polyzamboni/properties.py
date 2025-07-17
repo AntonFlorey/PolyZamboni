@@ -122,9 +122,22 @@ class ZamboniGeneralMeshProps(bpy.types.PropertyGroup):
             ("A8", "A8", "", "", 8),
             ("Letter", "Letter", ", ", 9),
             ("Legal", "Legal", "", "", 10),
-            ("Tabloid", "Tabloid", "", "", 11)
+            ("Tabloid", "Tabloid", "", "", 11),
+            ("Custom", "Custom", "", "", 12)
         ],
         default="A4"
+    )
+    custom_page_width : FloatProperty(
+        name="Width",
+        subtype="DISTANCE",
+        min=0.001,
+        default=0.21
+    )
+    custom_page_height : FloatProperty(
+        name="Height",
+        subtype="DISTANCE",
+        min=0.001,
+        default=0.297
     )
     model_scale : FloatProperty(
         name="Model scale",
@@ -165,9 +178,22 @@ class GeneralExportSettings(bpy.types.PropertyGroup):
             ("A8", "A8", "", "", 8),
             ("Letter", "Letter", ", ", 9),
             ("Legal", "Legal", "", "", 10),
-            ("Tabloid", "Tabloid", "", "", 11)
+            ("Tabloid", "Tabloid", "", "", 11),
+            ("Custom", "Custom", "", "", 12)
         ],
         default="A4"
+    )
+    custom_page_width : FloatProperty(
+        name="Width",
+        subtype="DISTANCE",
+        min=0.001,
+        default=0.21
+    )
+    custom_page_height : FloatProperty(
+        name="Height",
+        subtype="DISTANCE",
+        min=0.001,
+        default=0.297
     )
     page_margin: FloatProperty(
         name="Page margin",
@@ -300,6 +326,13 @@ class TextureExportSettings(bpy.types.PropertyGroup):
         description="When selected, build instructions and textures are printed on separate pages for two-sided printing",
         default=False
     )
+    triangle_bleed: FloatProperty(
+        name="Triangle bleed",
+        description="Each textured triangle drawn gets thickened by this amount. Increase this value to close visible gaps in your prints. A high value will lead to visible seams due to misalignment",
+        subtype="DISTANCE",
+        min=0,
+        default=0.0001
+    )
 
 class PageLayoutCreationSettings(bpy.types.PropertyGroup):
     paper_size: EnumProperty(
@@ -316,9 +349,22 @@ class PageLayoutCreationSettings(bpy.types.PropertyGroup):
             ("A8", "A8", "", "", 8),
             ("Letter", "Letter", ", ", 9),
             ("Legal", "Legal", "", "", 10),
-            ("Tabloid", "Tabloid", "", "", 11)
+            ("Tabloid", "Tabloid", "", "", 11),
+            ("Custom", "Custom", "", "", 12)
         ],
         default="A4"
+    )
+    custom_page_width : FloatProperty(
+        name="Width",
+        subtype="DISTANCE",
+        min=0.001,
+        default=0.21
+    )
+    custom_page_height : FloatProperty(
+        name="Height",
+        subtype="DISTANCE",
+        min=0.001,
+        default=0.297
     )
     page_margin: FloatProperty(
         name="Page margin",
