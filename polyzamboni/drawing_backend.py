@@ -15,7 +15,7 @@ from . import utils
 from .geometry import AffineTransform2D, triangulate_3d_polygon, face_corner_convex_3d, solve_for_weird_intersection_point
 from .utils import mesh_edge_is_cut, find_bmesh_edge_of_halfedge
 from .glueflaps import component_has_overlapping_glue_flaps, flap_is_overlapping, compute_3d_glue_flap_coords_in_glued_face
-from .printprepper import ComponentPrintData, CutEdgeData, FoldEdgeData, FoldEdgeAtGlueFlapData, ColoredTriangleData
+from .printprepper import ComponentPrintData, FoldEdgeData, FoldEdgeAtGlueFlapData, ColoredTriangleData
 
 def make_dotted_lines(line_array, target_line_length, max_segments = 100, linestyle = (1,1)):
     if target_line_length <= 0:
@@ -338,8 +338,11 @@ def compute_page_layout_render_data_of_component(component : ComponentPrintData,
     bg_verts = []
     bg_colors = []
 
-    for cut_edge_data in component.cut_edges + component.glue_flap_edges:
-        coords = [full_transform * coord for coord in cut_edge_data.coords]
+    cut_edges_coords = [cut_edge.coords for cut_edge in component.cut_edges]
+    for glue_flap_data in component.glue_flaps:
+        cut_edges_coords += glue_flap_data.edge_coords
+    for one_edge_coords in cut_edges_coords:
+        coords = [full_transform * coord for coord in one_edge_coords]
         full_lines += coords
     fold_edge_data : FoldEdgeData
     for fold_edge_data in component.fold_edges:

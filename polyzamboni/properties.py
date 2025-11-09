@@ -30,11 +30,18 @@ class DrawSettings(bpy.types.PropertyGroup):
         max=10,
         update=update_all_polyzamboni_drawings
     )
+    island_transparency: FloatProperty(
+        name="Region transparency",
+        default=0.5,
+        min=0,
+        max=1,
+        update=update_all_polyzamboni_drawings
+    )
     normal_offset: FloatProperty(
         name="Normal offset",
         default=0.01,
-        min=0.01,
-        max=0.5,
+        min=0.001,
+        max=1.0,
         update=update_all_polyzamboni_drawings
     )
     show_glue_flaps: BoolProperty(
@@ -249,12 +256,12 @@ class GeneralExportSettings(bpy.types.PropertyGroup):
         min=0,
         max=1
     )
-    print_on_inside: BoolProperty(
+    print_on_inside : BoolProperty(
         name="Prints inside of mesh",
         description="After glueing the pieces together, prints will be on the meshes inside if set to True",
         default=True
     )
-    scaling_mode: EnumProperty(
+    scaling_mode : EnumProperty(
         name="Scaling mode",
         items=[
             ("HEIGHT", "Target height", "Scales all pieces to achieve the desired model height", "DRIVER_DISTANCE", 0),
@@ -316,22 +323,34 @@ class LineExportSettings(bpy.types.PropertyGroup):
     )
 
 class TextureExportSettings(bpy.types.PropertyGroup):
-    apply_textures: BoolProperty(
+    apply_textures : BoolProperty(
         name="Apply textures",
         description="Applies some texture to all faces. If no texture can be found in a materials node tree, the diffuse color is used",
         default=True
     )
-    print_two_sided: BoolProperty(
+    print_two_sided : BoolProperty(
         name="Two sided texture mode",
         description="When selected, build instructions and textures are printed on separate pages for two-sided printing",
         default=False
     )
-    triangle_bleed: FloatProperty(
+    triangle_bleed : FloatProperty(
         name="Triangle bleed",
         description="Each textured triangle drawn gets thickened by this amount. Increase this value to close visible gaps in your prints. A high value will lead to visible seams due to misalignment",
         subtype="DISTANCE",
         min=0,
         default=0.0001
+    )
+    apply_glue_flap_color : BoolProperty(
+        name="Color glue flaps",
+        description="Enable this to color glue flap faces. This is helpful for knowing what has to be glued",
+        default=True
+    )
+    glue_flap_color : FloatVectorProperty(
+        name="Glue flap color",
+        subtype="COLOR",
+        default=[0.8,0.8,0.8],
+        min=0,
+        max=1
     )
 
 class PageLayoutCreationSettings(bpy.types.PropertyGroup):
@@ -416,7 +435,7 @@ def register():
     bpy.types.WindowManager.polyzamboni_auto_cuts_progress = FloatProperty(name="Auto Cuts Progress", min=0, max=1, default=0.0)
     bpy.types.WindowManager.polyzamboni_auto_cuts_running = BoolProperty(name="Auto Cuts computation running", default=False)
     bpy.types.WindowManager.polyzamboni_in_page_edit_mode = BoolProperty(name="Editing page layout", default=False)
-
+    
 def unregister():
     bpy.utils.unregister_class(DrawSettings)
     bpy.utils.unregister_class(ZamboniGeneralMeshProps)

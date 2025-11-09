@@ -152,17 +152,13 @@ class DrawSettingsPanel(bpy.types.Panel):
         layout = self.layout
         scene = context.scene
         drawing_settings = scene.polyzamboni_drawing_settings
-        row = layout.row()
-        row.prop(drawing_settings, "drawing_enabled")
-        row = layout.row()
-        row.prop(drawing_settings, "show_glue_flaps")
-        row = layout.row()
-        row.prop(drawing_settings, "color_faces_by_quality")
-        row = layout.row()
-        row.prop(drawing_settings, "dotted_line_length")
-        row = layout.row()
-        row.prop(drawing_settings, "normal_offset")
-
+        layout.row().prop(drawing_settings, "drawing_enabled")
+        layout.row().prop(drawing_settings, "show_glue_flaps")
+        layout.row().prop(drawing_settings, "color_faces_by_quality")
+        layout.row().prop(drawing_settings, "island_transparency")
+        layout.row().prop(drawing_settings, "dotted_line_length")
+        layout.row().prop(drawing_settings, "normal_offset")
+        
 class PageLayoutPanel(bpy.types.Panel):
     bl_label = "Poly Zamboni"
     bl_idname  = "POLYZAMBONI_PT_PageLayoutPanel"

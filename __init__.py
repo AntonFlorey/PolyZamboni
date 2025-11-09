@@ -1,7 +1,7 @@
 bl_info = {
     "name": "PolyZamboni",
     "author": "Anton Florey",
-    "version": (1,1,6),
+    "version": (1,1,7),
     "blender": (4,1,0),
     "location": "View3D",
     "warning": "",

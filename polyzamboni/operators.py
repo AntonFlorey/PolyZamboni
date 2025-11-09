@@ -15,6 +15,7 @@ from .autozamboni import greedy_auto_cuts
 from . import printprepper
 from . import operators_backend
 from . import utils
+from . import units
 from .zambonipolice import check_if_build_step_numbers_exist_and_make_sense, all_components_have_unfoldings, check_if_page_numbers_and_transforms_exist_for_all_components
 
 def _active_object_is_mesh(context : bpy.types.Context):
@@ -458,9 +459,9 @@ class AutoCutsOperator(bpy.types.Operator):
 
     def draw(self, context):
         layout = self.layout
-        write_custom_split_property_row(layout.row(), "Quality", self.properties, "quality_level", 0.5)
-        write_custom_split_property_row(layout.row(), "Loops", self.properties, "loop_alignment", 0.5)
-        write_custom_split_property_row(layout.row(), "Pieces per component", self.properties, "max_pieces_per_component", 0.5)
+        operators_backend.write_custom_split_property_row(layout.row(), "Quality", self.properties, "quality_level", 0.5)
+        operators_backend.write_custom_split_property_row(layout.row(), "Loops", self.properties, "loop_alignment", 0.5)
+        operators_backend.write_custom_split_property_row(layout.row(), "Pieces per component", self.properties, "max_pieces_per_component", 0.5)
 
     def execute(self, context):
         ao = context.active_object
@@ -524,168 +525,6 @@ class ZamboniGLueFlapEditingPieMenu(bpy.types.Menu):
         pie = layout.menu_pie() 
         pie.operator_enum("polyzamboni.glue_flap_editing_operator", "design_actions")
 
-def ext_list_to_filter_str(ext_list):
-    res = ""
-    for ext in ext_list[:-1]:
-        res += "*." + ext + ","
-    res += "*." + ext_list[-1]
-
-def write_custom_split_property_row(layout : bpy.types.UILayout, text, data, prop_name, split_factor, active=True):
-    custom_row = layout.row().split(factor=split_factor, align=True)
-    col_1, col_2 = (custom_row.column(), custom_row.column())
-    col_1.label(text=text)
-    col_2.prop(data, prop_name, text="")
-    custom_row.active = active
-
-def line_style_property_draw(layout : bpy.types.UILayout, text, data, prop_name, split_factor, linestyles):
-    ls_row = layout.row()
-    #ls_row.split(factor=split_factor, align=True)
-    ls_text_col, ls_enum_col = (ls_row.column(), ls_row.column())
-    ls_text_col.row().label(text=text)
-    ls_flow = ls_enum_col.column_flow(columns=3, align=True)#len(self.linestyles), align=True)
-    for style in linestyles:
-        ls_flow.column(align=True).prop_enum(data, prop_name, style[0])
-
-def export_draw_func(operator):
-    layout = operator.layout
-    
-    general_settings_props : GeneralExportSettings = operator.properties.general_settings
-    line_settings_props : LineExportSettings = operator.properties.line_settings
-    texture_settings_props : TextureExportSettings = operator.properties.texture_settings
-
-    # General settings
-    layout.label(text="General print settings", icon="TOOL_SETTINGS")
-    general_settings = layout.box()
-
-    # use custom layout
-    if operator.user_defined_page_layout_exists:
-        write_custom_split_property_row(general_settings, "Use custom layout", general_settings_props, "use_custom_layout", 0.6)
-        general_settings.separator(type="LINE")
-
-    if not (operator.user_defined_page_layout_exists and general_settings_props.use_custom_layout):
-        # paper size
-        write_custom_split_property_row(general_settings, "Paper size", general_settings_props, "paper_size", 0.6)
-        if general_settings_props.paper_size == "Custom":
-            page_size_box = general_settings.box()
-            page_size_box.label(text="Custom page size")
-            sizing_row = page_size_box.row()
-            sizing_row.column().prop(general_settings_props, "custom_page_width")
-            sizing_row.column().prop(general_settings_props, "custom_page_height")
-
-        # scaling mode
-        scaling_mode_row = general_settings.row().column_flow(columns=2, align=True)
-        scaling_mode_row.column(align=True).prop_enum(general_settings_props, "scaling_mode", "HEIGHT")
-        scaling_mode_row.column(align=True).prop_enum(general_settings_props, "scaling_mode", "SCALE")
-
-        if general_settings_props.scaling_mode == "HEIGHT":
-            # target model height
-            write_custom_split_property_row(general_settings, "Target height", general_settings_props, "target_model_height", 0.6)
-            curr_scale_factor = general_settings_props.target_model_height / operator.mesh_height
-            # set correct scaling
-            general_settings_props.sizing_scale = curr_scale_factor 
-        elif general_settings_props.scaling_mode == "SCALE":
-            write_custom_split_property_row(general_settings, "Model scale", general_settings_props, "sizing_scale", 0.6)
-            curr_scale_factor = general_settings_props.sizing_scale
-            # set target model height
-            general_settings_props.target_model_height = curr_scale_factor * operator.mesh_height
-        curr_page_size = exporters.paper_sizes[general_settings_props.paper_size] if general_settings_props.paper_size != "Custom" else (100 * operator.curr_len_scale * general_settings_props.custom_page_width, 100 * operator.curr_len_scale * general_settings_props.custom_page_height)
-
-        bu_to_cm_scale_factor =  100 * general_settings_props.target_model_height * operator.curr_len_scale / operator.mesh_height
-        page_margin_in_cm = 100 * operator.curr_len_scale * general_settings_props.page_margin
-        if operator.max_comp_with * bu_to_cm_scale_factor > curr_page_size[0] - 2 * page_margin_in_cm or operator.max_comp_height * bu_to_cm_scale_factor > curr_page_size[1] - 2 * page_margin_in_cm:
-            general_settings.row().label(icon="ERROR", text="A piece does not fit on one page!")
-        # margin
-        write_custom_split_property_row(general_settings, "Page margin", general_settings_props, "page_margin", 0.6)
-        # island spacing
-        write_custom_split_property_row(general_settings, "Island spacing", general_settings_props, "space_between_components", 0.6)
-        # one mat per page
-        write_custom_split_property_row(general_settings, "One material per page", general_settings_props, "one_material_per_page", 0.6)
-    # side of prints
-    write_custom_split_property_row(general_settings, "Prints inside", general_settings_props, "print_on_inside", 0.6)
-    # font settings
-    general_settings.separator(factor=0.2)
-    text_settings_row = general_settings.row().split(factor=0.55)
-    text_settings_left_col, text_settings_size_col, text_settings_color_col = (text_settings_row.column(), text_settings_row.column(), text_settings_row.column())
-    text_settings_left_col.row().label(text="Print?")
-    text_settings_size_col.row().label(text="Size")
-    text_settings_color_col.row().label(text="Color")
-    # edge numbers
-    text_settings_left_col.row().prop(general_settings_props, "show_edge_numbers", toggle=1, text="Edge numbers")
-    edge_number_size_row = text_settings_size_col.row()
-    edge_number_size_row.active = general_settings_props.show_edge_numbers
-    edge_number_size_row.prop(general_settings_props, "edge_number_font_size", text="")
-    edge_number_color_row = text_settings_color_col.row()
-    edge_number_color_row.active = general_settings_props.show_edge_numbers
-    edge_number_color_row.prop(general_settings_props, "edge_number_color", text="")
-    # step numbers
-    text_settings_left_col.row().prop(general_settings_props, "show_step_numbers", toggle=1, text="Step numbers")
-    step_number_size_row = text_settings_size_col.row()
-    step_number_size_row.active = general_settings_props.show_step_numbers
-    step_number_size_row.prop(general_settings_props, "build_steps_font_size", text="")
-    step_number_color_row = text_settings_color_col.row()
-    step_number_color_row.active = general_settings_props.show_step_numbers
-    step_number_color_row.prop(general_settings_props, "steps_color", text="")
-    if general_settings_props.show_step_numbers and not operator.build_steps_valid:
-        step_num_warning_row = general_settings.row()
-        step_num_warning_row.label(icon="ERROR", text="Invalid build step numbers!")
-
-    # Line settings
-    layout.label(text="Detailed line settings", icon="LINE_DATA")
-    line_settings = layout.box()
-    # line width
-    write_custom_split_property_row(line_settings, "Line width (pt)", line_settings_props, "line_width", 0.6)
-    # lines color
-    write_custom_split_property_row(line_settings, "Line color", line_settings_props, "lines_color", 0.6)
-    # hide fold edge threshold
-    write_custom_split_property_row(line_settings, "Fold edge threshold", line_settings_props, "hide_fold_edge_angle_th", 0.6)
-    # edge number offset
-    write_custom_split_property_row(line_settings, "Edge number offset", line_settings_props, "edge_number_offset", 0.6, general_settings_props.show_edge_numbers)
-    # linestyles
-    line_settings.separator(factor=0.2)
-    line_settings.row().label(text="Choose linestyles of:")
-    write_custom_split_property_row(line_settings, "Cut edges", line_settings_props, "cut_edge_ls", 0.6)
-    write_custom_split_property_row(line_settings, "Convex fold edges", line_settings_props, "convex_fold_edge_ls", 0.6)
-    write_custom_split_property_row(line_settings, "Concave fold edges", line_settings_props, "concave_fold_edge_ls", 0.6)
-    write_custom_split_property_row(line_settings, "Glue flap edges", line_settings_props, "glue_flap_ls", 0.6)
-
-    # Coloring / Texturing
-    layout.label(text="Texture settings", icon="TEXTURE")
-    texture_settings = layout.box()
-    texture_row = texture_settings.row().column_flow(columns=2, align=True)
-    show_textures_col, double_sided_col = (texture_row.column(align=True), texture_row.column(align=True))
-    show_textures_col.prop(texture_settings_props, "apply_textures", toggle=1)
-    double_sided_col.prop(texture_settings_props, "print_two_sided", toggle=1)
-    double_sided_col.active = texture_settings_props.apply_textures
-    write_custom_split_property_row(texture_settings, "Triangle bleed", texture_settings_props, "triangle_bleed", 0.6, texture_settings_props.apply_textures)
-
-
-def create_exporter_for_operator(operator, output_format="pdf"):
-    general_settings = operator.properties.general_settings
-    line_settings = operator.properties.line_settings
-    texture_settings = operator.properties.texture_settings
-    exporter = exporters.MatplotlibBasedExporter(output_format=output_format, 
-                                                 paper_size=general_settings.paper_size if general_settings.paper_size != "Custom" else 
-                                                 (100 * operator.curr_len_scale * general_settings.custom_page_width, 100 * operator.curr_len_scale * general_settings.custom_page_height),
-                                                 line_width=line_settings.line_width,
-                                                 cut_edge_ls=line_settings.cut_edge_ls,
-                                                 convex_fold_edge_ls=line_settings.convex_fold_edge_ls,
-                                                 concave_fold_edge_ls=line_settings.concave_fold_edge_ls,
-                                                 glue_flap_ls=line_settings.glue_flap_ls,
-                                                 fold_hide_threshold_angle=line_settings.hide_fold_edge_angle_th,
-                                                 show_edge_numbers=general_settings.show_edge_numbers,
-                                                 edge_number_font_size=general_settings.edge_number_font_size,
-                                                 edge_number_offset=100 * operator.curr_len_scale * line_settings.edge_number_offset,
-                                                 show_build_step_numbers=general_settings.show_step_numbers,
-                                                 apply_main_texture=texture_settings.apply_textures,
-                                                 print_on_inside=general_settings.print_on_inside,
-                                                 two_sided_w_texture=texture_settings.print_two_sided,
-                                                 color_of_lines=line_settings.lines_color,
-                                                 color_of_edge_numbers=general_settings.edge_number_color,
-                                                 color_of_build_steps=general_settings.steps_color,
-                                                 build_step_font_size=general_settings.build_steps_font_size,
-                                                 triangle_bleed=100 * operator.curr_len_scale * texture_settings.triangle_bleed)
-    return exporter
-
 class PolyZamboniExportPDFOperator(bpy.types.Operator, ExportHelper):
     """Export Unfolding of active object as pdf"""
     bl_label = "Export PDF"
@@ -710,26 +549,15 @@ class PolyZamboniExportPDFOperator(bpy.types.Operator, ExportHelper):
         ao = context.active_object
         active_mesh = ao.data
         self.build_steps_valid = check_if_build_step_numbers_exist_and_make_sense(active_mesh)
-        self.max_comp_with, self.max_comp_height = printprepper.compute_max_print_component_dimensions(ao)
+        self.max_fit_scaling = operators_backend.compute_max_fit_scaling_factor(ao, self.general_settings)
+
         self.mesh_height = utils.compute_mesh_height(active_mesh)
         if self.mesh_height == 0:
             print("POLYZAMBONI WARNING: Mesh has zero height!")
             self.mesh_height = 1 # to prevent crashes
-        self.curr_len_unit = context.scene.unit_settings.length_unit
-        self.curr_unit_system = context.scene.unit_settings.system
-        self.curr_len_scale = context.scene.unit_settings.scale_length
-        
-        #compute maximum target mesh height
-        page_margin_in_cm = 100 * self.curr_len_scale * self.general_settings.page_margin
-        max_w_in_cm = 100 * self.curr_len_scale * self.max_comp_with
-        max_h_in_cm = 100 * self.curr_len_scale * self.max_comp_height
-        if self.general_settings.paper_size != "Custom":
-            curr_page_size = exporters.paper_sizes[self.general_settings.paper_size]
-        else:
-            curr_page_size = (100 * self.curr_len_scale * self.general_settings.custom_page_width, 100 * self.curr_len_scale * self.general_settings.custom_page_height)
-        max_scaling = min((curr_page_size[0] - 2 * page_margin_in_cm) / max_w_in_cm, (curr_page_size[1] - 2 * page_margin_in_cm) / max_h_in_cm)
-        self.general_settings.sizing_scale = 0.99 * max_scaling
-        self.general_settings.target_model_height = 0.99 * max_scaling * self.mesh_height
+
+        self.general_settings.sizing_scale = 0.99 * self.max_fit_scaling
+        self.general_settings.target_model_height = 0.99 * self.max_fit_scaling * self.mesh_height
 
         # if it exists, load existing page layout
         self.user_defined_page_layout_exists = check_if_page_numbers_and_transforms_exist_for_all_components(active_mesh)
@@ -744,7 +572,7 @@ class PolyZamboniExportPDFOperator(bpy.types.Operator, ExportHelper):
         return super().invoke(context, event)
 
     def draw(self, context):
-        export_draw_func(self)
+        operators_backend.export_draw_func(self)
 
     def execute(self, context):
         # first, check if the selected model can be unfolded
@@ -757,14 +585,14 @@ class PolyZamboniExportPDFOperator(bpy.types.Operator, ExportHelper):
         if self.user_defined_page_layout_exists and self.general_settings.use_custom_layout:
             page_arrangement = self.custom_components_on_pages
         else:
-            component_print_info = printprepper.create_print_data_for_all_components(ao, printprepper.compute_scaling_factor_for_target_model_height(ao_mesh, 100 * self.curr_len_scale * self.general_settings.target_model_height))
+            component_print_info = printprepper.create_print_data_for_all_components(ao, printprepper.compute_scaling_factor_for_target_model_height(ao_mesh, units.blender_distance_to_cm(self.general_settings.target_model_height)))
             page_arrangement = printprepper.fit_components_on_pages(component_print_info,
-                                                                    exporters.paper_sizes[self.general_settings.paper_size] if self.general_settings.paper_size != "Custom" else (100 * self.curr_len_scale * self.general_settings.custom_page_width, 100 * self.curr_len_scale * self.general_settings.custom_page_height), 
-                                                                    100 * self.curr_len_scale * self.general_settings.page_margin, 
-                                                                    100 * self.curr_len_scale * self.general_settings.space_between_components, 
+                                                                    exporters.paper_sizes[self.general_settings.paper_size] if self.general_settings.paper_size != "Custom" else (units.blender_distance_to_cm(self.general_settings.custom_page_width), units.blender_distance_to_cm(self.general_settings.custom_page_height)), 
+                                                                    units.blender_distance_to_cm(self.general_settings.page_margin), 
+                                                                    units.blender_distance_to_cm(self.general_settings.space_between_components), 
                                                                     self.general_settings.one_material_per_page)
         # initialize exporter
-        pdf_exporter = create_exporter_for_operator(self, "pdf")
+        pdf_exporter = operators_backend.create_exporter_for_operator(self, "pdf")
         filename, extension = os.path.splitext(self.filepath)
 
         # export file
@@ -800,26 +628,15 @@ class PolyZamboniExportSVGOperator(bpy.types.Operator, ExportHelper):
         ao = context.active_object
         active_mesh = ao.data
         self.build_steps_valid = check_if_build_step_numbers_exist_and_make_sense(active_mesh)
-        self.max_comp_with, self.max_comp_height = printprepper.compute_max_print_component_dimensions(ao)
+        self.max_fit_scaling = operators_backend.compute_max_fit_scaling_factor(ao, self.general_settings)
+
         self.mesh_height = utils.compute_mesh_height(active_mesh)
         if self.mesh_height == 0:
             print("POLYZAMBONI WARNING: Mesh has zero height!")
             self.mesh_height = 1 # to prevent crashes
-        self.curr_len_unit = context.scene.unit_settings.length_unit
-        self.curr_unit_system = context.scene.unit_settings.system
-        self.curr_len_scale = context.scene.unit_settings.scale_length
-
-        #compute maximum target mesh height
-        page_margin_in_cm = 100 * self.curr_len_scale * self.general_settings.page_margin
-        max_w_in_cm = 100 * self.curr_len_scale * self.max_comp_with
-        max_h_in_cm = 100 * self.curr_len_scale * self.max_comp_height
-        if self.general_settings.paper_size != "Custom":
-            curr_page_size = exporters.paper_sizes[self.general_settings.paper_size]
-        else:
-            curr_page_size = (100 * self.curr_len_scale * self.general_settings.custom_page_width, 100 * self.curr_len_scale * self.general_settings.custom_page_height)
-        max_scaling = min((curr_page_size[0] - 2 * page_margin_in_cm) / max_w_in_cm, (curr_page_size[1] - 2 * page_margin_in_cm) / max_h_in_cm)
-        self.general_settings.sizing_scale = 0.99 * max_scaling
-        self.general_settings.target_model_height = 0.99 * max_scaling * self.mesh_height
+        
+        self.general_settings.sizing_scale = 0.99 * self.max_fit_scaling
+        self.general_settings.target_model_height = 0.99 * self.max_fit_scaling * self.mesh_height
 
         # if it exists, load existing page layout
         self.user_defined_page_layout_exists = check_if_page_numbers_and_transforms_exist_for_all_components(active_mesh)
@@ -832,7 +649,7 @@ class PolyZamboniExportSVGOperator(bpy.types.Operator, ExportHelper):
         return super().invoke(context, event)
 
     def draw(self, context):
-        export_draw_func(self)
+        operators_backend.export_draw_func(self)
 
     def execute(self, context):
         # first, check if the selected model can be unfolded
@@ -845,15 +662,15 @@ class PolyZamboniExportSVGOperator(bpy.types.Operator, ExportHelper):
         if self.user_defined_page_layout_exists and self.general_settings.use_custom_layout:
             page_arrangement = self.custom_components_on_pages
         else:
-            component_print_info = printprepper.create_print_data_for_all_components(ao, printprepper.compute_scaling_factor_for_target_model_height(ao_mesh, 100 * self.curr_len_scale * self.general_settings.target_model_height))
+            component_print_info = printprepper.create_print_data_for_all_components(ao, printprepper.compute_scaling_factor_for_target_model_height(ao_mesh, units.blender_distance_to_cm(self.general_settings.target_model_height)))
             page_arrangement = printprepper.fit_components_on_pages(component_print_info,
-                                                                    exporters.paper_sizes[self.general_settings.paper_size] if self.general_settings.paper_size != "Custom" else (100 * self.curr_len_scale * self.general_settings.custom_page_width, 100 * self.curr_len_scale * self.general_settings.custom_page_height), 
-                                                                    100 * self.curr_len_scale * self.general_settings.page_margin, 
-                                                                    100 * self.curr_len_scale * self.general_settings.space_between_components, 
+                                                                    exporters.paper_sizes[self.general_settings.paper_size] if self.general_settings.paper_size != "Custom" else (units.blender_distance_to_cm(self.general_settings.custom_page_width),units.blender_distance_to_cm(self.general_settings.custom_page_height)), 
+                                                                    units.blender_distance_to_cm(self.general_settings.page_margin), 
+                                                                    units.blender_distance_to_cm(self.general_settings.space_between_components), 
                                                                     self.general_settings.one_material_per_page)
 
         # initialize exporter
-        svg_exporter = create_exporter_for_operator(self, "svg")
+        svg_exporter = operators_backend.create_exporter_for_operator(self, "svg")
         filename, extension = os.path.splitext(self.filepath)
         
         # export file
@@ -876,79 +693,34 @@ class PolyZamboniPageLayoutOperator(bpy.types.Operator):
         # do stuff
         ao = context.active_object
         active_mesh = ao.data
-        self.max_comp_with, self.max_comp_height = printprepper.compute_max_print_component_dimensions(ao)
+        self.build_steps_valid = check_if_build_step_numbers_exist_and_make_sense(active_mesh)
+        self.max_fit_scaling = operators_backend.compute_max_fit_scaling_factor(ao, self.page_layout_options)
+        
         self.mesh_height = utils.compute_mesh_height(active_mesh)
         if self.mesh_height == 0:
             print("POLYZAMBONI WARNING: Mesh has zero height!")
             self.mesh_height = 1 # to prevent crashes
-        self.curr_len_unit = context.scene.unit_settings.length_unit
-        self.curr_unit_system = context.scene.unit_settings.system
-        self.curr_len_scale = context.scene.unit_settings.scale_length
-        
-        #compute maximum target mesh height
-        page_margin_in_cm = 100 * self.curr_len_scale * self.page_layout_options.page_margin
-        max_w_in_cm = 100 * self.curr_len_scale * self.max_comp_with
-        max_h_in_cm = 100 * self.curr_len_scale * self.max_comp_height
-        curr_page_size = exporters.paper_sizes[self.page_layout_options.paper_size] if self.page_layout_options.paper_size != "Custom" else (100 * self.curr_len_scale * self.page_layout_options.custom_page_width, 100 * self.curr_len_scale * self.page_layout_options.custom_page_height)
-        max_scaling = min((curr_page_size[0] - 2 * page_margin_in_cm) / max_w_in_cm, (curr_page_size[1] - 2 * page_margin_in_cm) / max_h_in_cm)
-        self.page_layout_options.sizing_scale = 0.99 * max_scaling
-        self.page_layout_options.target_model_height = 0.99 * max_scaling * self.mesh_height
+
+        self.page_layout_options.sizing_scale = 0.99 * self.max_fit_scaling
+        self.page_layout_options.target_model_height = 0.99 * self.max_fit_scaling * self.mesh_height
 
         wm = context.window_manager
         return wm.invoke_props_dialog(self, title="Page Layout Options")
 
     def draw(self, context):
-        layout : bpy.types.UILayout = self.layout
-        # paper size
-        write_custom_split_property_row(layout, "Paper size", self.page_layout_options, "paper_size", 0.6)
-        if self.page_layout_options.paper_size == "Custom":
-            page_size_box = layout.box()
-            page_size_box.label(text="Custom page size")
-            sizing_row = page_size_box.row()
-            sizing_row.column().prop(self.page_layout_options, "custom_page_width")
-            sizing_row.column().prop(self.page_layout_options, "custom_page_height")
-        # model scale
-        # scaling mode
-        scaling_mode_row = layout.row().column_flow(columns=2, align=True)
-        scaling_mode_row.column(align=True).prop_enum(self.page_layout_options, "scaling_mode", "HEIGHT")
-        scaling_mode_row.column(align=True).prop_enum(self.page_layout_options, "scaling_mode", "SCALE")
-
-        if self.page_layout_options.scaling_mode == "HEIGHT":
-            # target model height
-            write_custom_split_property_row(layout, "Target height", self.page_layout_options, "target_model_height", 0.6)
-            curr_scale_factor = self.page_layout_options.target_model_height / self.mesh_height
-            # set correct scaling
-            self.page_layout_options.sizing_scale = curr_scale_factor 
-        elif self.page_layout_options.scaling_mode == "SCALE":
-            write_custom_split_property_row(layout, "Model scale", self.page_layout_options, "sizing_scale", 0.6)
-            curr_scale_factor = self.page_layout_options.sizing_scale
-            # set target model height
-            self.page_layout_options.target_model_height = curr_scale_factor * self.mesh_height
-
-        bu_to_cm_scale_factor =  100 * self.page_layout_options.target_model_height * self.curr_len_scale / self.mesh_height
-        page_margin_in_cm = 100 * self.curr_len_scale * self.page_layout_options.page_margin
-        curr_page_size = exporters.paper_sizes[self.page_layout_options.paper_size] if self.page_layout_options.paper_size != "Custom" else (100 * self.curr_len_scale * self.page_layout_options.custom_page_width, 100 * self.curr_len_scale * self.page_layout_options.custom_page_height)
-        if self.max_comp_with * bu_to_cm_scale_factor > curr_page_size[0] - 2 * page_margin_in_cm or self.max_comp_height * bu_to_cm_scale_factor > curr_page_size[1] - 2 * page_margin_in_cm:
-            layout.row().label(icon="ERROR", text="A piece does not fit on one page!")
-
-        # one mat per page
-        write_custom_split_property_row(layout, "One material per page", self.page_layout_options, "one_material_per_page", 0.6)
-        # margin
-        write_custom_split_property_row(layout, "Page margin", self.page_layout_options, "page_margin", 0.6)
-        # island spacing
-        write_custom_split_property_row(layout, "Island spacing", self.page_layout_options, "space_between_components", 0.6)
+        operators_backend.page_layout_draw_func(self)
 
     def execute(self, context):
         ao = context.active_object
 
         my_options : PageLayoutCreationSettings = self.page_layout_options
-        scaling_factor = printprepper.compute_scaling_factor_for_target_model_height(ao.data, 100 * self.curr_len_scale * self.page_layout_options.target_model_height)
+        scaling_factor = printprepper.compute_scaling_factor_for_target_model_height(ao.data, units.blender_distance_to_cm(self.page_layout_options.target_model_height))
 
         operators_backend.compute_and_save_page_layout(ao, scaling_factor,
                                                        my_options.paper_size if my_options.paper_size != "Custom" else 
-                                                       (100 * self.curr_len_scale * my_options.custom_page_width, 100 * self.curr_len_scale * my_options.custom_page_height), 
-                                                       100 * self.curr_len_scale * my_options.page_margin, 
-                                                       100 * self.curr_len_scale * my_options.space_between_components, 
+                                                       (units.blender_distance_to_cm(my_options.custom_page_width),units.blender_distance_to_cm(my_options.custom_page_height)), 
+                                                       units.blender_distance_to_cm(my_options.page_margin), 
+                                                       units.blender_distance_to_cm(my_options.space_between_components), 
                                                        my_options.one_material_per_page)
 
         # trigger a redraw
@@ -992,7 +764,7 @@ class PolyZamboniStepNumberEditOperator(bpy.types.Operator):
 
     def draw(self, context):
         layout : bpy.types.UILayout = self.layout
-        write_custom_split_property_row(layout, "Step number", self.properties, "step_number", 0.6)
+        operators_backend.write_custom_split_property_row(layout, "Step number", self.properties, "step_number", 0.6)
 
 
     def execute(self, context):
@@ -1055,7 +827,7 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
         if self.general_mesh_props.paper_size != "Custom":
             self.paper_size = paper_sizes[self.general_mesh_props.paper_size] 
         else:
-            self.paper_size = (100 * context.scene.unit_settings.scale_length * self.general_mesh_props.custom_page_width, 100 * context.scene.unit_settings.scale_length * self.general_mesh_props.custom_page_height)
+            self.paper_size = (units.blender_distance_to_cm(self.general_mesh_props.custom_page_width, context),units.blender_distance_to_cm(self.general_mesh_props.custom_page_height, context))
 
         # collect all component print data
         component_print_data = create_print_data_for_all_components(ao, self.general_mesh_props.model_scale)

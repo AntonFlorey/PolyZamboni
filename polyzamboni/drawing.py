@@ -15,7 +15,7 @@ from . import drawing_backend
 from . import io
 from .zambonipolice import check_if_polyzamobni_data_exists_and_fits_to_bmesh, check_if_page_numbers_and_transforms_exist_for_all_components
 from .exporters import paper_sizes
-from .printprepper import ComponentPrintData, ColoredTriangleData, CutEdgeData, FoldEdgeData, GlueFlapEdgeData, FoldEdgeAtGlueFlapData, create_print_data_for_all_components
+from .printprepper import ComponentPrintData, ColoredTriangleData, CutEdgeData, FoldEdgeData, GlueFlapData, FoldEdgeAtGlueFlapData, create_print_data_for_all_components
 from .geometry import AffineTransform2D
 
 # colors (RWTH)
@@ -137,14 +137,15 @@ def triangles_draw_callback(vertex_positions, triangle_indices, color):
     shader = gpu.shader.from_builtin('UNIFORM_COLOR')
     gpu.state.face_culling_set("BACK")
     gpu.state.depth_test_set('LESS_EQUAL')
-    gpu.state.depth_mask_set(True)
+    if (color[3] < 1):  
+        gpu.state.blend_set('ALPHA')
     # prepare and draw batch
     batch = batch_for_shader(shader, 'TRIS', {"pos": vertex_positions}, indices=triangle_indices)
     shader.bind()
     shader.uniform_float("color", color)
     batch.draw(shader)
     # restore opengl defaults
-    gpu.state.depth_mask_set(False)
+    gpu.state.blend_set('NONE')
 
 #################################
 #        Handmade Cuts          #
@@ -211,17 +212,17 @@ def hide_region_quality_triangles():
     deactivate_draw_callback(_drawing_handle_region_quality_triangles)
     _drawing_handle_region_quality_triangles = None
 
-def region_quality_triangles_draw_callback(vertex_positions, regions_by_quality):
+def region_quality_triangles_draw_callback(vertex_positions, regions_by_quality, transparency):
     for quality, triangle_indices in regions_by_quality.items():
         if quality not in quality_color_mapping:
             print("POLYZAMBONI WARNING: Quality of provided region is not known!")
             continue
-        triangles_draw_callback(vertex_positions, triangle_indices, quality_color_mapping[quality])
+        triangles_draw_callback(vertex_positions, triangle_indices, (*quality_color_mapping[quality][:3], transparency))
 
-def show_region_quality_triangles(vertex_positions, regions_by_quality):
+def show_region_quality_triangles(vertex_positions, regions_by_quality, transparency):
     hide_region_quality_triangles()
     global _drawing_handle_region_quality_triangles
-    _drawing_handle_region_quality_triangles = bpy.types.SpaceView3D.draw_handler_add(region_quality_triangles_draw_callback, (vertex_positions, regions_by_quality), "WINDOW", "POST_VIEW")
+    _drawing_handle_region_quality_triangles = bpy.types.SpaceView3D.draw_handler_add(region_quality_triangles_draw_callback, (vertex_positions, regions_by_quality, transparency), "WINDOW", "POST_VIEW")
 
 #################################
 #           Glue Flaps          #
@@ -437,7 +438,7 @@ def update_all_polyzamboni_drawings(self, context):
         selected_component_id = general_mesh_props.selected_component_id if general_mesh_props.selected_component_id != -1 else None
         all_v_positions, quality_dict = drawing_backend.get_triangle_list_per_cluster_quality(active_mesh, bm, draw_settings.normal_offset, edge_constraints, 
                                                                                               world_matrix, connected_components, selected_component_id)
-        show_region_quality_triangles(all_v_positions, quality_dict)
+        show_region_quality_triangles(all_v_positions, quality_dict, draw_settings.island_transparency)
 
     if draw_settings.show_glue_flaps:
         # so far, the glue flap geometry gets computed on the fly each time this function is called

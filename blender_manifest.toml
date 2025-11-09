@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "polyzamboni"
-version = "1.1.6"
+version = "1.1.7"
 name = "PolyZamboni"
 tagline = "Papercraft in Blender"
 maintainer = "Anton Florey <anton.florey@googlemail.com>"

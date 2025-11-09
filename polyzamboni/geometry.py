@@ -316,7 +316,6 @@ def solve_2d_line_line_intersection(a0, a1, b0, b1):
     intersection_times = np.linalg.solve(M, b0 - a0)
     return intersection_times[0], intersection_times[1]
 
-
 def triangle_intersection_test_2d(t1_a, t1_b, t1_c, t2_a, t2_b, t2_c, eps = 1e-4):
     if determinant_2d(t1_b - t1_a, t1_c - t1_a) <= 0:
         print("POLYZAMBONI ERROR: Faulty triangle detected with determinant", determinant_2d(t1_b - t1_a, t1_c - t1_a))
@@ -334,3 +333,84 @@ def triangle_intersection_test_2d(t1_a, t1_b, t1_c, t2_a, t2_b, t2_c, eps = 1e-4
             return False
         
     return True
+
+def nonneg_atan2(x, y):
+    atan_val = np.arctan2(y, x)
+    if atan_val < 0:    
+        atan_val = 2.0 * np.pi + atan_val
+    assert atan_val >= 0
+    return atan_val
+
+def sweep_angle_sort(points):
+    '''Returns an index list'''
+    cog = np.mean(points, axis=0)
+    key_func = lambda i : nonneg_atan2(*(points[i] - cog))
+
+    return sorted(range(len(points)), key=key_func)
+
+def points_make_convex_corner(p_A, p_B, p_C):
+    '''Return 1 if convex, -1 of concvave and 0 if collinar'''
+    dir_AB = (p_B - p_A)
+    dir_BC = (p_C - p_B)
+    det = dir_AB[0] * dir_BC[1] - dir_AB[1] * dir_BC[0]
+    if np.allclose(det, 0):
+        return 0
+    return 1 if det > 0 else -1
+
+def compute_convex_hull(points):
+    '''Returns a list of convex hull vertex indices (subset of the input points in ccw order)'''
+
+    n = len(points)
+    sort_indices = sweep_angle_sort(points)
+    rightmost_iindex = np.argmax([points[sort_indices[i]][0] for i in range(len(points))])
+
+    convex_hull_indices = [rightmost_iindex]
+
+    for i in [(rightmost_iindex + j) % n for j in range(1,n+1)]:
+        p_C = points[sort_indices[i]]
+        while len(convex_hull_indices) > 1:
+            p_A = points[sort_indices[convex_hull_indices[-2]]]
+            p_B = points[sort_indices[convex_hull_indices[-1]]]
+            convexity = points_make_convex_corner(p_A, p_B, p_C)
+            if convexity == -1:
+                convex_hull_indices.pop()
+            else:
+                break
+        if not np.allclose(p_C, points[sort_indices[convex_hull_indices[-1]]]):
+            convex_hull_indices.append(i)
+
+    return [sort_indices[i] for i in convex_hull_indices]
+
+def compute_min_area_bounding_box_transformation(points):
+    '''A simple O(n^2) algorithm to find the min-area bounding box of a point cloud
+
+    Returns: min bounding box transformation (AffineTransform2D) 
+    '''
+    convex_hull_indices = compute_convex_hull(points)
+    assert len(convex_hull_indices) >= 4
+
+    min_area = np.inf
+    min_area_bb_transform = None
+    for i in range(len(convex_hull_indices) - 1):
+        p_A = points[convex_hull_indices[i]]
+        p_B = points[convex_hull_indices[i + 1]]
+        local_ax_X = p_B - p_A
+        local_ax_X = local_ax_X / np.linalg.norm(local_ax_X)
+        local_ax_Y = np.array([-local_ax_X[1], local_ax_X[0]])
+
+        min_corner = np.array([np.inf, np.inf])
+        max_corner = np.array([-np.inf, -np.inf])
+        for p in points:
+            local_coords_p = np.array([np.dot(p - p_A, local_ax_X), np.dot(p - p_A, local_ax_Y)])
+            min_corner = np.minimum(min_corner, local_coords_p)
+            max_corner = np.maximum(max_corner, local_coords_p)
+
+        area = np.prod(max_corner - min_corner)
+        if area < min_area:
+            if (max_corner[0] - min_corner[0]) >= max_corner[1] - min_corner[1]:
+                min_area_bb_transform = AffineTransform2D(np.column_stack((local_ax_X, local_ax_Y))).inverse()
+            else:
+                min_area_bb_transform = AffineTransform2D(np.column_stack((local_ax_Y, -local_ax_X))).inverse()
+            min_area = area
+    
+    return min_area_bb_transform

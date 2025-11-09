@@ -10,11 +10,12 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 import matplotlib.lines as lines
 import matplotlib.patches as patches
+import matplotlib.path as mpath
 import matplotlib.image as mpimg
 import matplotlib.transforms as mtransforms
 import numpy as np
 from .geometry import AffineTransform2D
-from .printprepper import ComponentPrintData, ColoredTriangleData, CutEdgeData, FoldEdgeData, GlueFlapEdgeData, FoldEdgeAtGlueFlapData
+from .printprepper import ComponentPrintData, ColoredTriangleData, CutEdgeData, FoldEdgeData, GlueFlapData, FoldEdgeAtGlueFlapData
 
 # when testing on macosx, closing a matplotlib plot crashes blender. This is a workaround that kind of works. 
 # if anyone knows a better way of dealing with this problem let me know :)
@@ -69,7 +70,9 @@ class PolyzamboniExporter(ABC):
                  color_of_edge_numbers = [0,0,0],
                  color_of_build_steps = [0,0,0],
                  build_step_font_size = 10,
-                 triangle_bleed = 0.01):
+                 triangle_bleed = 0.01,
+                 color_glue_flaps = False,
+                 color_of_glue_flaps = [0.5,0.1,0.1]):
         self.output_format = output_format
         self.paper_size = paper_sizes[paper_size] if isinstance(paper_size, str) else paper_size
         self.line_width = line_width
@@ -90,6 +93,8 @@ class PolyzamboniExporter(ABC):
         self.build_step_number_font_size = build_step_font_size
         self.builf_step_number_color = color_of_build_steps
         self.triangle_bleed = triangle_bleed
+        self.color_glue_flaps = color_glue_flaps
+        self.color_of_glue_flaps = color_of_glue_flaps
 
         self.texture_images = {}
 
@@ -140,16 +145,32 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
         page_coord_to = self.__transform_component_coord_to_page_coord(component_line_coords[1], page_transform, flip_along_short_side)
         return (page_coord_from, page_coord_to)
     
-    def __transform_component_triangle_coords_to_page_coords(self, component_tri_coords, page_transform : AffineTransform2D, flip_along_short_side):
-        page_coord_a = self.__transform_component_coord_to_page_coord(component_tri_coords[0], page_transform, flip_along_short_side)
-        page_coord_b = self.__transform_component_coord_to_page_coord(component_tri_coords[1], page_transform, flip_along_short_side)
-        page_coord_c = self.__transform_component_coord_to_page_coord(component_tri_coords[2], page_transform, flip_along_short_side)
-        return (page_coord_a, page_coord_b, page_coord_c)
+    def __transform_component_coords_tuple_to_page_coords_tuple(self, component_coords_tuple, page_transform : AffineTransform2D, flip_along_short_side):
+        return tuple([self.__transform_component_coord_to_page_coord(coord, page_transform, flip_along_short_side) for coord in component_coords_tuple])
 
-    def __draw_line(self, ax : axes.Axes, line_coords, linestyle, color, zorder=None):
+    def __create_glue_flap_mask_of_component(self, ax : axes.Axes, component : ComponentPrintData, page_transform : AffineTransform2D, page_flipped = False):
+        xlim, ylim = ax.get_xlim(), ax.get_ylim()
+        full_page_rect = mpath.Path([
+            [xlim[0], ylim[0]],
+            [xlim[1], ylim[0]],
+            [xlim[1], ylim[1]],
+            [xlim[0], ylim[1]],
+            [xlim[0], ylim[0]],
+        ], closed=True)
+        triangle_masks_coords = [list(self.__transform_component_coords_tuple_to_page_coords_tuple(triangle.coords, page_transform, page_flipped)) for triangle in component.colored_triangles]
+        triangle_masks_coords = [(coords + [coords[0]]) for coords in triangle_masks_coords]
+        if not page_flipped:
+            triangle_masks_coords = [coords[::-1] for coords in triangle_masks_coords]
+        triangle_masks = [mpath.Path(coords, closed=True) for coords in triangle_masks_coords]
+
+        return mpath.Path.make_compound_path(full_page_rect, *triangle_masks)
+
+    def __draw_line(self, ax : axes.Axes, line_coords, linestyle, color, zorder=None, clip_path=None):
         line = lines.Line2D([line_coords[0][0], line_coords[1][0]], [line_coords[0][1], line_coords[1][1]], linewidth=self.line_width, linestyle=custom_line_styles[linestyle], c=color, solid_capstyle="round")
         if zorder is not None:
             line.zorder = zorder
+        if clip_path is not None:
+            line.set_clip_path(clip_path, transform=ax.transData)
         ax.add_line(line)
 
     def __write_text(self, ax : axes.Axes, text, coord, text_size, color, page_transform : AffineTransform2D, page_flipped = False):
@@ -205,10 +226,21 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
             return
         self.__write_text_along_line(ax, page_coords, str(fold_edge_at_flap_data.edge_index), self.edge_number_font_size, color=self.__linear_to_srgb(self.color_of_edge_numbers), offset_cm=self.edge_number_offset, flipped=page_flipped)
 
-    def __draw_glue_flap_edge(self, ax : axes.Axes, glue_flap_edge_data : GlueFlapEdgeData, page_transform : AffineTransform2D, page_flipped = False):
+    def __draw_glue_flap_faces(self, ax : axes.Axes, glue_flap_data : GlueFlapData, mask_path : mpath.Path, page_transform : AffineTransform2D, page_flipped = False):
+        if len(glue_flap_data.tris) == 1:
+            flap_coords_page = self.__transform_component_coords_tuple_to_page_coords_tuple(glue_flap_data.tris[0], page_transform, page_flipped)
+        else:
+            flap_coords_page = self.__transform_component_coords_tuple_to_page_coords_tuple(list(glue_flap_data.tris[0]) + [glue_flap_data.tris[1][2]], page_transform, page_flipped)
+        draw_polygon = patches.Polygon(flap_coords_page, closed=True, fill=True, facecolor=tuple(self.__linear_to_srgb(self.color_of_glue_flaps)))
+        draw_polygon.set_clip_path(mask_path, transform=ax.transData)
+        draw_polygon.set_zorder(-3) 
+        ax.add_patch(draw_polygon)
+
+    def __draw_glue_flap_edges(self, ax : axes.Axes, glue_flap_data : GlueFlapData, mask_path : mpath.Path, page_transform : AffineTransform2D, page_flipped = False):
         # transform line coords and draw
-        page_coords = self.__transform_component_line_coords_to_page_coord(glue_flap_edge_data.coords, page_transform, page_flipped)
-        self.__draw_line(ax, page_coords, self.glue_flap_linestyle, color=self.__linear_to_srgb(self.color_of_lines), zorder=-2)
+        for flap_edge_coords in glue_flap_data.edge_coords:
+            page_coords = self.__transform_component_line_coords_to_page_coord(flap_edge_coords, page_transform, page_flipped)
+            self.__draw_line(ax, page_coords, self.glue_flap_linestyle, color=self.__linear_to_srgb(self.color_of_lines), zorder=-2, clip_path=mask_path)
 
     def __create_thickened_triangle_coords(self, triangle_coords, eps):
         a_t, b_t, c_t = tuple(np.asarray(v) for v in triangle_coords)
@@ -268,7 +300,7 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
         self.__retrieve_texture_image(image_path)
         texture_transform = self.__affine_transform_from_uv_to_vertices(triangle_coords, triangle_uvs)
         image_transform = texture_transform + ax.transData
-        im = ax.imshow(self.texture_images[image_path], origin='upper', extent = [0,1,0,1], transform=image_transform, zorder=-1)
+        im = ax.imshow(self.texture_images[image_path], origin='upper', extent = (0,1,0,1), transform=image_transform, zorder=-1)
         im.set_clip_path(clip_polygon)
 
     def __draw_solid_color_triangle(self, ax : axes.Axes, triangle_coords, color):
@@ -279,7 +311,7 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
         if colored_tri_data.absolute_texture_path is None and colored_tri_data.color is None:
             return # nothing to draw here
         
-        triangle_page_coords = self.__transform_component_triangle_coords_to_page_coords(colored_tri_data.coords, page_transform, page_flipped)
+        triangle_page_coords = self.__transform_component_coords_tuple_to_page_coords_tuple(colored_tri_data.coords, page_transform, page_flipped)
         thickened_triangle_coords = self.__create_thickened_triangle_coords(triangle_page_coords, self.triangle_bleed)
 
         if colored_tri_data.absolute_texture_path is not None:
@@ -300,10 +332,15 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
                 colored_triangle_data : ColoredTriangleData
                 for colored_triangle_data in component_print_data.colored_triangles:
                     self.__draw_colored_triangle(ax, colored_triangle_data, component_print_data.page_transform, page_flipped=(not self.prints_on_model_inside))
+                if self.color_glue_flaps:
+                    component_mask = self.__create_glue_flap_mask_of_component(ax, component_print_data, component_print_data.page_transform, (not self.prints_on_model_inside))
+                    for glue_flap_data in component_print_data.glue_flaps:
+                        self.__draw_glue_flap_faces(ax, glue_flap_data, component_mask, component_print_data.page_transform, (not self.prints_on_model_inside))
             return fig, ax
 
         # draw all lines and text and maybe colored triangles
         for component_print_data in components_on_page:
+            component_mask = self.__create_glue_flap_mask_of_component(ax, component_print_data, component_print_data.page_transform, self.prints_on_model_inside)
             if self.show_build_step_numbers:
                 self.__write_text(ax, str(component_print_data.build_step_number), 
                                 component_print_data.build_step_number_position,
@@ -321,8 +358,10 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
             for fold_edge_at_flap_print_data in component_print_data.fold_edges_at_flaps:
                 self.__draw_fold_edge_at_glue_flap(ax, fold_edge_at_flap_print_data, component_print_data.page_transform, self.prints_on_model_inside)
 
-            for glue_flap_edge_data in component_print_data.glue_flap_edges:
-                self.__draw_glue_flap_edge(ax, glue_flap_edge_data, component_print_data.page_transform, self.prints_on_model_inside)
+            for glue_flap_data in component_print_data.glue_flaps:
+                if self.color_glue_flaps:
+                    self.__draw_glue_flap_faces(ax, glue_flap_data, component_mask, component_print_data.page_transform, self.prints_on_model_inside)
+                self.__draw_glue_flap_edges(ax, glue_flap_data, component_mask, component_print_data.page_transform, self.prints_on_model_inside)
 
             if draw_textures:
                 for colored_triangle_data in component_print_data.colored_triangles:
