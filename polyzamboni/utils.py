@@ -33,6 +33,15 @@ def find_bmesh_edge_of_halfedge(bm : bmesh.types.BMesh, halfedge):
     bm.verts.ensure_lookup_table()
     return bm.edges.get([bm.verts[i] for i in halfedge])
 
+def compute_edge_to_oriented_halfedge_map(bm : bmesh.types.BMesh, bmface : bmesh.types.BMFace):
+    edge_to_oriented_halfedge_map = {}
+    face_vertex_loop = list(bmface.verts)
+    for v_i in range(len(face_vertex_loop)):
+        v_j = (v_i + 1) % len(face_vertex_loop)
+        curr_e = bm.edges.get([face_vertex_loop[v_i], face_vertex_loop[v_j]])
+        edge_to_oriented_halfedge_map[curr_e.index] = (face_vertex_loop[v_i], face_vertex_loop[v_j])
+    return edge_to_oriented_halfedge_map
+
 def construct_halfedge_to_face_dict(mesh : bmesh.types.BMesh):
     """ Assumes that the given mesh is manifold and has no flipped normals! """
     halfedge_to_face = {}
@@ -64,3 +73,11 @@ def construct_dual_graph_from_mesh(mesh : bpy.types.Mesh):
     dual_graph = construct_dual_graph_from_bmesh(bm)
     bm.free()
     return dual_graph
+
+def get_default_section_name_from_section_index(index):
+    res = ""
+    while index // 26 != 0:
+        res = str(chr(65 + (index % 26))) + res
+        index = index // 26 - 1
+    res = str(chr(65 + (index % 26))) + res
+    return res

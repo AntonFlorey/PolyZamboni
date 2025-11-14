@@ -13,38 +13,12 @@ from enum import Enum
 
 from . import drawing_backend
 from . import io
+from .import units
+from .colors import *
 from .zambonipolice import check_if_polyzamobni_data_exists_and_fits_to_bmesh, check_if_page_numbers_and_transforms_exist_for_all_components
 from .exporters import paper_sizes
 from .printprepper import ComponentPrintData, ColoredTriangleData, CutEdgeData, FoldEdgeData, GlueFlapData, FoldEdgeAtGlueFlapData, create_print_data_for_all_components
 from .geometry import AffineTransform2D
-
-# colors (RWTH)
-BLUE = (  0 / 255,  84 / 255, 159 / 255, 1.0)
-MAGENTA = (227 / 255,   0 / 255, 102 / 255, 1.0)
-YELLOW = (255 / 255, 237 / 255,   0 / 255, 1.0)
-PETROL = (  0 / 255,  97 / 255, 101 / 255, 1.0)
-TEAL = (  0 / 255, 152 / 255, 161 / 255, 1.0)
-GREEN = ( 87 / 255, 171 / 255,  39 / 255, 1.0)
-MAY_GREEN = (189 / 255, 205 / 255,   0 / 255, 1.0)
-ORANGE = (246 / 255, 168 / 255,   0 / 255, 1.0)
-RED = (204 / 255,   7 / 255,  30 / 255, 1.0)
-BORDEAUX = (161 / 255,  16 / 255,  53 / 255, 1.0)
-PURPLE = ( 97 / 255,  33 / 255,  88 / 255, 1.0)
-LILAC = (122 / 255, 111 / 255, 172 / 255, 1.0)
-
-# colors (POLYZAMBONI)
-POLYZAMBONI_RED = (  191 / 255,  77 / 255, 77 / 255, 1.0)
-POLYZAMBONI_ORANGE = (  191 / 255,  124 / 255, 77 / 255, 1.0)
-POLYZAMBONI_YELLOW = (  191 / 255,  191 / 255, 77 / 255, 1.0)
-POLYZAMBONI_GREEN = (  124 / 255,  191 / 255, 77 / 255, 1.0)
-POLYZAMBONI_TEAL = (  74 / 255,  161 / 255, 129 / 255, 1.0)
-POLYZAMBONI_BLUE = (  71 / 255,  141 / 255, 179 / 255, 1.0)
-POLYZAMBONI_LILA = (  134 / 255,  71 / 255, 179 / 255, 1.0)
-POLYZAMBONI_ROSE = (  179 / 255,  71 / 255, 116 / 255, 1.0)
-
-BLACK = (0.0, 0.0, 0.0, 1.0)
-GRAY = (0.5, 0.5, 0.5, 1.0)
-WHITE = (1.0, 1.0, 1.0, 1.0)
 
 # Keep track of active draw callbacks
 _drawing_handle_user_provided_cuts = None
@@ -88,7 +62,7 @@ def deactivate_draw_callback(callback_handle, region_type='WINDOW'):
     if callback_handle is not None:
         bpy.types.SpaceView3D.draw_handler_remove(callback_handle, region_type)
 
-def lines_2D_draw_callback(line_array, color, width=3):
+def uniform_lines_2D_draw_callback(line_array, color, width=3):
     shader = gpu.shader.from_builtin("UNIFORM_COLOR")
     prev_line_width = gpu.state.line_width_get()
     prev_blend = gpu.state.blend_get()
@@ -97,6 +71,18 @@ def lines_2D_draw_callback(line_array, color, width=3):
     batch = batch_for_shader(shader, 'LINES', {"pos" : line_array})
     shader.bind()   
     shader.uniform_float("color", color)
+    batch.draw(shader)
+    gpu.state.line_width_set(prev_line_width)
+    gpu.state.blend_set(prev_blend)
+
+def multicolored_lines_2D_draw_callback(line_array, vertex_colors, width=3):
+    shader = gpu.shader.from_builtin("FLAT_COLOR")
+    prev_line_width = gpu.state.line_width_get()
+    prev_blend = gpu.state.blend_get()
+    gpu.state.line_width_set(width)
+    gpu.state.blend_set('ALPHA')
+    batch = batch_for_shader(shader, 'LINES', {"pos" : line_array, "color" : vertex_colors})
+    shader.bind()   
     batch.draw(shader)
     gpu.state.line_width_set(prev_line_width)
     gpu.state.blend_set(prev_blend)
@@ -111,13 +97,18 @@ def multicolored_triangles_2D_draw_callback(vertex_positions, vertex_colors):
     batch.draw(shader)
     gpu.state.blend_set(prev_blend)
 
-def triangles_2D_draw_callback(vertex_positions, color):
+def triangles_2D_draw_callback(vertex_positions, color, alpha_blend=False):
     shader = gpu.shader.from_builtin('UNIFORM_COLOR')
+    if alpha_blend:
+        prev_blend = gpu.state.blend_get()
+        gpu.state.blend_set('ALPHA')
     # prepare and draw batch
     batch = batch_for_shader(shader, 'TRIS', {"pos": vertex_positions})
     shader.bind()
     shader.uniform_float("color", color)
     batch.draw(shader)
+    if alpha_blend:
+        gpu.state.blend_set(prev_blend)
 
 def lines_draw_callback(line_array, color, width=3):
     shader = gpu.shader.from_builtin('UNIFORM_COLOR')
@@ -212,17 +203,27 @@ def hide_region_quality_triangles():
     deactivate_draw_callback(_drawing_handle_region_quality_triangles)
     _drawing_handle_region_quality_triangles = None
 
-def region_quality_triangles_draw_callback(vertex_positions, regions_by_quality, transparency):
-    for quality, triangle_indices in regions_by_quality.items():
+def region_quality_triangles_draw_callback(vertex_positions, regions_by_quality, transparency, highlight_factor):
+    for quality, triangle_indices in regions_by_quality["default"].items():
+        if quality not in quality_color_mapping:
+            print("POLYZAMBONI WARNING: Quality of provided region is not known!")
+            continue
+        triangles_draw_callback(vertex_positions, triangle_indices, (*quality_color_mapping[quality][:3], highlight_factor * transparency))
+    for quality, triangle_indices in regions_by_quality["selected"].items():
+        if len(triangle_indices) == 0:
+            continue
         if quality not in quality_color_mapping:
             print("POLYZAMBONI WARNING: Quality of provided region is not known!")
             continue
         triangles_draw_callback(vertex_positions, triangle_indices, (*quality_color_mapping[quality][:3], transparency))
+    
 
-def show_region_quality_triangles(vertex_positions, regions_by_quality, transparency):
+def show_region_quality_triangles(vertex_positions, regions_by_quality, transparency, highlight_factor):
     hide_region_quality_triangles()
     global _drawing_handle_region_quality_triangles
-    _drawing_handle_region_quality_triangles = bpy.types.SpaceView3D.draw_handler_add(region_quality_triangles_draw_callback, (vertex_positions, regions_by_quality, transparency), "WINDOW", "POST_VIEW")
+    _drawing_handle_region_quality_triangles = bpy.types.SpaceView3D.draw_handler_add(region_quality_triangles_draw_callback, (vertex_positions, regions_by_quality, transparency, highlight_factor), "WINDOW", "POST_VIEW")
+
+
 
 #################################
 #           Glue Flaps          #
@@ -267,62 +268,72 @@ def hide_pages():
 def page_bg_draw_callback(page_verts, selected_page_lines, other_pages_lines):
     triangles_2D_draw_callback(page_verts, WHITE)
     if selected_page_lines is not None:
-        lines_2D_draw_callback(selected_page_lines, PETROL)
-    lines_2D_draw_callback(other_pages_lines, BLACK)
+        uniform_lines_2D_draw_callback(selected_page_lines, PETROL)
+    uniform_lines_2D_draw_callback(other_pages_lines, BLACK)
 
-def component_draw_callback(component_triangle_verts, component_triangle_colors, component_lines, selected_component_lines = None):
-    multicolored_triangles_2D_draw_callback(component_triangle_verts, component_triangle_colors)
-    lines_2D_draw_callback(component_lines, BLACK, 1.5)
-    if selected_component_lines is not None:
-        lines_2D_draw_callback(selected_component_lines, ORANGE, 2)
-
-def build_step_numbers_draw_callback(numbers_with_positions, font_size):
+def build_step_numbers_draw_callback(numbers_with_positions, font_size, transparency = 1.0):
     scale = 0.01
-    blf.color(0, 0, 0, 0, 1)
     blf.size(0, font_size / scale)
     blf.shadow(0, 0, 0, 0, 0, 1)
     with gpu.matrix.push_pop():
         gpu.matrix.scale_uniform(scale)
         for num_with_pos in numbers_with_positions:
+            blf.color(0, 0, 0, 0, transparency)
             step_number = num_with_pos[0]
             dim = blf.dimensions(0, str(step_number))
             position = num_with_pos[1] / scale - np.array([dim[0] / 2, dim[1] / 2])
             blf.position(0, position[0], position[1], 0)
             blf.draw(0, str(step_number))
 
-def pages_draw_callback(page_verts, selected_page_lines, other_pages_lines, component_triangle_verts, component_triangle_colors, component_lines, 
-                        selected_component_lines, numbers_with_positions, font_size):
+def component_group_draw_callback(render_data_group : drawing_backend.GroupedLayoutRenderData, show_page_numbers, apply_material_color, font_size):
+    if apply_material_color:
+        multicolored_triangles_2D_draw_callback(render_data_group.combined_render_data[drawing_backend.LayoutRenderData.BG_VERTS],
+                                                render_data_group.combined_render_data[drawing_backend.LayoutRenderData.BG_COLORS])
+    else:
+        triangles_2D_draw_callback(render_data_group.combined_render_data[drawing_backend.LayoutRenderData.BG_VERTS], WHITE, True)
+
+    uniform_lines_2D_draw_callback(render_data_group.combined_render_data[drawing_backend.LayoutRenderData.OUTLINE_LINES], 
+                        render_data_group.shared_outline_color, render_data_group.outline_width)
+
+    uniform_lines_2D_draw_callback(render_data_group.combined_render_data[drawing_backend.LayoutRenderData.INNER_LINES],
+                        render_data_group.shared_inner_lines_color, render_data_group.inner_lines_width)
+    if show_page_numbers:
+        build_step_numbers_draw_callback(render_data_group.step_numbers, font_size, render_data_group.transparency)
+
+def pages_draw_callback(page_verts, selected_page_lines, other_pages_lines, render_data_groups, font_size, show_page_numbers, apply_material_color):
     # pages in the backgound
     page_bg_draw_callback(page_verts, selected_page_lines, other_pages_lines)
-    # connected components
-    component_draw_callback(component_triangle_verts, component_triangle_colors, component_lines, selected_component_lines)
-    # build step numbers
-    build_step_numbers_draw_callback(numbers_with_positions, font_size)
+
+    # islands/components
+    for render_data_group in render_data_groups:
+        component_group_draw_callback(render_data_group, show_page_numbers, apply_material_color, font_size)
 
 def show_pages_with_procomputed_render_data(render_data_per_component, num_pages, paper_size = paper_sizes["A4"], selected_page = None, selected_component = None, 
-                                            margin_between_pages = 1.0, pages_per_row = 2, color_components = True, show_step_numbers = True):
+                                            margin_between_pages = 1.0, pages_per_row = 2, color_components = True, show_step_numbers = True,
+                                            components_in_selected_section = set(), hide_non_selected_factor = 1.0):
     page_verts, selected_page_lines, other_page_lines = drawing_backend.compute_backgound_paper_render_data(num_pages, paper_size, selected_page, margin_between_pages, pages_per_row)
-    combined_render_data = drawing_backend.combine_layout_render_data_of_all_components(render_data_per_component, selected_component, color_components, show_step_numbers)
+    render_data_groups = drawing_backend.combine_layout_render_data_of_all_components(render_data_per_component, selected_component, components_in_selected_section, hide_non_selected_factor)
 
     hide_pages()
     global _drawing_handle_pages
     _drawing_handle_pages = bpy.types.SpaceImageEditor.draw_handler_add(pages_draw_callback, 
-                                                                        (page_verts, selected_page_lines, other_page_lines, *combined_render_data, 1), 
+                                                                        (page_verts, selected_page_lines, other_page_lines, render_data_groups, 1, show_step_numbers, color_components), 
                                                                         "WINDOW", "POST_VIEW")
 
 def show_pages(num_pages, components_per_page, paper_size = paper_sizes["A4"], selected_page = None, selected_component = None, margin_between_pages = 1.0, 
-               pages_per_row = 2, fold_angle_th = 0.0, color_components = True, show_step_numbers = True):
+               pages_per_row = 2, fold_angle_th = 0.0, color_components = True, show_step_numbers = True,
+               components_in_selected_section = set(), hide_non_selected_factor = 1.0):
 
     page_verts, selected_page_lines, other_page_lines = drawing_backend.compute_backgound_paper_render_data(num_pages, paper_size, selected_page, margin_between_pages, pages_per_row)
     
     # components on pages
     render_data_per_component = drawing_backend.compute_page_layout_render_data_of_all_components(components_per_page, paper_size, margin_between_pages, pages_per_row, fold_angle_th)
-    combined_render_data = drawing_backend.combine_layout_render_data_of_all_components(render_data_per_component, selected_component, color_components, show_step_numbers)
+    render_data_groups = drawing_backend.combine_layout_render_data_of_all_components(render_data_per_component, selected_component, components_in_selected_section, hide_non_selected_factor)
 
     hide_pages()
     global _drawing_handle_pages
     _drawing_handle_pages = bpy.types.SpaceImageEditor.draw_handler_add(pages_draw_callback, 
-                                                                        (page_verts, selected_page_lines, other_page_lines, *combined_render_data, 1), 
+                                                                        (page_verts, selected_page_lines, other_page_lines, render_data_groups, 1, show_step_numbers, color_components), 
                                                                         "WINDOW", "POST_VIEW")
 
 #################################
@@ -389,15 +400,24 @@ def update_all_page_layout_drawings(self, context):
     if general_mesh_props.paper_size != "Custom":
         paper_size = paper_sizes[general_mesh_props.paper_size]
     else:
-        len_scale = context.scene.unit_settings.scale_length
-        paper_size = (100 * len_scale * general_mesh_props.custom_page_width, 100 * len_scale * general_mesh_props.custom_page_height)
+        paper_size = (units.blender_distance_to_cm(general_mesh_props.custom_page_width), units.blender_distance_to_cm(general_mesh_props.custom_page_height))
+
+    # highlight the selected build section
+    components_in_selected_section = set()
+    hide_non_selected_factor = 1.0
+    if draw_settings.highlight_active_section and general_mesh_props.active_build_section != -1:
+        section_to_components_dict, _ = io.read_build_sections(active_mesh)
+        components_in_selected_section = section_to_components_dict[general_mesh_props.active_build_section]
+        hide_non_selected_factor = 1.0 - draw_settings.highlight_factor
 
     show_pages(num_pages, components_on_pages, 
                paper_size, 
                None, 
                fold_angle_th=draw_settings.hide_fold_edge_angle_th, 
                color_components=draw_settings.show_component_colors, 
-               show_step_numbers=draw_settings.show_build_step_numbers)
+               show_step_numbers=draw_settings.show_build_step_numbers,
+               components_in_selected_section=components_in_selected_section,
+               hide_non_selected_factor=hide_non_selected_factor)
     redraw_image_editor(context)
 
 def update_all_polyzamboni_drawings(self, context):
@@ -430,15 +450,25 @@ def update_all_polyzamboni_drawings(self, context):
     connected_components, face_to_component_dict =io.read_connected_components(active_mesh)
 
     # draw user provided cuts
-    show_user_provided_cuts(drawing_backend.mesh_edge_id_list_to_coordinate_list(bm, io.read_manual_cut_edges(active_mesh), draw_settings.normal_offset, world_matrix), dotted_line_length=draw_settings.dotted_line_length)
-    show_locked_edges(drawing_backend.mesh_edge_id_list_to_coordinate_list(bm, io.read_locked_edges(active_mesh), draw_settings.normal_offset, world_matrix), dotted_line_length=draw_settings.dotted_line_length)
-    show_auto_completed_cuts(drawing_backend.mesh_edge_id_list_to_coordinate_list(bm, io.read_auto_cut_edges(active_mesh), draw_settings.normal_offset, world_matrix), dotted_line_length=draw_settings.dotted_line_length)
+    if draw_settings.draw_edges:
+        show_user_provided_cuts(drawing_backend.mesh_edge_id_list_to_coordinate_list(bm, io.read_manual_cut_edges(active_mesh), draw_settings.normal_offset, world_matrix), dotted_line_length=draw_settings.dotted_line_length)
+        show_locked_edges(drawing_backend.mesh_edge_id_list_to_coordinate_list(bm, io.read_locked_edges(active_mesh), draw_settings.normal_offset, world_matrix), dotted_line_length=draw_settings.dotted_line_length)
+        show_auto_completed_cuts(drawing_backend.mesh_edge_id_list_to_coordinate_list(bm, io.read_auto_cut_edges(active_mesh), draw_settings.normal_offset, world_matrix), dotted_line_length=draw_settings.dotted_line_length)
 
     if draw_settings.color_faces_by_quality:
         selected_component_id = general_mesh_props.selected_component_id if general_mesh_props.selected_component_id != -1 else None
+        components_in_selected_section = set()
+        hide_non_selected_factor = 1.0
+        if draw_settings.highlight_active_section and general_mesh_props.active_build_section != -1:
+           section_to_components_dict, _ = io.read_build_sections(active_mesh)
+           components_in_selected_section = section_to_components_dict[general_mesh_props.active_build_section]
+           hide_non_selected_factor = 1.0 - draw_settings.highlight_factor
+
         all_v_positions, quality_dict = drawing_backend.get_triangle_list_per_cluster_quality(active_mesh, bm, draw_settings.normal_offset, edge_constraints, 
-                                                                                              world_matrix, connected_components, selected_component_id)
-        show_region_quality_triangles(all_v_positions, quality_dict, draw_settings.island_transparency)
+                                                                                              world_matrix, connected_components, selected_component_id,
+                                                                                              components_in_selected_section)
+        
+        show_region_quality_triangles(all_v_positions, quality_dict, draw_settings.island_transparency, hide_non_selected_factor)
 
     if draw_settings.show_glue_flaps:
         # so far, the glue flap geometry gets computed on the fly each time this function is called

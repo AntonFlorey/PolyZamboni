@@ -32,7 +32,20 @@ def check_if_build_step_numbers_exist_and_make_sense(mesh : Mesh):
     # check content
     build_step_numbers = io.read_build_step_numbers(mesh)
     connected_components = io.read_connected_component_sets(mesh)
-    return set(connected_components.keys()).issubset(build_step_numbers.keys()) and set(build_step_numbers.values()) == set(range(1, len(connected_components.keys()) + 1))
+    # all components should have a step number
+    all_components_have_a_number = set(connected_components.keys()).issubset(build_step_numbers.keys())
+    if not all_components_have_a_number:
+        return False
+    # the step numbers should be something like range(1,n) where n is the amount of islands (total or per section)
+    step_numbers_are_full_range = set(build_step_numbers.values()) == set(range(1, len(connected_components.keys()) + 1))
+    section_to_components_dict, component_to_section_dict = io.read_build_sections(mesh)
+    components_in_no_section = set([component_id for component_id in connected_components.keys() if component_id not in component_to_section_dict.keys()])
+    step_numbers_are_range_per_section = True
+    for section in list(section_to_components_dict.values()) + [components_in_no_section]:
+        if set([build_step_numbers[component_id] for component_id in section]) != set(range(1, len(section) + 1)):
+            step_numbers_are_range_per_section = False
+            break
+    return step_numbers_are_full_range or step_numbers_are_range_per_section
     
 def check_if_page_numbers_and_transforms_exist_for_all_components(mesh : Mesh):
     """ Assumes that other polyzamboni data exists. """

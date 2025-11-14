@@ -1,7 +1,7 @@
 bl_info = {
     "name": "PolyZamboni",
     "author": "Anton Florey",
-    "version": (1,1,7),
+    "version": (1,2,0),
     "blender": (4,1,0),
     "location": "View3D",
     "warning": "",
@@ -32,7 +32,7 @@ def register():
     ui.register()
     bpy.app.handlers.load_post.append(callbacks.post_load_handler)
     bpy.app.handlers.load_pre.append(callbacks.pre_load_handler)
-    bpy.app.handlers.undo_post.append(callbacks.redraw_callback)
+    bpy.app.handlers.undo_post.append(callbacks.redraw_3D_view_callback)
     callbacks.subscribe_to_active_object()
 
 def unregister():
@@ -43,8 +43,8 @@ def unregister():
     properties.unregister()
     if callbacks.post_load_handler in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.remove(callbacks.post_load_handler)
-    if callbacks.redraw_callback in bpy.app.handlers.undo_post:
-        bpy.app.handlers.undo_post.remove(callbacks.redraw_callback)
+    if callbacks.redraw_3D_view_callback in bpy.app.handlers.undo_post:
+        bpy.app.handlers.undo_post.remove(callbacks.redraw_3D_view_callback)
     if callbacks.pre_load_handler in bpy.app.handlers.load_pre:
         bpy.app.handlers.load_pre.remove(callbacks.pre_load_handler)
 

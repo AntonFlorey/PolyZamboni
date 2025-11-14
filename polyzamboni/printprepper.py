@@ -62,11 +62,11 @@ class ComponentPrintData():
         self.colored_triangles = []
         self.dominating_mat_index = 0 # we need this if different materials should be printed on different pages
         self.build_step_number = 0
+        self.build_section_name = None
         self.build_step_number_position = np.zeros(2)
         self.page_transform : AffineTransform2D = AffineTransform2D()
         self.horizontal_alignment_transform : AffineTransform2D = None
         self.vertical_alignment_transform : AffineTransform2D = None
-        pass
     
     def __update_bb_after_adding_edge(self, edge_coords):
         self.lower_left = np.minimum(self.lower_left, edge_coords[0])
@@ -118,7 +118,11 @@ class ComponentPrintData():
     def compute_alignment_tranforms(self):
         # collect all coords along boundary edges
         boundary_edge_first_coords = np.array([boundary_edge[0] for boundary_edge in self.__get_boundary_edges()])
-        self.horizontal_alignment_transform = compute_min_area_bounding_box_transformation(boundary_edge_first_coords)
+        try:
+            self.horizontal_alignment_transform = compute_min_area_bounding_box_transformation(boundary_edge_first_coords)
+        except AssertionError as error:
+            self.horizontal_alignment_transform = AffineTransform2D()
+            print("Polyamboni error: Could not compute minimum area bounding box! A piece might be rotated unoptimally now.")
         self.vertical_alignment_transform = AffineTransform2D(np.array([[0.0, -1.0],[1.0, 0.0]])) @ self.horizontal_alignment_transform # 90 degree rotation on top
 
     def align_horizontally(self):
@@ -179,18 +183,19 @@ def compute_all_connected_components_bb_dimensions(obj : Object):
         for face_index in curr_connected_component_faces:
             curr_face : bmesh.types.BMFace = bm.faces[face_index]
 
-            # collect all edges
+            # map edges to correct halfedges
+            edge_to_correct_halfedge_map = utils.compute_edge_to_oriented_halfedge_map(bm, curr_face)
+
+            # collect all boundary edges
             for curr_edge in curr_face.edges:
+                if not (curr_edge.is_boundary or utils.mesh_edge_is_cut(curr_edge.index, edge_constraints)):
+                    continue
+                if glueflaps.check_if_edge_of_face_has_glue_flap(curr_edge.index, face_index, glue_flap_halfedge_dict, halfedge_to_face_dict):
+                    continue
                 # compute edge coords in unfolding space
-                vertex_coords_3d = [v.co for v in curr_edge.verts]    
+                vertex_coords_3d = [v.co for v in edge_to_correct_halfedge_map[curr_edge.index]]   
                 vertex_coords_unfolded = [get_unfolded_vertex_coord(co_3d, face_index) for co_3d in vertex_coords_3d]
-                if curr_edge.is_boundary or utils.mesh_edge_is_cut(curr_edge.index, edge_constraints):
-                    if glueflaps.check_if_edge_of_face_has_glue_flap(curr_edge.index, face_index, glue_flap_halfedge_dict, halfedge_to_face_dict):
-                        # this is a fold edge of a glue flap
-                        curr_component_print_data.add_fold_edges_at_flaps(FoldEdgeAtGlueFlapData(tuple(vertex_coords_unfolded), curr_edge.is_convex, curr_edge.calc_face_angle(), curr_edge.index))
-                    else:
-                        # this is a cut edge
-                        curr_component_print_data.add_cut_edge(CutEdgeData(tuple(vertex_coords_unfolded), curr_edge.index, curr_edge.is_boundary))
+                curr_component_print_data.add_cut_edge(CutEdgeData(tuple(vertex_coords_unfolded), curr_edge.index, curr_edge.is_boundary))
 
         # collect edges and faces for glue flaps
         for flap_triangles in glue_flap_triangles[c_id].values():
@@ -235,6 +240,10 @@ def create_print_data_for_all_components(obj : Object, scaling_factor):
     build_step_numbers = io.read_build_step_numbers(mesh)
     glue_flap_halfedge_dict = io.read_glueflap_halfedge_dict(mesh)
     halfedge_to_face_dict = utils.construct_halfedge_to_face_dict(bm)
+    section_to_components_dict, component_to_section_dict = io.read_build_sections(mesh)
+    name_for_sectionless_component = None
+    if len(section_to_components_dict.keys()) > 0: # if there are no sections, we don't need to print any section names
+        name_for_sectionless_component = utils.get_default_section_name_from_section_index(len(section_to_components_dict.keys()))
 
     all_print_data = [] 
     for c_id, curr_connected_component_faces in connected_components.items():
@@ -257,17 +266,12 @@ def create_print_data_for_all_components(obj : Object, scaling_factor):
         face_cog_scores = {}
         for face_index in curr_connected_component_faces:
             curr_face : bmesh.types.BMFace = bm.faces[face_index]
+            # the face with the largest average 'cog to edges'-distance displays the build step number
+            face_cog = np.mean([scaling_factor * get_unfolded_vertex_coord(v.co, face_index) for v in curr_face.verts], axis=0)
 
             # map edges to correct halfedges
-            edge_to_correct_halfedge_map = {}
-            face_vertex_loop = list(curr_face.verts)
-            for v_i in range(len(face_vertex_loop)):
-                v_j = (v_i + 1) % len(face_vertex_loop)
-                curr_e = bm.edges.get([face_vertex_loop[v_i], face_vertex_loop[v_j]])
-                edge_to_correct_halfedge_map[curr_e.index] = (face_vertex_loop[v_i], face_vertex_loop[v_j])
-
-            face_cog = np.mean([scaling_factor * get_unfolded_vertex_coord(v.co, face_index) for v in face_vertex_loop], axis=0)
-
+            edge_to_correct_halfedge_map = utils.compute_edge_to_oriented_halfedge_map(bm, curr_face)
+            
             # collect all edges
             dist_cog_edge_sum = 0
             for curr_edge in curr_face.edges:
@@ -337,12 +341,18 @@ def create_print_data_for_all_components(obj : Object, scaling_factor):
                 flap_edges.append((scaled_flap_triangles[1][1], scaled_flap_triangles[1][2]))
             curr_component_print_data.add_glue_flap(GlueFlapData(flap_edges, scaled_flap_triangles))
 
+        # build section name and step number
         face_with_step_number = list(sorted(curr_connected_component_faces, key=lambda face_index : face_cog_scores[face_index], reverse=True))[0] # sorting in the end is a bit meh but whatever
         step_number_pos = np.mean([scaling_factor * get_unfolded_vertex_coord(v.co, face_with_step_number) for v in bm.faces[face_with_step_number].verts], axis=0)
 
         curr_component_print_data.build_step_number_position = step_number_pos
         if c_id in build_step_numbers:
             curr_component_print_data.build_step_number = build_step_numbers[c_id]
+
+        if c_id in component_to_section_dict:
+            curr_component_print_data.build_section_name = component_to_section_dict[c_id][0]
+        else:
+            curr_component_print_data.build_section_name = name_for_sectionless_component
 
         all_print_data.append(curr_component_print_data)
     

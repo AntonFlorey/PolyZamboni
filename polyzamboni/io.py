@@ -658,6 +658,39 @@ def remove_page_transforms(mesh : Mesh):
         del mesh["polyzamboni_page_transforms"]
 _all_removal_functions.append(remove_page_transforms)
 
+# build sections
+
+def overwrite_build_section(build_section, new_component_ids, new_name = None):
+    if new_name:
+        build_section.name = new_name
+    build_section.connected_components.clear()
+    for component_id in new_component_ids:
+        curr_component = build_section.connected_components.add()
+        curr_component.id = component_id
+
+def write_new_build_section(mesh : Mesh, section_name, component_ids):
+    sections = mesh.polyzamboni_general_mesh_props.build_sections
+    new_section = sections.add()
+    overwrite_build_section(new_section, component_ids, section_name)
+
+def read_build_sections(mesh : Mesh):
+    component_to_section_dict = dict()
+    section_to_components_dict = dict()
+
+    sections = mesh.polyzamboni_general_mesh_props.build_sections
+    for section_id, section in enumerate(sections):
+        component_ids = [component.id for component in section.connected_components]
+        section_to_components_dict[section_id] = set(component_ids)
+        for component_id in component_ids:
+            component_to_section_dict[component_id] = (section.name, section_id)
+
+    return section_to_components_dict, component_to_section_dict
+
+def remove_build_sections(mesh : Mesh):
+    mesh.polyzamboni_general_mesh_props.build_sections.clear()
+    mesh.polyzamboni_general_mesh_props.active_build_section = -1
+_all_removal_functions.append(remove_build_sections)
+
 def remove_all_polyzamboni_data(mesh : Mesh):
     for removal_function in _all_removal_functions:
         removal_function(mesh)

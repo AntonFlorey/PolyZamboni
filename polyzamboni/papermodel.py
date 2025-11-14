@@ -305,6 +305,14 @@ class PaperModel():
         io.write_all_component_render_data(self.mesh, component_render_vertices, component_render_triangles)
         io.write_page_numbers(self.mesh, page_numbers_per_component)
         io.write_page_transforms(self.mesh, page_transforms_per_component)
+
+        # the build sections might contain component ids that don't exist anymore
+        existing_component_ids = self.connected_components.keys()
+        for build_section in self.mesh.polyzamboni_general_mesh_props.build_sections:
+            old_component_ids = set([component.id for component in build_section.connected_components])
+            old_component_ids.intersection_update(existing_component_ids)
+            io.overwrite_build_section(build_section, old_component_ids)
+
         self.zamboni_props.has_attached_paper_model = True
 
     def close(self):
@@ -401,18 +409,34 @@ class PaperModel():
 
     def compute_build_step_numbers(self, starting_face_indices):
         visited_components = set()
-        next_build_index = 1
+
+        section_to_components_dict, component_to_section_dict = io.read_build_sections(self.mesh)
+        components_in_no_section = set([component_id for component_id in self.connected_components.keys() if component_id not in component_to_section_dict.keys()])
+        no_section_id = len(section_to_components_dict)
+        section_to_components_dict[no_section_id] = components_in_no_section
+        for component_id in components_in_no_section:
+            component_to_section_dict[component_id] = ("No section", no_section_id)
+
+        starting_face_indices_per_build_section = {}
         for starting_face_index in starting_face_indices:
-            if self.face_to_component_index_dict[starting_face_index] in visited_components:
-                continue
-            next_build_index = self.__build_order_bfs(self.face_to_component_index_dict[starting_face_index], next_build_index, visited_components)
-        # some mesh pieces might not be selected. they have to be collected here
-        for component_id in self.connected_components.keys():
-            if component_id in visited_components:
-                continue
-            next_build_index = self.__build_order_bfs(component_id, next_build_index, visited_components)
-        # sanity check
-        assert next_build_index == len(self.connected_components.keys()) + 1
+            current_component_index = self.face_to_component_index_dict[starting_face_index]
+            current_section = component_to_section_dict[current_component_index][1] # first entry is the section name
+            starting_face_indices_per_build_section.setdefault(current_section, []).append(starting_face_index)
+
+        for section_id, components_in_section in section_to_components_dict.items():
+            next_build_index = 1
+            if section_id in starting_face_indices_per_build_section.keys():
+                for starting_face_index in starting_face_indices_per_build_section[section_id]:
+                    if self.face_to_component_index_dict[starting_face_index] in visited_components:
+                        continue
+                    next_build_index = self.__build_order_bfs(self.face_to_component_index_dict[starting_face_index], next_build_index, visited_components, components_in_section)
+            # some components might not be selected. they have to be collected here
+            for component_id in components_in_section:
+                if component_id in visited_components:
+                    continue
+                next_build_index = self.__build_order_bfs(component_id, next_build_index, visited_components, components_in_section)
+            # sanity check
+            assert next_build_index == len(components_in_section) + 1
 
     def compute_all_glueflaps_greedily(self):
         self.__place_all_glue_flaps_via_greedy_dfs()
@@ -504,7 +528,7 @@ class PaperModel():
                 neighbour_ids.add(nb_component_index)
         return neighbour_ids
 
-    def __build_order_bfs(self, starting_component_index, next_free_build_index, visited_components : set[int]):
+    def __build_order_bfs(self, starting_component_index, next_free_build_index, visited_components : set[int], search_subspace : set[int]):
         component_queue = deque()
         component_queue.append(starting_component_index)
         next_build_index = next_free_build_index
@@ -517,7 +541,7 @@ class PaperModel():
             curr_component.build_step_number = next_build_index
             next_build_index += 1
             for nb_component_index in self.__get_adjacent_connected_component_ids_of_component(curr_component_id, curr_component):
-                if nb_component_index in visited_components:
+                if nb_component_index in visited_components or nb_component_index not in search_subspace:
                     continue
                 component_queue.append(nb_component_index)
         return next_build_index

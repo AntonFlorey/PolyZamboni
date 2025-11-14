@@ -17,6 +17,7 @@ from . import operators_backend
 from . import utils
 from . import units
 from .zambonipolice import check_if_build_step_numbers_exist_and_make_sense, all_components_have_unfoldings, check_if_page_numbers_and_transforms_exist_for_all_components
+from .callbacks import CallbackGlobals
 
 def _active_object_is_mesh(context : bpy.types.Context):
     active_object = context.active_object
@@ -55,6 +56,7 @@ class InitializeCuttingOperator(bpy.types.Operator):
         if returnto:
             bpy.ops.object.mode_set(mode=self.weird_mode_table[returnto] if returnto in self.weird_mode_table else returnto)
         self.selected_mesh_is_manifold = np.all([edge.is_manifold or edge.is_boundary for edge in bm.edges] + [v.is_manifold for v in bm.verts])
+        mesh_props.mesh_is_non_manifold = not self.selected_mesh_is_manifold
         self.normals_are_okay = np.all([edge.is_contiguous or edge.is_boundary for edge in bm.edges])
         self.double_connected_face_pair_present = False
         self.non_triangulatable_faces_present = False
@@ -125,6 +127,38 @@ class InitializeCuttingOperator(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context : bpy.types.Context):
+        return _active_object_is_mesh(context)
+
+class SelectNonManifoldVerticesOperator(bpy.types.Operator):
+    """Select all non-manifold vertices"""
+    bl_label = "Select non manifold"
+    bl_description = "Select all non-manifold vertices"
+    bl_idname  = "polyzamboni.non_manifold_selection_op"
+
+    def execute(self, context):
+        bpy.ops.object.mode_set(mode="EDIT")
+        ao = bpy.context.active_object
+        active_mesh = ao.data
+        mesh_props : ZamboniGeneralMeshProps = active_mesh.polyzamboni_general_mesh_props
+        bm : bmesh.types.BMesh = bmesh.from_edit_mesh(active_mesh)
+
+        vertex_indices_to_select = operators_backend.get_indices_of_non_manifold_vertices(bm)
+
+        if len(vertex_indices_to_select) == 0:
+            mesh_props.mesh_is_non_manifold = False
+
+        # deselect all vertices
+        for vertex in bm.verts:
+            vertex.select_set(False)
+        bm.verts.ensure_lookup_table()
+        for vertex_index in vertex_indices_to_select:
+            bm.verts[vertex_index].select_set(True)
+
+        bmesh.update_edit_mesh(ao.data)
+        return {'FINISHED'}
+
+    @classmethod
+    def poll(cls, context):
         return _active_object_is_mesh(context)
 
 class SelectMultiTouchingFacesOperator(bpy.types.Operator):
@@ -803,7 +837,7 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
         screenspace_anchor_pos = np.array(context.region.view2d.view_to_region(self.rotation_center[0], self.rotation_center[1]))
         screenspace_mouse_pos = np.array([event.mouse_region_x, event.mouse_region_y])
         dotted_line_array = drawing_backend.make_dotted_lines([screenspace_anchor_pos, screenspace_mouse_pos], 10.0)
-        PolyZamboniPageLayoutEditingOperator._drawing_handle = bpy.types.SpaceImageEditor.draw_handler_add(lines_2D_draw_callback, (dotted_line_array, ORANGE, 1), "WINDOW", "POST_PIXEL")
+        PolyZamboniPageLayoutEditingOperator._drawing_handle = bpy.types.SpaceImageEditor.draw_handler_add(uniform_lines_2D_draw_callback, (dotted_line_array, ORANGE, 1), "WINDOW", "POST_PIXEL")
 
     def invoke(self, context, event):
         ao = context.active_object
@@ -857,8 +891,16 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
         num_display_pages = self.num_pages
         if self.active_page is not None and self.active_page == self.num_pages:
             num_display_pages += 1
+        # highlight the selected build section
+        components_in_selected_section = set()
+        hide_non_selected_factor = 1.0
+        if self.draw_settings.highlight_active_section and self.general_mesh_props.active_build_section != -1:
+            section_to_components_dict, _ = io.read_build_sections(self.mesh)
+            components_in_selected_section = section_to_components_dict[self.general_mesh_props.active_build_section]
+            hide_non_selected_factor = 1.0 - self.draw_settings.highlight_factor
         show_pages_with_procomputed_render_data(self.render_data_per_component, num_display_pages, self.paper_size, self.active_page, self.selected_component_id,
-                                                color_components=self.draw_settings.show_component_colors, show_step_numbers=self.draw_settings.show_build_step_numbers)
+                                                color_components=self.draw_settings.show_component_colors, show_step_numbers=self.draw_settings.show_build_step_numbers,
+                                                components_in_selected_section=components_in_selected_section, hide_non_selected_factor=hide_non_selected_factor)
         redraw_image_editor(context)
 
     def refresh_step_numbers_for_rendering(self):
@@ -996,6 +1038,10 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
             self.editing_state = operators_backend.PageEditorState.SELECT_PIECES
             self.refresh_step_numbers_for_rendering()
             self.draw_current_page_layout(context)
+        if CallbackGlobals._refresh_page_layout_in_modal_operator:
+            self.editing_state = operators_backend.PageEditorState.SELECT_PIECES
+            self.draw_current_page_layout(context)
+            CallbackGlobals._refresh_page_layout_in_modal_operator = False
         if self.editing_state == operators_backend.PageEditorState.SELECT_PIECES:
             if event.type in {'ESC', 'RET'} and event.value == "PRESS":
                 return self.exit_modal_mode(context)
@@ -1097,7 +1143,251 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
     def poll(cls, context):
         return _active_object_is_mesh_with_paper_model(context)
 
-polyzamboni_keymaps = []
+class PolyZamboniCreateSectionFromSelectedOperator(bpy.types.Operator):
+    """Create a build section from the selected mesh faces"""
+    bl_label = "Create build section"
+    bl_description = "Create a build section from the selected mesh faces"
+    bl_idname  = "polyzamboni.section_creation_op"
+
+    def execute(self, context):
+        ao = context.active_object
+        active_mesh = ao.data
+        bm : bmesh.types.BMesh = bmesh.from_edit_mesh(active_mesh)
+        
+        operators_backend.create_build_section_from_selected_faces(active_mesh, bm, active_mesh.polyzamboni_general_mesh_props)
+        active_mesh.polyzamboni_general_mesh_props.active_build_section = len(active_mesh.polyzamboni_general_mesh_props.build_sections) - 1
+        bm.free()
+        return {'FINISHED'}
+
+    @classmethod
+    def poll(cls, context : bpy.types.Context):
+        return _active_object_is_mesh_with_paper_model(context) and context.mode == 'EDIT_MESH'
+
+class PolyZamboniOverwriteSectionFromSelectedOperator(bpy.types.Operator):
+    """Overwrites section from the selected mesh faces"""
+    bl_label = "Overwrite build section"
+    bl_description = "Overwrite a build section with the selected connected components"
+    bl_idname  = "polyzamboni.section_overwrite_op"
+
+    def execute(self, context):
+        ao = context.active_object
+        active_mesh = ao.data
+        bm : bmesh.types.BMesh = bmesh.from_edit_mesh(active_mesh)
+        
+        operators_backend.change_active_build_section_from_selected_faces(active_mesh, bm, active_mesh.polyzamboni_general_mesh_props)
+        update_all_polyzamboni_drawings(None, context)
+        update_all_page_layout_drawings(None, context)
+        PolyZamboniPageLayoutEditingOperator._refresh_drawings_on_next_event = True
+
+        bm.free()
+        return {'FINISHED'}
+
+    @classmethod
+    def poll(cls, context : bpy.types.Context):
+        if not (_active_object_is_mesh_with_paper_model(context) and context.mode == 'EDIT_MESH'):
+            return False
+        return context.active_object.data.polyzamboni_general_mesh_props.active_build_section != -1
+    
+class PolyZamboniAddSelectedComponentsToSectionOperator(bpy.types.Operator):
+    """Add the selected connected components to the active build section"""
+    bl_label = "Add to build section"
+    bl_description = "Add the selected connected components to the active build section"
+    bl_idname  = "polyzamboni.add_to_section_op"
+
+    def execute(self, context):
+        ao = context.active_object
+        active_mesh = ao.data
+        bm : bmesh.types.BMesh = bmesh.from_edit_mesh(active_mesh)
+        
+        operators_backend.add_components_of_selected_faces_to_active_build_section(active_mesh, bm, active_mesh.polyzamboni_general_mesh_props)
+        update_all_polyzamboni_drawings(None, context)
+        update_all_page_layout_drawings(None, context)
+        PolyZamboniPageLayoutEditingOperator._refresh_drawings_on_next_event = True
+
+        bm.free()
+        return {'FINISHED'}
+
+    @classmethod
+    def poll(cls, context : bpy.types.Context):
+        if not (_active_object_is_mesh_with_paper_model(context) and context.mode == 'EDIT_MESH'):
+            return False
+        return context.active_object.data.polyzamboni_general_mesh_props.active_build_section != -1
+    
+class PolyZamboniRemoveSelectedComponentsFromSectionOperator(bpy.types.Operator):
+    """Remove the selected connected components from the active build section"""
+    bl_label = "Remove from build section"
+    bl_description = "Remove the selected connected components from the active build section"
+    bl_idname  = "polyzamboni.remove_from_section_op"
+
+    def execute(self, context):
+        ao = context.active_object
+        active_mesh = ao.data
+        bm : bmesh.types.BMesh = bmesh.from_edit_mesh(active_mesh)
+        
+        operators_backend.remove_components_of_selected_faces_from_active_build_section(active_mesh, bm, active_mesh.polyzamboni_general_mesh_props)
+        update_all_polyzamboni_drawings(None, context)
+        update_all_page_layout_drawings(None, context)
+        PolyZamboniPageLayoutEditingOperator._refresh_drawings_on_next_event = True
+
+        bm.free()
+        return {'FINISHED'}
+
+    @classmethod
+    def poll(cls, context : bpy.types.Context):
+        if not (_active_object_is_mesh_with_paper_model(context) and context.mode == 'EDIT_MESH'):
+            return False
+        return context.active_object.data.polyzamboni_general_mesh_props.active_build_section != -1
+
+class PolyZamboniRemoveActiveSectionOeprator(bpy.types.Operator):
+    """Removes the currently active build section"""
+    bl_label = "Remove build section"
+    bl_description = "Removes the selected build section"
+    bl_idname  = "polyzamboni.section_removal_op"
+
+    def execute(self, context):
+        ao = context.active_object
+        operators_backend.remove_active_build_section(ao.data)
+        return {'FINISHED'}
+
+    @classmethod
+    def poll(cls, context : bpy.types.Context):
+        return _active_object_is_mesh_with_paper_model(context)
+
+class PolyzamboniMoveActionSectionUP(bpy.types.Operator):
+    """ Decreases the active section index by one """
+    bl_label = "Move down"
+    bl_description = " Decreases the active section index by one "
+    bl_idname = "polyzamboni.section_move_active_up"
+
+    def execute(self, context):
+        ao = context.active_object
+
+        current_index = ao.data.polyzamboni_general_mesh_props.active_build_section
+        if current_index > 0:
+            ao.data.polyzamboni_general_mesh_props.active_build_section = current_index - 1
+        elif current_index == -1:
+            ao.data.polyzamboni_general_mesh_props.active_build_section = len(ao.data.polyzamboni_general_mesh_props.build_sections) - 1
+
+        return {'FINISHED'}
+
+    @classmethod
+    def poll(cls, context : bpy.types.Context):
+        return _active_object_is_mesh_with_paper_model(context)
+
+class PolyzamboniMoveActionSectionDOWN(bpy.types.Operator):
+    """ Increases the active section index by one """
+    bl_label = "Move down"
+    bl_description = "Increases the active section index by one "
+    bl_idname = "polyzamboni.section_move_active_down"
+
+    def execute(self, context):
+        ao = context.active_object
+
+        current_index = ao.data.polyzamboni_general_mesh_props.active_build_section
+        if current_index < len(ao.data.polyzamboni_general_mesh_props.build_sections) - 1:
+            ao.data.polyzamboni_general_mesh_props.active_build_section = current_index + 1
+
+        return {'FINISHED'}
+
+    @classmethod
+    def poll(cls, context : bpy.types.Context):
+        return _active_object_is_mesh_with_paper_model(context)
+
+class PolyzamboniClearActionSelection(bpy.types.Operator):
+    """ Sets the active section index to -1 """
+    bl_label = "Clear selection"
+    bl_description = "Sets the active section index to -1"
+    bl_idname = "polyzamboni.section_clear_selection"
+
+    def execute(self, context):
+        ao = context.active_object
+        ao.data.polyzamboni_general_mesh_props.active_build_section = -1
+
+        return {'FINISHED'}
+    
+    @classmethod
+    def poll(cls, context : bpy.types.Context):
+        return _active_object_is_mesh_with_paper_model(context)
+
+class PolyzamboniLockAllBuildSections(bpy.types.Operator):
+    """ Locks all build sections """
+    bl_label = "Lock all"
+    bl_description = "Locks all build sections"
+    bl_idname = "polyzamboni.lock_all_sections_op"
+
+    def execute(self, context):
+        ao = context.active_object
+        for build_section in ao.data.polyzamboni_general_mesh_props.build_sections:
+            build_section.locked = True
+
+        return {'FINISHED'}
+
+    @classmethod
+    def poll(cls, context : bpy.types.Context):
+        return _active_object_is_mesh_with_paper_model(context)
+
+class PolyzamboniUnlockAllBuildSections(bpy.types.Operator):
+    """ Unlocks all build sections """
+    bl_label = "Unlock all"
+    bl_description = "Unlocks all build sections"
+    bl_idname = "polyzamboni.unlock_all_sections_op"
+
+    def execute(self, context):
+        ao = context.active_object
+        for build_section in ao.data.polyzamboni_general_mesh_props.build_sections:
+            build_section.locked = False
+
+        return {'FINISHED'}
+
+    @classmethod
+    def poll(cls, context : bpy.types.Context):
+        return _active_object_is_mesh_with_paper_model(context)
+
+class PolyzamboniSelectAllFacesInActiveBuildSection(bpy.types.Operator):
+    """ Selects all faces in the selected build sections components """
+    bl_label = "Select faces"
+    bl_description = "Selects all faces in the selected build sections islands"
+    bl_idname = "polyzamboni.select_build_section_faces_op"
+
+    def execute(self, context):
+        bpy.ops.object.mode_set(mode="EDIT")
+        ao = context.active_object
+        active_mesh = ao.data
+        bm : bmesh.types.BMesh = bmesh.from_edit_mesh(active_mesh)
+
+        face_indices_to_select = operators_backend.get_face_ids_in_active_build_section(active_mesh, active_mesh.polyzamboni_general_mesh_props)
+        bm.verts.ensure_lookup_table()
+        bm.edges.ensure_lookup_table()
+        bm.faces.ensure_lookup_table()
+        
+        # deselect everything
+        for vertex in bm.verts:
+            vertex.select_set(False)
+        for edge in bm.edges:
+            edge.select_set(False)
+        for face in bm.faces:
+            face.select_set(False)
+
+        # select everything in the section
+        for face_index in face_indices_to_select:
+            face = bm.faces[face_index]
+            face.select_set(True)
+            for edge in face.edges:
+                edge.select_set(True)
+                for vertex in edge.verts:
+                    vertex.select_set(True)
+
+        bmesh.update_edit_mesh(active_mesh)
+        bm.free()
+        return {'FINISHED'}
+
+    @classmethod
+    def poll(cls, context : bpy.types.Context):
+        if not (_active_object_is_mesh_with_paper_model(context) and context.mode == 'EDIT_MESH'):
+            return False
+        return context.active_object.data.polyzamboni_general_mesh_props.active_build_section != -1
+
+polyzamboni_keymaps = []    
 
 def menu_func_polyzamboni_export_pdf(self, context):
     self.layout.operator(PolyZamboniExportPDFOperator.bl_idname, text="Polyzamboni Export PDF")
@@ -1121,12 +1411,24 @@ def register():
     bpy.utils.register_class(RemoveAllPolyzamboniDataOperator)
     bpy.utils.register_class(ComputeBuildStepsOperator)
     bpy.utils.register_class(AutoCutsOperator)
+    bpy.utils.register_class(SelectNonManifoldVerticesOperator)
     bpy.utils.register_class(SelectMultiTouchingFacesOperator)
     bpy.utils.register_class(SelectNonTriangulatableFacesOperator)
     bpy.utils.register_class(PolyZamboniPageLayoutOperator)
     bpy.utils.register_class(PolyZamboniPageLayoutEditingOperator)
     bpy.utils.register_class(PolyZamboniExitPageLayoutEditingOperator)
     bpy.utils.register_class(PolyZamboniStepNumberEditOperator)
+    bpy.utils.register_class(PolyZamboniCreateSectionFromSelectedOperator)
+    bpy.utils.register_class(PolyZamboniOverwriteSectionFromSelectedOperator)
+    bpy.utils.register_class(PolyZamboniRemoveActiveSectionOeprator)
+    bpy.utils.register_class(PolyzamboniMoveActionSectionUP)
+    bpy.utils.register_class(PolyzamboniMoveActionSectionDOWN)
+    bpy.utils.register_class(PolyzamboniClearActionSelection)
+    bpy.utils.register_class(PolyzamboniLockAllBuildSections)
+    bpy.utils.register_class(PolyzamboniUnlockAllBuildSections)
+    bpy.utils.register_class(PolyzamboniSelectAllFacesInActiveBuildSection)
+    bpy.utils.register_class(PolyZamboniAddSelectedComponentsToSectionOperator)
+    bpy.utils.register_class(PolyZamboniRemoveSelectedComponentsFromSectionOperator)
 
     bpy.types.TOPBAR_MT_file_export.append(menu_func_polyzamboni_export_pdf)
     bpy.types.TOPBAR_MT_file_export.append(menu_func_polyzamboni_export_svg)
@@ -1159,12 +1461,24 @@ def unregister():
     bpy.utils.unregister_class(RemoveAllPolyzamboniDataOperator)
     bpy.utils.unregister_class(ComputeBuildStepsOperator)
     bpy.utils.unregister_class(AutoCutsOperator)
+    bpy.utils.unregister_class(SelectNonManifoldVerticesOperator)
     bpy.utils.unregister_class(SelectMultiTouchingFacesOperator)
     bpy.utils.unregister_class(SelectNonTriangulatableFacesOperator)
     bpy.utils.unregister_class(PolyZamboniPageLayoutOperator)
     bpy.utils.unregister_class(PolyZamboniPageLayoutEditingOperator)
     bpy.utils.unregister_class(PolyZamboniExitPageLayoutEditingOperator)
     bpy.utils.unregister_class(PolyZamboniStepNumberEditOperator)
+    bpy.utils.unregister_class(PolyZamboniCreateSectionFromSelectedOperator)
+    bpy.utils.unregister_class(PolyZamboniOverwriteSectionFromSelectedOperator)
+    bpy.utils.unregister_class(PolyZamboniRemoveActiveSectionOeprator)
+    bpy.utils.unregister_class(PolyzamboniMoveActionSectionUP)
+    bpy.utils.unregister_class(PolyzamboniMoveActionSectionDOWN)
+    bpy.utils.unregister_class(PolyzamboniClearActionSelection)
+    bpy.utils.unregister_class(PolyzamboniLockAllBuildSections)
+    bpy.utils.unregister_class(PolyzamboniUnlockAllBuildSections)
+    bpy.utils.unregister_class(PolyzamboniSelectAllFacesInActiveBuildSection)
+    bpy.utils.unregister_class(PolyZamboniAddSelectedComponentsToSectionOperator)
+    bpy.utils.unregister_class(PolyZamboniRemoveSelectedComponentsFromSectionOperator)
 
     bpy.types.TOPBAR_MT_file_export.remove(menu_func_polyzamboni_export_pdf)
     bpy.types.TOPBAR_MT_file_export.remove(menu_func_polyzamboni_export_svg)

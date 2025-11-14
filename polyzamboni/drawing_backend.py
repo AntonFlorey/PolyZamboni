@@ -12,6 +12,7 @@ import time
 
 from . import io
 from . import utils
+from .colors import *
 from .geometry import AffineTransform2D, triangulate_3d_polygon, face_corner_convex_3d, solve_for_weird_intersection_point
 from .utils import mesh_edge_is_cut, find_bmesh_edge_of_halfedge
 from .glueflaps import component_has_overlapping_glue_flaps, flap_is_overlapping, compute_3d_glue_flap_coords_in_glued_face
@@ -218,7 +219,7 @@ def compute_and_update_connected_component_triangle_lists_for_drawing(mesh : Mes
     return render_ready_vertex_positions, render_ready_triangles_per_component
 
 def get_triangle_list_per_cluster_quality(mesh : Mesh, bmesh : BMesh, face_offset, edge_constraints, world_matrix,
-                                          connected_components = None, selected_component = None):
+                                          connected_components = None, selected_component = None, components_in_selected_section = set()):
     if connected_components is None:
         connected_components = io.read_connected_component_sets(mesh)
         assert connected_components is not None
@@ -227,27 +228,45 @@ def get_triangle_list_per_cluster_quality(mesh : Mesh, bmesh : BMesh, face_offse
     components_with_overlaps = io.read_components_with_overlaps(mesh)
     glue_flap_collisions = io.read_glue_flap_collisions_dict(mesh)
 
-    quality_dict = {
-        ComponentQuality.PERFECT_REGION : [],
-        ComponentQuality.BAD_GLUE_FLAPS_REGION : [],
-        ComponentQuality.OVERLAPPING_REGION : [],
-        ComponentQuality.NOT_FOLDABLE_REGION : [],
-        ComponentQuality.NOT_SELECTED_REGION : []
-        }
+    quality_dict = { "default": {
+                        ComponentQuality.PERFECT_REGION : [],
+                        ComponentQuality.BAD_GLUE_FLAPS_REGION : [],
+                        ComponentQuality.OVERLAPPING_REGION : [],
+                        ComponentQuality.NOT_FOLDABLE_REGION : [],
+                        ComponentQuality.NOT_SELECTED_REGION : []},
+                    "selected": {
+                        ComponentQuality.PERFECT_REGION : [],
+                        ComponentQuality.BAD_GLUE_FLAPS_REGION : [],
+                        ComponentQuality.OVERLAPPING_REGION : [],
+                        ComponentQuality.NOT_FOLDABLE_REGION : [],
+                        ComponentQuality.NOT_SELECTED_REGION : []}}
+
     for component_id, triangles in tris_per_component.items():
         if selected_component is not None and component_id != selected_component:
             #quality_dict[ComponentQuality.NOT_SELECTED_REGION] += triangles
             continue
-        if component_id in cyclic_components:
-            quality_dict[ComponentQuality.NOT_FOLDABLE_REGION] += triangles
-            continue
-        if component_id in components_with_overlaps:
-            quality_dict[ComponentQuality.OVERLAPPING_REGION] += triangles
-            continue
-        if component_has_overlapping_glue_flaps(mesh, component_id, glue_flap_collisions):
-            quality_dict[ComponentQuality.BAD_GLUE_FLAPS_REGION] += triangles
-            continue
-        quality_dict[ComponentQuality.PERFECT_REGION] += triangles
+        if component_id in components_in_selected_section:
+            if component_id in cyclic_components:
+                quality_dict["selected"][ComponentQuality.NOT_FOLDABLE_REGION] += triangles
+                continue
+            if component_id in components_with_overlaps:
+                quality_dict["selected"][ComponentQuality.OVERLAPPING_REGION] += triangles
+                continue
+            if component_has_overlapping_glue_flaps(mesh, component_id, glue_flap_collisions):
+                quality_dict["selected"][ComponentQuality.BAD_GLUE_FLAPS_REGION] += triangles
+                continue
+            quality_dict["selected"][ComponentQuality.PERFECT_REGION] += triangles
+        else:
+            if component_id in cyclic_components:
+                quality_dict["default"][ComponentQuality.NOT_FOLDABLE_REGION] += triangles
+                continue
+            if component_id in components_with_overlaps:
+                quality_dict["default"][ComponentQuality.OVERLAPPING_REGION] += triangles
+                continue
+            if component_has_overlapping_glue_flaps(mesh, component_id, glue_flap_collisions):
+                quality_dict["default"][ComponentQuality.BAD_GLUE_FLAPS_REGION] += triangles
+                continue
+            quality_dict["default"][ComponentQuality.PERFECT_REGION] += triangles
     return all_v_positions, quality_dict
 
 def get_lines_array_per_glue_flap_quality(mesh : Mesh, bmesh : BMesh, face_offset, world_matrix, flap_angle, flap_height,
@@ -318,12 +337,28 @@ def compute_backgound_paper_render_data(num_pages, paper_size, selected_page = N
     return page_verts, selected_page_lines, other_page_lines
 
 class LayoutRenderData(Enum):
-    FULL_LINES = 0
-    CONVEX_LINES = 1
-    CONCAVE_LINES = 2
-    BG_VERTS = 3
-    BG_COLORS = 4
-    STEP_NUMBER = 5
+    OUTLINE_LINES = 0
+    INNER_LINES = 1
+    BG_VERTS = 2
+    BG_COLORS = 3
+    STEP_NUMBER = 4
+
+class GroupedLayoutRenderData():
+    """ Contains all layout render data for a group of connected components """
+
+    def __init__(self, layout_render_data_of_components, outline_color, transparency, inner_color = BLACK, outline_width = 1.5, other_lines_width = 1.5):
+        self.shared_outline_color = (*outline_color[:3], transparency)
+        self.shared_inner_lines_color = (*inner_color[:3], transparency)
+        self.transparency = transparency
+        self.outline_width = outline_width
+        self.inner_lines_width = other_lines_width
+        self.combined_render_data = {
+            LayoutRenderData.OUTLINE_LINES : [p for component_data in layout_render_data_of_components for p in component_data[LayoutRenderData.OUTLINE_LINES]],
+            LayoutRenderData.INNER_LINES : [p for component_data in layout_render_data_of_components for p in component_data[LayoutRenderData.INNER_LINES]],
+            LayoutRenderData.BG_VERTS : [p for component_data in layout_render_data_of_components for p in component_data[LayoutRenderData.BG_VERTS]],
+            LayoutRenderData.BG_COLORS : [(*c[:3], transparency) for component_data in layout_render_data_of_components for c in component_data[LayoutRenderData.BG_COLORS]]
+        }
+        self.step_numbers = [component_data[LayoutRenderData.STEP_NUMBER] for component_data in layout_render_data_of_components]
 
 def compute_page_layout_render_data_of_component(component : ComponentPrintData, paper_size, fold_angle_th, page_index, pages_per_row = 2.0, margin_between_pages = 1.0):
     row_index = page_index % pages_per_row
@@ -357,7 +392,6 @@ def compute_page_layout_render_data_of_component(component : ComponentPrintData,
     for fold_edge_at_flap in component.fold_edges_at_flaps:
         coords = [full_transform * coord for coord in fold_edge_at_flap.coords]
         if fold_edge_at_flap.fold_angle <= fold_angle_th:
-            full_lines += coords
             continue
         if fold_edge_at_flap.is_convex:
             convex_lines += coords
@@ -370,9 +404,8 @@ def compute_page_layout_render_data_of_component(component : ComponentPrintData,
         bg_verts += [full_transform * coord for coord in tri_data.coords]
         bg_colors += [linear_to_srgb(tri_data.color if tri_data.color is not None else (1,1,1,1))] * 3
 
-    render_data[LayoutRenderData.FULL_LINES] = full_lines
-    render_data[LayoutRenderData.CONVEX_LINES] = make_dotted_lines(convex_lines, 0.2)
-    render_data[LayoutRenderData.CONCAVE_LINES] = make_dotted_lines(concave_lines, 0.2, linestyle=[1,1,4,1])
+    render_data[LayoutRenderData.OUTLINE_LINES] = full_lines
+    render_data[LayoutRenderData.INNER_LINES] = make_dotted_lines(convex_lines, 0.2) + make_dotted_lines(concave_lines, 0.2, linestyle=[1,1,4,1])
     render_data[LayoutRenderData.BG_VERTS] = bg_verts
     render_data[LayoutRenderData.BG_COLORS] = bg_colors
 
@@ -387,24 +420,24 @@ def compute_page_layout_render_data_of_all_components(components_per_page, paper
                                                                                                                         page_index, pages_per_row, margin_between_pages)
     return render_data_per_component
 
-def combine_layout_render_data_of_all_components(render_data_per_component, selected_component = None, color_components = True, show_step_numbers = True):
-    component_bg_verts = []
-    component_bg_colors = []
-    selected_component_lines = []
-    other_component_lines = []
-    build_step_numbers = []
-
+def combine_layout_render_data_of_all_components(render_data_per_component, selected_component = None, 
+                                                 components_in_selected_section : set = set(), unselected_component_transparency = 1.0):
+    layout_rd_selected_component = []
+    layout_rd_selected_section = []
+    layout_rd_default = []
+    
+    selected_transparency = 1.0
     for component_id, render_data in render_data_per_component.items():
         if selected_component is not None and component_id == selected_component:
-            selected_component_lines += render_data[LayoutRenderData.FULL_LINES]
+            layout_rd_selected_component.append(render_data)
+            if component_id not in components_in_selected_section:
+                selected_transparency = unselected_component_transparency
+            continue
+        if component_id in components_in_selected_section:
+            layout_rd_selected_section.append(render_data)
         else:
-            other_component_lines += render_data[LayoutRenderData.FULL_LINES]
-        other_component_lines += render_data[LayoutRenderData.CONCAVE_LINES]
-        other_component_lines += render_data[LayoutRenderData.CONVEX_LINES]
-        if color_components:
-            component_bg_verts += render_data[LayoutRenderData.BG_VERTS]
-            component_bg_colors += render_data[LayoutRenderData.BG_COLORS]
-        if show_step_numbers:
-            build_step_numbers.append(render_data[LayoutRenderData.STEP_NUMBER])
+            layout_rd_default.append(render_data)
 
-    return component_bg_verts, component_bg_colors, other_component_lines, selected_component_lines, build_step_numbers
+    return [GroupedLayoutRenderData(layout_rd_selected_component, ORANGE, selected_transparency, outline_width=2), 
+            GroupedLayoutRenderData(layout_rd_selected_section, BLACK, 1.0),
+            GroupedLayoutRenderData(layout_rd_default, BLACK, unselected_component_transparency)]

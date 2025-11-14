@@ -2,7 +2,7 @@ import bpy
 from bpy.types import Scene
 import numpy as np
 from .drawing import update_all_polyzamboni_drawings, update_all_page_layout_drawings
-from .callbacks import update_glueflap_geometry_callback
+from .callbacks import update_glueflap_geometry_callback, update_all_drawings_callback
 
 # For more information about Blender Properties, visit:
 # <https://blender.org/api/blender_python_api_2_78a_release/bpy.types.Property.html>
@@ -11,10 +11,17 @@ from bpy.props import EnumProperty
 from bpy.props import FloatProperty
 from bpy.props import IntProperty
 from bpy.props import FloatVectorProperty
+from bpy.props import CollectionProperty
+from bpy.props import StringProperty
 
 class DrawSettings(bpy.types.PropertyGroup):
     drawing_enabled: BoolProperty(
         name="Show Zamboni interface",
+        default=True,
+        update=update_all_polyzamboni_drawings
+    )
+    draw_edges: BoolProperty(
+        name="Draw edges",
         default=True,
         update=update_all_polyzamboni_drawings
     )
@@ -73,6 +80,39 @@ class DrawSettings(bpy.types.PropertyGroup):
         default=True,
         update=update_all_page_layout_drawings
     )
+    highlight_active_section : BoolProperty(
+        name="Highlight selected section",
+        default=True,
+        update=update_all_polyzamboni_drawings
+    )
+    highlight_factor : FloatProperty(
+        name="Highlight factor",
+        description="A value of 1 makes all non-selected sections disappear",
+        default=0.5,
+        min=0,
+        max=1,
+        update=update_all_polyzamboni_drawings
+    )
+
+class ConnectedComponentProperty(bpy.types.PropertyGroup):
+    id : IntProperty(
+        name="Component id"
+    )
+
+class BuildSectionProperty(bpy.types.PropertyGroup):
+    name : StringProperty(
+        name="Section Name",
+        default="A"
+    )
+    connected_components : CollectionProperty(
+        type = ConnectedComponentProperty,
+        name="Connected components"
+    )
+    locked : BoolProperty(
+        name="Lock section",
+        description="When set to true, this section can only be changed manually.",
+        default=True
+    )
 
 class ZamboniGeneralMeshProps(bpy.types.PropertyGroup):
     has_attached_paper_model : BoolProperty(
@@ -106,6 +146,10 @@ class ZamboniGeneralMeshProps(bpy.types.PropertyGroup):
         description="Glue flaps get automatically trimmed to fit on the piece it is glued onto",
         default=True,
         update=update_glueflap_geometry_callback
+    )
+    mesh_is_non_manifold : BoolProperty(
+        name="Mesh is non manifold",
+        default=False
     )
     multi_touching_faces_present : BoolProperty(
         name="Multi touching faces present",
@@ -156,6 +200,15 @@ class ZamboniGeneralMeshProps(bpy.types.PropertyGroup):
         name="Selected Component ID",
         default=-1,
         update=update_all_polyzamboni_drawings
+    )
+    build_sections : CollectionProperty(
+        type=BuildSectionProperty,
+        name="Build sections"
+    )
+    active_build_section : IntProperty(
+        name="Active build section",
+        default=-1,
+        update=update_all_drawings_callback
     )
 
 linestyles = [
@@ -424,6 +477,8 @@ class PageLayoutCreationSettings(bpy.types.PropertyGroup):
 # This is where you assign any variables you need in your script. Note that they
 # won't always be assigned to the Scene object but it's a good place to start.
 def register():
+    bpy.utils.register_class(ConnectedComponentProperty)
+    bpy.utils.register_class(BuildSectionProperty)
     bpy.utils.register_class(DrawSettings)
     bpy.utils.register_class(ZamboniGeneralMeshProps)
     bpy.utils.register_class(GeneralExportSettings)
@@ -437,8 +492,10 @@ def register():
     bpy.types.WindowManager.polyzamboni_in_page_edit_mode = BoolProperty(name="Editing page layout", default=False)
     
 def unregister():
-    bpy.utils.unregister_class(DrawSettings)
     bpy.utils.unregister_class(ZamboniGeneralMeshProps)
+    bpy.utils.unregister_class(BuildSectionProperty)
+    bpy.utils.unregister_class(ConnectedComponentProperty)
+    bpy.utils.unregister_class(DrawSettings)
     bpy.utils.unregister_class(GeneralExportSettings)
     bpy.utils.unregister_class(LineExportSettings)
     bpy.utils.unregister_class(TextureExportSettings)

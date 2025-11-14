@@ -14,14 +14,26 @@ from . import io
 from . import units
 from . import exporters 
 from . import printprepper
+from . import utils
 from .papermodel import PaperModel
-from .printprepper import create_print_data_for_all_components, fit_components_on_pages, ComponentPrintData, ColoredTriangleData
+from .printprepper import create_print_data_for_all_components, fit_components_on_pages, ComponentPrintData, ColoredTriangleData, GlueFlapData
 from .exporters import paper_sizes
 
 
 #################################
 #    Init, delete and update    #
 #################################
+
+def get_indices_of_non_manifold_vertices(bm : BMesh):
+    non_manifold_vertices = set()
+    for vertex in bm.verts:
+        if not vertex.is_manifold:
+            non_manifold_vertices.add(vertex.index)
+    for edge in bm.edges:
+        if not (edge.is_boundary or edge.is_manifold):
+            for vertex in edge.verts:
+                non_manifold_vertices.add(vertex.index)
+    return non_manifold_vertices
 
 def get_indices_of_multi_touching_faces(bm : BMesh):
     face_pair_set = set()
@@ -220,7 +232,7 @@ def export_draw_func(operator : bpy.types.Operator):
     step_number_color_row.prop(general_settings_props, "steps_color", text="")
     if general_settings_props.show_step_numbers and not operator.build_steps_valid:
         step_num_warning_row = general_settings.row()
-        step_num_warning_row.label(icon="ERROR", text="Invalid build step numbers!")
+        step_num_warning_row.label(icon="ERROR", text="Sure about the step numbers?")
 
     # Line settings
     layout.label(text="Detailed line settings", icon="LINE_DATA")
@@ -434,9 +446,106 @@ def find_papermodel_piece_under_mouse_position(pos_x, pos_y, print_data_on_pages
         for colored_triangle in current_print_data.colored_triangles:
             if geometry.point_in_2d_triangle(np.array([pos_x, pos_y]) - page_anchor, *[current_print_data.page_transform * coord for coord in colored_triangle.coords]):
                 return current_print_data.og_component_id
+        glue_flap : GlueFlapData
+        for glue_flap in current_print_data.glue_flaps:
+            for glue_flap_triangle_coords in glue_flap.tris:
+                if geometry.point_in_2d_triangle(np.array([pos_x, pos_y]) - page_anchor, *[current_print_data.page_transform * coord for coord in glue_flap_triangle_coords]):
+                    return current_print_data.og_component_id
     return None
 
 def find_page_under_papermodel_piece(component_print_data : ComponentPrintData, component_page, bonus_transform : geometry.AffineTransform2D, pages, paper_size, margin_between_pages = 1.0, pages_per_row = 2):
     component_cog = component_print_data.get_cog()
     image_space_cog = (bonus_transform @ component_print_data.page_transform) * component_cog + compute_page_anchor(component_page, pages_per_row, paper_size, margin_between_pages)
     return find_page_under_mouse_position(image_space_cog[0], image_space_cog[1], pages, paper_size, margin_between_pages, pages_per_row)
+
+#################################
+#         Build sections        #
+#################################
+
+def collect_all_selected_connected_components(bm : BMesh, face_ids_to_component_ids):
+    res = set()
+    for face in bm.faces:
+        if not face.select:
+            continue
+        res.add(face_ids_to_component_ids[face.index])
+    return res
+
+def remove_component_set_from_all_existing_unlocked_build_sections(props, component_set : set):
+    build_sections = props.build_sections
+    for build_section in build_sections:
+        if build_section.locked:
+            continue
+        components_in_section = set([component.id for component in build_section.connected_components])
+        components_in_section.difference_update(component_set)
+        io.overwrite_build_section(build_section, components_in_section)
+
+def subtract_all_locked_build_sections_from_component_set(props, component_set : set, skip_index = -1):
+    build_sections = props.build_sections
+    for section_index, build_section in enumerate(build_sections):
+        if section_index == skip_index:
+            continue
+        if not build_section.locked:
+            continue
+        components_in_section = set([component.id for component in build_section.connected_components])
+        component_set.difference_update(components_in_section)
+
+def create_build_section_from_selected_faces(mesh : Mesh, bm : BMesh, props):
+    _, face_ids_to_component_ids = io.read_connected_components(mesh)
+    components_in_new_section = collect_all_selected_connected_components(bm, face_ids_to_component_ids)
+    remove_component_set_from_all_existing_unlocked_build_sections(props, components_in_new_section)
+    subtract_all_locked_build_sections_from_component_set(props, components_in_new_section)
+    io.write_new_build_section(mesh, utils.get_default_section_name_from_section_index(len(props.build_sections)), components_in_new_section)
+
+def change_active_build_section_from_selected_faces(mesh : Mesh, bm : BMesh, props):
+    active_section_index = props.active_build_section
+    if active_section_index == -1 or active_section_index >= len(props.build_sections):
+        return
+    _, face_ids_to_component_ids = io.read_connected_components(mesh)
+    selected_components = collect_all_selected_connected_components(bm, face_ids_to_component_ids)
+    remove_component_set_from_all_existing_unlocked_build_sections(props, selected_components)
+    subtract_all_locked_build_sections_from_component_set(props, selected_components, skip_index=active_section_index)
+    io.overwrite_build_section(props.build_sections[active_section_index], selected_components)
+
+def add_components_of_selected_faces_to_active_build_section(mesh : Mesh, bm : BMesh, props):
+    active_section_index = props.active_build_section
+    if active_section_index == -1 or active_section_index >= len(props.build_sections):
+        return
+    _, face_ids_to_component_ids = io.read_connected_components(mesh)
+    section_to_components_dict, _ = io.read_build_sections(mesh)
+    selected_components = collect_all_selected_connected_components(bm, face_ids_to_component_ids)
+    selected_components.update(section_to_components_dict[active_section_index])
+    remove_component_set_from_all_existing_unlocked_build_sections(props, selected_components)
+    subtract_all_locked_build_sections_from_component_set(props, selected_components, skip_index=active_section_index)
+    io.overwrite_build_section(props.build_sections[active_section_index], selected_components)
+
+def remove_components_of_selected_faces_from_active_build_section(mesh : Mesh, bm : BMesh, props):
+    active_section_index = props.active_build_section
+    if active_section_index == -1 or active_section_index >= len(props.build_sections):
+        return
+    _, face_ids_to_component_ids = io.read_connected_components(mesh)
+    section_to_components_dict, _ = io.read_build_sections(mesh)
+    selected_components = collect_all_selected_connected_components(bm, face_ids_to_component_ids)
+    remaining_components = section_to_components_dict[active_section_index].difference(selected_components)
+    io.overwrite_build_section(props.build_sections[active_section_index], remaining_components)
+
+def remove_active_build_section(mesh : Mesh):
+    active_section_index = mesh.polyzamboni_general_mesh_props.active_build_section
+    if active_section_index == -1:
+        return
+    if active_section_index >= len(mesh.polyzamboni_general_mesh_props.build_sections):
+        return
+    mesh.polyzamboni_general_mesh_props.build_sections.remove(active_section_index)
+    mesh.polyzamboni_general_mesh_props.active_build_section = active_section_index - 1
+
+def get_face_ids_in_active_build_section(mesh, props):
+    active_section_index = props.active_build_section
+    if active_section_index == -1:
+        return
+    if active_section_index >= len(props.build_sections):
+        return
+    components_as_sets, _ = io.read_connected_components(mesh)
+    res = set()
+    active_section = props.build_sections[active_section_index]
+    for component in active_section.connected_components:
+        res.update(components_as_sets[component.id])
+    return res

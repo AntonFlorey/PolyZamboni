@@ -173,11 +173,15 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
             line.set_clip_path(clip_path, transform=ax.transData)
         ax.add_line(line)
 
-    def __write_text(self, ax : axes.Axes, text, coord, text_size, color, page_transform : AffineTransform2D, page_flipped = False):
-        page_coord_text = self.__transform_component_coord_to_page_coord(coord, page_transform, page_flipped)
-        if text == "6" or text == "9":
-            text += "."
-        ax.text(page_coord_text[0], page_coord_text[1], text, fontsize=text_size, ha="center", va="center", color=color)
+    def __write_section_with_build_step_number(self, ax : axes.Axes, section_name, step_number, text_position, page_transform : AffineTransform2D, page_flipped = False):
+        combined_text = ""
+        if section_name is not None:
+            combined_text += section_name + " "
+        combined_text += str(step_number)
+        if step_number == 6 or step_number == 9:
+            combined_text += "."
+        page_coord_text = self.__transform_component_coord_to_page_coord(text_position, page_transform, page_flipped)
+        ax.text(page_coord_text[0], page_coord_text[1], combined_text, fontsize=self.build_step_number_font_size, ha="center", va="center", color=self.__linear_to_srgb(self.builf_step_number_color))
 
     def __write_text_along_line(self, ax : axes.Axes, line_coords, text, text_size, color = "black", offset_cm=0.1, flipped=False):
         start = line_coords[0]
@@ -342,13 +346,9 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
         for component_print_data in components_on_page:
             component_mask = self.__create_glue_flap_mask_of_component(ax, component_print_data, component_print_data.page_transform, self.prints_on_model_inside)
             if self.show_build_step_numbers:
-                self.__write_text(ax, str(component_print_data.build_step_number), 
-                                component_print_data.build_step_number_position,
-                                self.build_step_number_font_size,
-                                self.__linear_to_srgb(self.builf_step_number_color),
-                                component_print_data.page_transform,
-                                self.prints_on_model_inside)
-
+                self.__write_section_with_build_step_number(ax, component_print_data.build_section_name, 
+                                                            component_print_data.build_step_number, component_print_data.build_step_number_position, 
+                                                            component_print_data.page_transform, self.prints_on_model_inside)
             for cut_edge_print_data in component_print_data.cut_edges:
                 self.__draw_cut_edge(ax, cut_edge_print_data, component_print_data.page_transform, self.prints_on_model_inside)
             
