@@ -168,7 +168,7 @@ class POLYZAMBONI_UL_build_sections_list_2D_view(bpy.types.UIList):
             layout.alignment = 'CENTER'
             layout.label(text=build_section.name, icon_value=icon)
 
-class BuildSectionsDetailPanel(bpy.types.Menu):
+class BuildSectionsDetailMenu(bpy.types.Menu):
     bl_label = "Build section specials"
     bl_idname  = "POLYZAMBONI_MT_BuildSectionsSpecials"
     bl_category = "PolyZamboni"
@@ -350,7 +350,7 @@ class PageLayoutDrawSettingsPanel(bpy.types.Panel):
 def register():
     bpy.utils.register_class(POLYZAMBONI_UL_build_sections_list)
     bpy.utils.register_class(POLYZAMBONI_UL_build_sections_list_2D_view)
-    bpy.utils.register_class(BuildSectionsDetailPanel)
+    bpy.utils.register_class(BuildSectionsDetailMenu)
     bpy.utils.register_class(MainPanel)
     bpy.utils.register_class(GlueFlapSettingsPanel)
     bpy.utils.register_class(BuildSectionsPanel)
@@ -362,7 +362,7 @@ def register():
 def unregister():
     bpy.utils.unregister_class(POLYZAMBONI_UL_build_sections_list)
     bpy.utils.unregister_class(POLYZAMBONI_UL_build_sections_list_2D_view)
-    bpy.utils.unregister_class(BuildSectionsDetailPanel)
+    bpy.utils.unregister_class(BuildSectionsDetailMenu)
     bpy.utils.unregister_class(MainPanel)
     bpy.utils.unregister_class(GlueFlapSettingsPanel)
     bpy.utils.unregister_class(BuildSectionsPanel)

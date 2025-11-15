@@ -436,12 +436,15 @@ def compute_page_anchor(page_index, pages_per_row, paper_size, margin_between_pa
     col_index = page_index // pages_per_row
     return np.array([row_index * (paper_size[0] + margin_between_pages), -col_index * (paper_size[1] + margin_between_pages)])
 
-def find_papermodel_piece_under_mouse_position(pos_x, pos_y, print_data_on_pages, current_page_index, paper_size, pages_per_row = 2, margin_between_pages = 1):
+def find_papermodel_piece_under_mouse_position(pos_x, pos_y, print_data_on_pages, current_page_index, paper_size, pages_per_row = 2, margin_between_pages = 1, search_subset = None):
     if current_page_index is None or current_page_index >= len(print_data_on_pages):
         return None
+
     page_anchor = compute_page_anchor(current_page_index, pages_per_row, paper_size, margin_between_pages)
     current_print_data : ComponentPrintData
     for current_print_data in print_data_on_pages[current_page_index].values():
+        if search_subset is not None and current_print_data.og_component_id not in search_subset:
+            continue
         colored_triangle : ColoredTriangleData
         for colored_triangle in current_print_data.colored_triangles:
             if geometry.point_in_2d_triangle(np.array([pos_x, pos_y]) - page_anchor, *[current_print_data.page_transform * coord for coord in colored_triangle.coords]):
@@ -495,6 +498,12 @@ def create_build_section_from_selected_faces(mesh : Mesh, bm : BMesh, props):
     remove_component_set_from_all_existing_unlocked_build_sections(props, components_in_new_section)
     subtract_all_locked_build_sections_from_component_set(props, components_in_new_section)
     io.write_new_build_section(mesh, utils.get_default_section_name_from_section_index(len(props.build_sections)), components_in_new_section)
+
+def get_active_build_section_set(mesh : Mesh, props):
+    active_section_index = props.active_build_section
+    if active_section_index == -1 or active_section_index >= len(props.build_sections):
+        return None
+    return set([component.id for component in props.build_sections[active_section_index].connected_components])
 
 def change_active_build_section_from_selected_faces(mesh : Mesh, bm : BMesh, props):
     active_section_index = props.active_build_section

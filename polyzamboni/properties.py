@@ -83,7 +83,7 @@ class DrawSettings(bpy.types.PropertyGroup):
     highlight_active_section : BoolProperty(
         name="Highlight selected section",
         default=True,
-        update=update_all_polyzamboni_drawings
+        update=update_all_drawings_callback
     )
     highlight_factor : FloatProperty(
         name="Highlight factor",
@@ -91,7 +91,7 @@ class DrawSettings(bpy.types.PropertyGroup):
         default=0.5,
         min=0,
         max=1,
-        update=update_all_polyzamboni_drawings
+        update=update_all_drawings_callback
     )
 
 class ConnectedComponentProperty(bpy.types.PropertyGroup):

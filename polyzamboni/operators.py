@@ -1055,7 +1055,12 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
                     self.draw_current_page_layout(context)
             if event.type == "LEFTMOUSE" and event.value == "PRESS":
                 page_hovered_over = operators_backend.find_page_under_mouse_position(image_x, image_y, self.num_pages, self.paper_size)
-                selected_component_id = operators_backend.find_papermodel_piece_under_mouse_position(image_x, image_y, self.components_on_pages, page_hovered_over, self.paper_size)
+                if self.draw_settings.highlight_active_section and self.draw_settings.highlight_factor == 1.0:
+                    components_for_search = operators_backend.get_active_build_section_set(self.mesh, self.general_mesh_props)
+                    selected_component_id = operators_backend.find_papermodel_piece_under_mouse_position(image_x, image_y, self.components_on_pages, page_hovered_over, self.paper_size, 
+                                                                                                         search_subset=components_for_search)
+                else:
+                    selected_component_id = operators_backend.find_papermodel_piece_under_mouse_position(image_x, image_y, self.components_on_pages, page_hovered_over, self.paper_size)
                 self.select_component(context, selected_component_id, page_hovered_over)
             if event.type == "RIGHTMOUSE" and event.value == "PRESS":
                 self.select_component(context, None, None)
@@ -1146,7 +1151,7 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
 class PolyZamboniCreateSectionFromSelectedOperator(bpy.types.Operator):
     """Create a build section from the selected mesh faces"""
     bl_label = "Create build section"
-    bl_description = "Create a build section from the selected mesh faces"
+    bl_description = "Create a build section from the selected islands"
     bl_idname  = "polyzamboni.section_creation_op"
 
     def execute(self, context):
@@ -1166,7 +1171,7 @@ class PolyZamboniCreateSectionFromSelectedOperator(bpy.types.Operator):
 class PolyZamboniOverwriteSectionFromSelectedOperator(bpy.types.Operator):
     """Overwrites section from the selected mesh faces"""
     bl_label = "Overwrite build section"
-    bl_description = "Overwrite a build section with the selected connected components"
+    bl_description = "Overwrite a build section with the selected islands"
     bl_idname  = "polyzamboni.section_overwrite_op"
 
     def execute(self, context):
@@ -1191,7 +1196,7 @@ class PolyZamboniOverwriteSectionFromSelectedOperator(bpy.types.Operator):
 class PolyZamboniAddSelectedComponentsToSectionOperator(bpy.types.Operator):
     """Add the selected connected components to the active build section"""
     bl_label = "Add to build section"
-    bl_description = "Add the selected connected components to the active build section"
+    bl_description = "Add the selected islands to the active build section"
     bl_idname  = "polyzamboni.add_to_section_op"
 
     def execute(self, context):
@@ -1216,7 +1221,7 @@ class PolyZamboniAddSelectedComponentsToSectionOperator(bpy.types.Operator):
 class PolyZamboniRemoveSelectedComponentsFromSectionOperator(bpy.types.Operator):
     """Remove the selected connected components from the active build section"""
     bl_label = "Remove from build section"
-    bl_description = "Remove the selected connected components from the active build section"
+    bl_description = "Remove the selected islands from the active build section"
     bl_idname  = "polyzamboni.remove_from_section_op"
 
     def execute(self, context):

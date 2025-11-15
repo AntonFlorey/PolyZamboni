@@ -11,8 +11,7 @@ class CallbackGlobals():
     _refresh_page_layout_in_modal_operator = False
 
 def redraw_all(*args):
-    update_all_polyzamboni_drawings(None, bpy.context)
-    update_all_page_layout_drawings(None, bpy.context)
+    update_all_drawings_callback(None, bpy.context)
 
 dummy_owner = object()
 
