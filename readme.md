@@ -64,6 +64,19 @@ Glue flaps are also visualized on top of faces at the position they will have in
     <img src ="images/SpotFeedbackAnnotated.png">
 </p>
 
+### Build sections and step numbers
+To make the papermodel construction easier, you can partition the papermodel pieces into build sections. For this, go to the `Build Sections` panel where you can see a list of all build sections and have the following options:
+- Create a build section: This creates a build section from all pieces of selected mesh faces.
+- Remove the selected build section.
+- Change the islands of the selected build section.
+- Select all mesh faces that belong to the selected build section.
+- Lock and unlock build sections: Normally when adding pieces to a section, the pieces get removed from the sections that previously contained it (a piece can only be in one section at the time). Locking a section prevents this from happening.
+- Rename the build sections (directly in the list).
+
+You can also generate build step numbers for each piece, that tell you in which order to put them all together. While in `Edit Mode`, press the `Compute Build Order` button. Now all pieces inside a build section of size n will be numbered 1 to n. 
+
+In the final instructions, each piece will be printed with its build section name and build step number. 
+
 ### Edit the page layout
 Before exporting the instructions for your model, PolyZamboni allows you to edit the final page layout. For this go to the `UV or Image-Editor` and open the sidebar. After clicking on `Create print review` and setting some layout options, a preview of all pages and papermodel pieces should appear on your screen.
 
@@ -96,8 +109,6 @@ I am thrilled to see what you can create with this addon. Share your cool paperc
 
 ## Additional features
 I want to explain a couple more neat things built into this addon. These features might need some more work in the future as they are not as flexible and intuitive as the rest.
-
-**Construction order generation:** To help you construct the paper model, build step numbers can be printed on each piece. To generate an order in which to put all pieces together, select any start face and press the `Compute Build Order` button. This will number all connected regions via a bfs search on the cut-graph. I will maybe add a way to interactively edit this numbering and see the build process step by step.
 
 **Face texturing:** If your mesh has materials assigned to faces, you can transfer them to the paper model instructions. So far, only solid colors or single texture images are supported. PolyZamboni automatically searches for `Principled BSDF` shader nodes to get the base color of a material. A texture image is taken from an `Image Texture` shader node. Multiple textures are not supported (you would get a single random texture in such a case). Feel free to adjust the code to make this feature more powerful. I have little to no experience with texturing in blender and this is the best I could come up with.
 
