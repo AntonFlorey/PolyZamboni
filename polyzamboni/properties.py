@@ -368,6 +368,20 @@ class LineExportSettings(bpy.types.PropertyGroup):
         min=0,
         max=1
     )
+    convex_fold_edges_color : FloatVectorProperty(
+        name="Convex folds color",
+        subtype="COLOR",
+        default=[0.0,0.0,0.0],
+        min=0,
+        max=1
+    )
+    concave_fold_edges_color : FloatVectorProperty(
+        name="Convave folds color",
+        subtype="COLOR",
+        default=[0.0,0.0,0.0],
+        min=0,
+        max=1
+    )
     edge_number_offset : FloatProperty(
         name="Edge number offset",
         default=0.0005,

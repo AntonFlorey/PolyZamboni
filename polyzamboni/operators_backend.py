@@ -17,7 +17,7 @@ from . import printprepper
 from . import utils
 from .papermodel import PaperModel
 from .printprepper import create_print_data_for_all_components, fit_components_on_pages, ComponentPrintData, ColoredTriangleData, GlueFlapData
-from .exporters import paper_sizes
+from .exporters import paper_sizes, ExportSettings
 
 
 #################################
@@ -240,7 +240,9 @@ def export_draw_func(operator : bpy.types.Operator):
     # line width
     write_custom_split_property_row(line_settings, "Line width (pt)", line_settings_props, "line_width", 0.6)
     # lines color
-    write_custom_split_property_row(line_settings, "Line color", line_settings_props, "lines_color", 0.6)
+    write_custom_split_property_row(line_settings, "Cut edges color", line_settings_props, "lines_color", 0.6)
+    write_custom_split_property_row(line_settings, "Convex folds color", line_settings_props, "convex_fold_edges_color", 0.6)
+    write_custom_split_property_row(line_settings, "Concave folds color", line_settings_props, "concave_fold_edges_color", 0.6)
     # hide fold edge threshold
     write_custom_split_property_row(line_settings, "Fold edge threshold", line_settings_props, "hide_fold_edge_angle_th", 0.6)
     # edge number offset
@@ -312,29 +314,34 @@ def create_exporter_for_operator(operator, output_format="pdf"):
     general_settings = operator.properties.general_settings
     line_settings = operator.properties.line_settings
     texture_settings = operator.properties.texture_settings
-    exporter = exporters.MatplotlibBasedExporter(output_format=output_format, 
-                                                 paper_size=general_settings.paper_size if general_settings.paper_size != "Custom" else
-                                                 (units.blender_distance_to_cm(general_settings.custom_page_width), units.blender_distance_to_cm(general_settings.custom_page_height)),
-                                                 line_width=line_settings.line_width,
-                                                 cut_edge_ls=line_settings.cut_edge_ls,
-                                                 convex_fold_edge_ls=line_settings.convex_fold_edge_ls,
-                                                 concave_fold_edge_ls=line_settings.concave_fold_edge_ls,
-                                                 glue_flap_ls=line_settings.glue_flap_ls,
-                                                 fold_hide_threshold_angle=line_settings.hide_fold_edge_angle_th,
-                                                 show_edge_numbers=general_settings.show_edge_numbers,
-                                                 edge_number_font_size=general_settings.edge_number_font_size,
-                                                 edge_number_offset=units.blender_distance_to_cm(line_settings.edge_number_offset),
-                                                 show_build_step_numbers=general_settings.show_step_numbers,
-                                                 apply_main_texture=texture_settings.apply_textures,
-                                                 print_on_inside=general_settings.print_on_inside,
-                                                 two_sided_w_texture=texture_settings.print_two_sided,
-                                                 color_of_lines=line_settings.lines_color,
-                                                 color_of_edge_numbers=general_settings.edge_number_color,
-                                                 color_of_build_steps=general_settings.steps_color,
-                                                 build_step_font_size=general_settings.build_steps_font_size,
-                                                 triangle_bleed=units.blender_distance_to_cm(texture_settings.triangle_bleed),
-                                                 color_glue_flaps=texture_settings.apply_glue_flap_color,
-                                                 color_of_glue_flaps=texture_settings.glue_flap_color)
+
+    export_settings = ExportSettings(
+        paper_size=paper_sizes[general_settings.paper_size] if general_settings.paper_size != "Custom" else (units.blender_distance_to_cm(general_settings.custom_page_width), units.blender_distance_to_cm(general_settings.custom_page_height)), 
+        line_width=line_settings.line_width,
+        cut_edge_ls=line_settings.cut_edge_ls,
+        convex_fold_edge_ls=line_settings.convex_fold_edge_ls,
+        concave_fold_edge_ls=line_settings.concave_fold_edge_ls,
+        glue_flap_ls=line_settings.glue_flap_ls,
+        fold_hide_threshold_angle=line_settings.hide_fold_edge_angle_th,
+        show_edge_numbers=general_settings.show_edge_numbers,
+        edge_number_font_size=general_settings.edge_number_font_size,
+        edge_number_offset=units.blender_distance_to_cm(line_settings.edge_number_offset),
+        show_build_step_numbers=general_settings.show_step_numbers,
+        apply_main_texture=texture_settings.apply_textures,
+        prints_on_model_inside=general_settings.print_on_inside,
+        two_sided_with_texture=texture_settings.print_two_sided,
+        color_of_cut_edges=line_settings.lines_color,
+        color_of_convex_fold_edges=line_settings.convex_fold_edges_color,
+        color_of_concave_fold_edges = line_settings.concave_fold_edges_color,
+        color_of_edge_numbers=general_settings.edge_number_color,
+        color_of_build_steps=general_settings.steps_color,
+        build_step_font_size=general_settings.build_steps_font_size,
+        triangle_bleed=units.blender_distance_to_cm(texture_settings.triangle_bleed),
+        color_glue_flaps=texture_settings.apply_glue_flap_color,
+        color_of_glue_flaps=texture_settings.glue_flap_color
+    )
+
+    exporter = exporters.MatplotlibBasedExporter(output_format=output_format, export_settings=export_settings)
     return exporter
 
 def compute_max_fit_scaling_factor(ao : bpy.types.Object, settings):
@@ -434,7 +441,7 @@ def find_page_under_mouse_position(pos_x, pos_y, pages, paper_size, margin_betwe
 def compute_page_anchor(page_index, pages_per_row, paper_size, margin_between_pages):
     row_index = page_index % pages_per_row
     col_index = page_index // pages_per_row
-    return np.array([row_index * (paper_size[0] + margin_between_pages), -col_index * (paper_size[1] + margin_between_pages)])
+    return np.array([row_index * (paper_size[0] + margin_between_pages), -col_index * (paper_size[1] + margin_between_pages)], dtype=np.float64)
 
 def find_papermodel_piece_under_mouse_position(pos_x, pos_y, print_data_on_pages, current_page_index, paper_size, pages_per_row = 2, margin_between_pages = 1, search_subset = None):
     if current_page_index is None or current_page_index >= len(print_data_on_pages):
@@ -447,12 +454,12 @@ def find_papermodel_piece_under_mouse_position(pos_x, pos_y, print_data_on_pages
             continue
         colored_triangle : ColoredTriangleData
         for colored_triangle in current_print_data.colored_triangles:
-            if geometry.point_in_2d_triangle(np.array([pos_x, pos_y]) - page_anchor, *[current_print_data.page_transform * coord for coord in colored_triangle.coords]):
+            if geometry.point_in_2d_triangle(np.array([pos_x, pos_y], dtype=np.float64) - page_anchor, *[current_print_data.page_transform * coord for coord in colored_triangle.coords]):
                 return current_print_data.og_component_id
         glue_flap : GlueFlapData
         for glue_flap in current_print_data.glue_flaps:
             for glue_flap_triangle_coords in glue_flap.tris:
-                if geometry.point_in_2d_triangle(np.array([pos_x, pos_y]) - page_anchor, *[current_print_data.page_transform * coord for coord in glue_flap_triangle_coords]):
+                if geometry.point_in_2d_triangle(np.array([pos_x, pos_y], dtype=np.float64) - page_anchor, *[current_print_data.page_transform * coord for coord in glue_flap_triangle_coords]):
                     return current_print_data.og_component_id
     return None
 

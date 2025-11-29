@@ -20,8 +20,8 @@ def compute_optimal_flap_angle(edge : bmesh.types.BMEdge, flap_angle, flap_heigh
 
 def compute_2d_glue_flap_endpoints_edge_local(edge : bmesh.types.BMEdge, flap_angle_0, flap_angle_1):
     l = edge.calc_length()
-    target_0 = np.array([np.cos(flap_angle_0), np.sin(flap_angle_0)])
-    target_1 = np.array([-np.cos(flap_angle_1), np.sin(flap_angle_1)]) + np.array([l, 0])
+    target_0 = np.array([np.cos(flap_angle_0), np.sin(flap_angle_0)], dtype=np.float64)
+    target_1 = np.array([-np.cos(flap_angle_1), np.sin(flap_angle_1)], dtype=np.float64) + np.array([l, 0], dtype=np.float64)
     return target_0, target_1
 
 def compute_2d_glue_flap_triangles_edge_local(edge : bmesh.types.BMEdge, flap_angle, flap_height):
@@ -31,17 +31,17 @@ def compute_2d_glue_flap_triangles_edge_local(edge : bmesh.types.BMEdge, flap_an
     
     if l <= 2 * abs(x):
         # special emergency case...
-        p_1_local_edge = np.array([0, 0])
-        p_2_local_edge = np.array([l / 2, -h])
-        p_3_local_edge = np.array([l, 0])
+        p_1_local_edge = np.array([0, 0], dtype=np.float64)
+        p_2_local_edge = np.array([l / 2, -h], dtype=np.float64)
+        p_3_local_edge = np.array([l, 0], dtype=np.float64)
         return [(p_1_local_edge, p_2_local_edge, p_3_local_edge)]
 
     # compute all flap points in local edge coordinates
     convex_flap = flap_angle <= np.pi / 2
-    p_1_local_edge = np.array([0 if convex_flap else -x, 0])
-    p_2_local_edge = np.array([x if convex_flap else 0, -h])
-    p_3_local_edge = np.array([l - x if convex_flap else l, -h])
-    p_4_local_edge = np.array([l if convex_flap else l + x, 0])
+    p_1_local_edge = np.array([0 if convex_flap else -x, 0], dtype=np.float64)
+    p_2_local_edge = np.array([x if convex_flap else 0, -h], dtype=np.float64)
+    p_3_local_edge = np.array([l - x if convex_flap else l, -h], dtype=np.float64)
+    p_4_local_edge = np.array([l if convex_flap else l + x, 0], dtype=np.float64)
     return [(p_1_local_edge, p_2_local_edge, p_3_local_edge), (p_1_local_edge, p_3_local_edge, p_4_local_edge)]
 
 def compute_affine_transform_between_touching_components(component_id_1, component_id_2, join_face_index_1, join_face_index_2, join_verts,
@@ -59,8 +59,8 @@ def compute_affine_transform_between_touching_components(component_id_1, compone
         other_join_point_2 = unfolding_affine_transforms[component_id_2][join_face_index_2] * geometry.to_local_coords(join_verts_2[1].co, *local_coord_system_per_face[join_face_index_2])
         x_ax_1, y_ax_1 = geometry.construct_orthogonal_basis_at_2d_edge(join_point_1, other_join_point_1)
         x_ax_2, y_ax_2 = geometry.construct_orthogonal_basis_at_2d_edge(join_point_2, other_join_point_2)
-        basis_mat_1 = np.array([x_ax_1, y_ax_1]).T
-        basis_mat_2 = np.array([x_ax_2, y_ax_2]).T
+        basis_mat_1 = np.array([x_ax_1, y_ax_1], dtype=np.float64).T
+        basis_mat_2 = np.array([x_ax_2, y_ax_2], dtype=np.float64).T
         rotate_edges_together = geometry.AffineTransform2D(linear_part=basis_mat_2 @ np.linalg.inv(basis_mat_1))
         # full transformation
         transform_first_unfolding : geometry.AffineTransform2D = orig_to_join_point_2 @ rotate_edges_together @ join_point_1_to_orig

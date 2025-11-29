@@ -20,12 +20,13 @@ _all_validity_check_functions = []
 
 def serialize_affine_transform(affine_transform : AffineTransform2D):
     res = list(affine_transform.A.flatten()) + list(affine_transform.t)
+    res = [float(x) for x in res]
     assert len(res) == 6
     return res
 
 def parse_affine_transform(affine_transform_as_list):
     assert len(affine_transform_as_list) == 6
-    return AffineTransform2D(linear_part=np.array(affine_transform_as_list[:4]).reshape((2,2)), affine_part=np.array(affine_transform_as_list[4:]))
+    return AffineTransform2D(linear_part=np.array(affine_transform_as_list[:4], dtype=np.float64).reshape((2,2)), affine_part=np.array(affine_transform_as_list[4:], dtype=np.float64))
 
 # Edge constraints
 
@@ -334,12 +335,12 @@ def write_local_coordinate_systems_per_face(mesh : Mesh, local_coordinate_system
 def read_local_coordinate_systems_per_face(mesh : Mesh):
     if not local_coordinate_systems_per_face_exist(mesh):
         return None
-    return {int(face_id) : tuple([np.asarray(vec) for vec in coord_system]) for face_id, coord_system in mesh["polyzamboni_local_coordinate_systems_per_face"].to_dict().items()}
+    return {int(face_id) : tuple([np.array(vec, dtype=np.float64) for vec in coord_system]) for face_id, coord_system in mesh["polyzamboni_local_coordinate_systems_per_face"].to_dict().items()}
 
 def read_local_coordinate_system_of_face(mesh : Mesh, face_index):
     if not local_coordinate_systems_per_face_exist(mesh) or str(face_index) not in mesh["polyzamboni_local_coordinate_systems_per_face"]:
         return None
-    return tuple([np.asarray(vec) for vec in mesh["polyzamboni_local_coordinate_systems_per_face"][str(face_index)]])
+    return tuple([np.array(vec, dtype=np.float64) for vec in mesh["polyzamboni_local_coordinate_systems_per_face"][str(face_index)]])
 
 def remove_local_coordinate_systems_per_face(mesh : Mesh):
     if local_coordinate_systems_per_face_exist(mesh):
@@ -364,7 +365,8 @@ def inner_face_affine_transforms_exist(mesh : Mesh):
 _all_existence_check_functions.append(inner_face_affine_transforms_exist)
 
 def write_inner_face_affine_transforms(mesh : Mesh, inner_face_affine_transforms):
-    mesh["polyzamboni_inner_face_affine_transforms"] = {str(face_id) : {str(edge_id) : serialize_affine_transform(transform) for edge_id, transform in transforms_per_edges.items()} for face_id, transforms_per_edges in inner_face_affine_transforms.items()}
+    to_write = {str(face_id) : {str(edge_id) : serialize_affine_transform(transform) for edge_id, transform in transforms_per_edges.items()} for face_id, transforms_per_edges in inner_face_affine_transforms.items()}
+    mesh["polyzamboni_inner_face_affine_transforms"] = to_write
 
 def read_inner_face_affine_transforms(mesh : Mesh):
     if not inner_face_affine_transforms_exist(mesh):
@@ -456,12 +458,12 @@ def write_facewise_triangles_of_one_component(mesh : Mesh, component_id, facewis
 def read_facewise_triangles_per_component(mesh : Mesh):
     if not facewise_triangles_per_component_exist(mesh):
         return None
-    return {int(component_id) : {int(face_id) : [tuple([np.array(coord) for coord in tri]) for tri in triangles] for face_id, triangles in facewise_triangles.items()} for component_id, facewise_triangles in mesh["polyzamboni_facewise_triangles_per_component"].to_dict().items()}
+    return {int(component_id) : {int(face_id) : [tuple([np.array(coord, dtype=np.float64) for coord in tri]) for tri in triangles] for face_id, triangles in facewise_triangles.items()} for component_id, facewise_triangles in mesh["polyzamboni_facewise_triangles_per_component"].to_dict().items()}
 
 def read_facewise_triangles_of_one_component(mesh : Mesh, component_id):
     if not ("polyzamboni_facewise_triangles_per_component" in mesh and str(component_id) in mesh["polyzamboni_facewise_triangles_per_component"]):
         return None
-    return {int(face_id) : [tuple([np.array(coord) for coord in tri]) for tri in triangles] for face_id, triangles in mesh["polyzamboni_facewise_triangles_per_component"][str(component_id)].to_dict()}
+    return {int(face_id) : [tuple([np.array(coord, dtype=np.float64) for coord in tri]) for tri in triangles] for face_id, triangles in mesh["polyzamboni_facewise_triangles_per_component"][str(component_id)].to_dict()}
 
 def remove_facewise_triangles_per_component(mesh : Mesh):
     if facewise_triangles_per_component_exist(mesh):
@@ -562,7 +564,7 @@ def write_glue_flap_geometry_per_edge_per_component(mesh : Mesh, glue_flap_trian
 def read_glue_flap_geometry_per_edge_per_component(mesh : Mesh):
     if not glue_flap_geometry_per_edge_per_component_exist(mesh):
         return None
-    return {int(c_id) : {int(e_id) : [tuple([np.array(pos) for pos in tri]) for tri in tris] for e_id, tris in tris_per_edge.items()} for c_id, tris_per_edge in mesh["polyzamboni_glue_flap_triangles_2d"].to_dict().items()}
+    return {int(c_id) : {int(e_id) : [tuple([np.array(pos, dtype=np.float64) for pos in tri]) for tri in tris] for e_id, tris in tris_per_edge.items()} for c_id, tris_per_edge in mesh["polyzamboni_glue_flap_triangles_2d"].to_dict().items()}
 
 def read_glue_flap_2d_triangles_of_component(mesh : Mesh, component_id):
     if not glue_flap_geometry_per_edge_per_component_exist(mesh):

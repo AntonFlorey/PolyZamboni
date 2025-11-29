@@ -44,7 +44,7 @@ class ColoredTriangleData():
 
     def __init__(self, coords, uvs, abs_texture_path, color=None):
         self.coords = coords
-        self.uvs = [np.array(uv) for uv in uvs]
+        self.uvs = [np.array(uv, dtype=np.float64) for uv in uvs]
         self.absolute_texture_path = abs_texture_path # for textured faces 
         self.color = color # for monocolored faces
 
@@ -117,13 +117,13 @@ class ComponentPrintData():
 
     def compute_alignment_tranforms(self):
         # collect all coords along boundary edges
-        boundary_edge_first_coords = np.array([boundary_edge[0] for boundary_edge in self.__get_boundary_edges()])
+        boundary_edge_first_coords = np.array([boundary_edge[0] for boundary_edge in self.__get_boundary_edges()], dtype=np.float64)
         try:
             self.horizontal_alignment_transform = compute_min_area_bounding_box_transformation(boundary_edge_first_coords)
         except AssertionError as error:
             self.horizontal_alignment_transform = AffineTransform2D()
             print("Polyamboni error: Could not compute minimum area bounding box! A piece might be rotated unoptimally now.")
-        self.vertical_alignment_transform = AffineTransform2D(np.array([[0.0, -1.0],[1.0, 0.0]])) @ self.horizontal_alignment_transform # 90 degree rotation on top
+        self.vertical_alignment_transform = AffineTransform2D(np.array([[0.0, -1.0],[1.0, 0.0]], dtype=np.float64)) @ self.horizontal_alignment_transform # 90 degree rotation on top
 
     def align_horizontally(self):
         if self.horizontal_alignment_transform is None:
@@ -137,8 +137,8 @@ class ComponentPrintData():
     
     def get_cog(self):
         """ Center of gravity pre page transform """
-        boundary_edge_first_coords = np.array([boundary_edge[0] for boundary_edge in self.__get_boundary_edges()])
-        return np.mean(np.array(boundary_edge_first_coords), axis=0)
+        boundary_edge_first_coords = np.array([boundary_edge[0] for boundary_edge in self.__get_boundary_edges()], dtype=np.float64)
+        return np.mean(np.array(boundary_edge_first_coords, dtype=np.float64), axis=0)
 
 class PagePartitionNode():
     def __init__(self, ll, ur):
@@ -317,7 +317,7 @@ def create_print_data_for_all_components(obj : Object, scaling_factor):
                         text_path = norm_path
 
             # collect all faces and apply scaling factor
-            triangles_in_unfolding_space = [tuple(scaling_factor * np.asarray(tri_coords)) for tri_coords in unfolded_face_triangles[c_id][face_index]]
+            triangles_in_unfolding_space = [tuple(scaling_factor * np.asarray(tri_coords, dtype=np.float64)) for tri_coords in unfolded_face_triangles[c_id][face_index]]
             
             # uvs
             uvs_available = len(mesh.uv_layers) > 0
@@ -334,7 +334,7 @@ def create_print_data_for_all_components(obj : Object, scaling_factor):
 
         # collect edges and faces for glue flaps
         for flap_triangles in glue_flap_triangles[c_id].values():
-            scaled_flap_triangles = [tuple(scaling_factor * np.asarray(tri_coords)) for tri_coords in flap_triangles]
+            scaled_flap_triangles = [tuple(scaling_factor * np.asarray(tri_coords, dtype=np.float64)) for tri_coords in flap_triangles]
             assert len(scaled_flap_triangles) > 0
             flap_edges = [(scaled_flap_triangles[0][0],scaled_flap_triangles[0][1]), (scaled_flap_triangles[0][1], scaled_flap_triangles[0][2])]
             if len(scaled_flap_triangles) == 2:
@@ -360,7 +360,7 @@ def create_print_data_for_all_components(obj : Object, scaling_factor):
     return all_print_data
 
 def create_new_page_partition(page_size, page_margin):
-    return PagePartitionNode(np.array([page_margin, page_margin]), np.maximum(0, np.array([page_size[0] - page_margin, page_size[1] - page_margin])))
+    return PagePartitionNode(np.array([page_margin, page_margin], dtype=np.float64), np.maximum(0, np.array([page_size[0] - page_margin, page_size[1] - page_margin], dtype=np.float64)))
 
 def component_fits_in_page_part_node(component : ComponentPrintData, node : PagePartitionNode):
     comp_width = component.upper_right[0] - component.lower_left[0]
@@ -377,21 +377,21 @@ def partition_node_after_component_insertion(component : ComponentPrintData, nod
     
     # split along longer edge (I dont know what is better here tbh)
     if comp_height >= comp_width:
-        b1_ll = node.lower_left_corner + np.array([comp_width + component_margin, 0])
+        b1_ll = node.lower_left_corner + np.array([comp_width + component_margin, 0], dtype=np.float64)
         b1_ur = node.upper_right_corner
         if b1_ll[0] < b1_ur[0]:
             node.child_one = PagePartitionNode(b1_ll, b1_ur)
-        b2_ll = node.lower_left_corner + np.array([0, comp_height + component_margin])
-        b2_ur = np.array([node.lower_left_corner[0] + comp_width, node.upper_right_corner[1]])
+        b2_ll = node.lower_left_corner + np.array([0, comp_height + component_margin], dtype=np.float64)
+        b2_ur = np.array([node.lower_left_corner[0] + comp_width, node.upper_right_corner[1]], dtype=np.float64)
         if b2_ll[0] < b2_ur[0] and b2_ll[1] < b2_ur[1]:
             node.child_two = PagePartitionNode(b2_ll, b2_ur)
     else:
-        b1_ll = node.lower_left_corner + np.array([0 , comp_height + component_margin])
+        b1_ll = node.lower_left_corner + np.array([0 , comp_height + component_margin], dtype=np.float64)
         b1_ur = node.upper_right_corner
         if b1_ll[1] < b1_ur[1]:
             node.child_one = PagePartitionNode(b1_ll, b1_ur)
-        b2_ll = node.lower_left_corner + np.array([comp_width + component_margin, 0])
-        b2_ur = np.array([node.upper_right_corner[0], node.lower_left_corner[1] + comp_height])
+        b2_ll = node.lower_left_corner + np.array([comp_width + component_margin, 0], dtype=np.float64)
+        b2_ur = np.array([node.upper_right_corner[0], node.lower_left_corner[1] + comp_height], dtype=np.float64)
         if b2_ll[0] < b2_ur[0] and b2_ll[1] < b2_ur[1]:
             node.child_two = PagePartitionNode(b2_ll, b2_ur)
 

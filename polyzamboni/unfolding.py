@@ -33,6 +33,7 @@ def compute_local_coordinate_system_with_all_transitions_to_it(bmesh : BMesh, fa
         curr_basis = geometry.construct_2d_space_along_face_edge(face_vertices_ccw[i].co, face_vertices_ccw[j].co, face_normal)
         transition = geometry.affine_2d_transformation_between_two_2d_spaces_on_same_plane(local_2d_coord_system, curr_basis)
         inner_affine_transforms[bmesh.edges.get([face_vertices_ccw[i], face_vertices_ccw[j]]).index] = transition
+
     return local_2d_coord_system, inner_affine_transforms
 
 def compute_2d_unfolded_triangles_of_component(bmesh : BMesh, face_list, pred_dict,
@@ -62,7 +63,7 @@ def compute_2d_unfolded_triangles_of_component(bmesh : BMesh, face_list, pred_di
         pred_to_root : geometry.AffineTransform2D = affine_transform_to_root_coord_system_per_face[pred]
         pred_connecting_edge_to_local_2d : geometry.AffineTransform2D = inner_transform_data_per_face[pred][connecting_edge_id]
         curr_local_2d_to_connecting_edge : geometry.AffineTransform2D = inner_transform_data_per_face[face_index][connecting_edge_id].inverse()
-        transform_at_edge = geometry.AffineTransform2D(-np.eye(2), np.array([connecting_edge.calc_length(), 0]))
+        transform_at_edge = geometry.AffineTransform2D(-np.eye(2), np.array([connecting_edge.calc_length(), 0], dtype=np.float64))
         combined_transform = pred_to_root @ (pred_connecting_edge_to_local_2d @ (transform_at_edge @ curr_local_2d_to_connecting_edge))
         affine_transform_to_root_coord_system_per_face[face_index] = combined_transform
 

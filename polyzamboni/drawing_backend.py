@@ -48,7 +48,7 @@ def make_dotted_lines(line_array, target_line_length, max_segments = 100, linest
 def linear_to_srgb(linear_color):
     if linear_color is None:
         return None
-    linear_color = np.array(linear_color)
+    linear_color = np.array(linear_color, dtype=np.float64)
     srgb_color = np.where(linear_color <= 0.0031308, 12.92 * linear_color, 1.055 * np.power(linear_color, 1/2.4) - 0.055)
     return srgb_color
 
@@ -323,11 +323,11 @@ def compute_backgound_paper_render_data(num_pages, paper_size, selected_page = N
     for page_index in range(num_pages):
         row_index = page_index % pages_per_row
         col_index = page_index // pages_per_row
-        page_anchor = np.array([row_index * (paper_size[0] + margin_between_pages), -col_index * (paper_size[1] + margin_between_pages)])
+        page_anchor = np.array([row_index * (paper_size[0] + margin_between_pages), -col_index * (paper_size[1] + margin_between_pages)], dtype=np.float64)
         ll = page_anchor 
-        lr = page_anchor + np.array([paper_size[0], 0.0])
-        ur = page_anchor + np.array([paper_size[0], paper_size[1]])
-        ul = page_anchor + np.array([0.0, paper_size[1]])
+        lr = page_anchor + np.array([paper_size[0], 0.0], dtype=np.float64)
+        ur = page_anchor + np.array([paper_size[0], paper_size[1]], dtype=np.float64)
+        ul = page_anchor + np.array([0.0, paper_size[1]], dtype=np.float64)
         current_page_line_coords = [ll, lr, lr, ur, ur, ul, ul, ll]
         if selected_page is not None and selected_page == page_index:
             selected_page_lines += current_page_line_coords
@@ -363,7 +363,7 @@ class GroupedLayoutRenderData():
 def compute_page_layout_render_data_of_component(component : ComponentPrintData, paper_size, fold_angle_th, page_index, pages_per_row = 2.0, margin_between_pages = 1.0):
     row_index = page_index % pages_per_row
     col_index = page_index // pages_per_row
-    page_anchor = np.array([row_index * (paper_size[0] + margin_between_pages), -col_index * (paper_size[1] + margin_between_pages)])
+    page_anchor = np.array([row_index * (paper_size[0] + margin_between_pages), -col_index * (paper_size[1] + margin_between_pages)], dtype=np.float64)
     full_transform = AffineTransform2D(affine_part=page_anchor) @ component.page_transform
 
     render_data = {}

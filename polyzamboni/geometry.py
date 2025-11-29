@@ -91,7 +91,7 @@ class AffineTransform2D():
         return "2D Affine Transformation\nLinear Part:\n" + self.A.__str__() + "\nAffine Part:\n" + self.t.__str__()
 
 def compute_bb_diameter(mesh : bmesh.types.BMesh):
-    positions = np.asarray([np.asarray(v.co) for v in mesh.verts])
+    positions = np.asarray([np.asarray(v.co, dtype=np.float64) for v in mesh.verts])
     mincorner = np.min(positions, axis=0)
     maxcorner = np.max(positions, axis=0)
     
@@ -125,33 +125,33 @@ def compute_planarity_score(face_coords):
     return planarity_score * 6 / (n * (n - 1) * (n - 2))
 
 def to_local_coords(point_in_3d, frame_orig, base_x, base_y):
-    relative_coord = np.asarray(point_in_3d) - frame_orig
-    return np.array([np.dot(base_x, relative_coord), np.dot(base_y, relative_coord)])
+    relative_coord = np.asarray(point_in_3d, dtype=np.float64) - frame_orig
+    return np.array([np.dot(base_x, relative_coord), np.dot(base_y, relative_coord)], dtype=np.float64)
 
 def to_world_coords(point_in_2d, frame_orig, base_x, base_y):
     return frame_orig + point_in_2d[0] * base_x + point_in_2d[1] * base_y
 
 def construct_orthogonal_basis_at_2d_edge(v_2d_from, v_2d_to):
-    x_ax = np.array(v_2d_to - v_2d_from)
+    x_ax = np.array(v_2d_to - v_2d_from, dtype=np.float64)
     x_ax = x_ax / np.linalg.norm(x_ax)
-    y_ax = np.array([-x_ax[1], x_ax[0]]) # rotation by 90 degrees
+    y_ax = np.array([-x_ax[1], x_ax[0]], dtype=np.float64) # rotation by 90 degrees
     return x_ax, y_ax
 
 def construct_2d_space_along_face_edge(v_3d_from, v_3d_to, n_3d):
-    x_ax = np.array(v_3d_to - v_3d_from)
+    x_ax = np.array(v_3d_to - v_3d_from, dtype=np.float64)
     x_ax = x_ax / np.linalg.norm(x_ax)
-    n = np.array(n_3d)
+    n = np.array(n_3d, dtype=np.float64)
     y_ax = np.cross(n, x_ax)
     y_ax = y_ax / np.linalg.norm(y_ax)
-    orig = np.array(v_3d_from)
+    orig = np.array(v_3d_from, dtype=np.float64)
     return (orig, x_ax, y_ax)
 
 def compute_angle_between_2d_vectors_atan2(vec_1, vec_2):
     v1, v1_orth = construct_orthogonal_basis_at_2d_edge(np.zeros(2), vec_1)
-    v2 = np.array(vec_2)
+    v2 = np.array(vec_2, dtype=np.float64)
     v2 = v2 / np.linalg.norm(v2)
     # rotate v1 to (1,0) and apply the same rotation to v2
-    v2_rot = np.linalg.inv(np.array([v1, v1_orth]).T) @ v2
+    v2_rot = np.linalg.inv(np.array([v1, v1_orth], dtype=np.float64).T) @ v2
     return np.arctan2(v2_rot[1], v2_rot[0])
 
 def affine_2d_transformation_between_two_2d_spaces_on_same_plane(space_a, space_b):
@@ -159,12 +159,12 @@ def affine_2d_transformation_between_two_2d_spaces_on_same_plane(space_a, space_
     orig_b_in_space_a = to_local_coords(space_b[0], *space_a)
     x_ax_b_in_space_a = to_local_coords(space_a[0] + space_b[1], *space_a)
     y_ax_b_in_space_a = to_local_coords(space_a[0] + space_b[2], *space_a)
-    A = np.array([[x_ax_b_in_space_a[0], y_ax_b_in_space_a[0]], [x_ax_b_in_space_a[1], y_ax_b_in_space_a[1]]])
+    A = np.array([[x_ax_b_in_space_a[0], y_ax_b_in_space_a[0]], [x_ax_b_in_space_a[1], y_ax_b_in_space_a[1]]], dtype=np.float64)
     return AffineTransform2D(A, orig_b_in_space_a)
 
 def signed_point_dist_to_line(point, v_a, v_b):
     v_ab = v_b - v_a
-    n = np.array([-v_ab[1], v_ab[0]]) # rotation by 90 degrees
+    n = np.array([-v_ab[1], v_ab[0]], dtype=np.float64) # rotation by 90 degrees
     n = n / np.linalg.norm(n)
     return np.dot(n,point - v_a)
 
@@ -196,13 +196,13 @@ def compute_all_interior_triangle_angles_2d(v_a, v_b, v_c):
 def face_corner_convex_3d(v_a, v_b, v_c, normal):
     ab = (v_b - v_a) / np.linalg.norm(v_b - v_a)
     bc = (v_c - v_b) / np.linalg.norm(v_c - v_b)
-    return np.linalg.det(np.array([ab, bc, normal])) >= 0
+    return np.linalg.det(np.array([ab, bc, normal], dtype=np.float64)) >= 0
 
 def triangulate_3d_polygon(ccw_vertex_list, normal, external_vertex_id = None, crash_on_fail = False):
     """ Triangulates a 2D polygon embedded in 3D space """
 
     local_2d_space = construct_2d_space_along_face_edge(ccw_vertex_list[0], ccw_vertex_list[1], normal)
-    vertex_2d_list = [to_local_coords(np.array(v), *local_2d_space) for v in ccw_vertex_list]
+    vertex_2d_list = [to_local_coords(np.array(v, dtype=np.float64), *local_2d_space) for v in ccw_vertex_list]
     triangles_2d, triangles_via_ids = triangulate_2d_polygon_angle_optimal(vertex_2d_list, external_vertex_id, crash_on_fail)
 
     return [to_world_coords(v, *local_2d_space) for v in triangles_2d], triangles_via_ids
@@ -286,21 +286,21 @@ def triangulate_2d_polygon_angle_optimal(ccw_vertex_list, external_vertex_id = N
 
 def solve_for_weird_intersection_point(center_point_3d, prev_point_3d, next_point_3d, normal, prev_offset, next_offset):
     local_basis = construct_2d_space_along_face_edge(center_point_3d, next_point_3d, normal)
-    center_2d = to_local_coords(np.asarray(center_point_3d), *local_basis)
-    prev_2d = to_local_coords(np.asarray(prev_point_3d), *local_basis)
-    next_2d = to_local_coords(np.asarray(next_point_3d), *local_basis)
+    center_2d = to_local_coords(np.asarray(center_point_3d, dtype=np.float64), *local_basis)
+    prev_2d = to_local_coords(np.asarray(prev_point_3d, dtype=np.float64), *local_basis)
+    next_2d = to_local_coords(np.asarray(next_point_3d, dtype=np.float64), *local_basis)
 
     ptc = center_2d - prev_2d
-    line_normal_prev = np.array([-ptc[1], ptc[0]])
+    line_normal_prev = np.array([-ptc[1], ptc[0]], dtype=np.float64)
     line_normal_prev = line_normal_prev / np.linalg.norm(line_normal_prev)
     ctn = next_2d - center_2d
-    line_normal_next = np.array([-ctn[1], ctn[0]])
+    line_normal_next = np.array([-ctn[1], ctn[0]], dtype=np.float64)
     line_normal_next = line_normal_next / np.linalg.norm(line_normal_next)
 
     line_base_prev = center_2d + prev_offset * line_normal_prev
     line_base_next = center_2d + next_offset * line_normal_next
-    M = np.array([line_normal_prev, line_normal_next])
-    rhs = np.array([np.dot(line_normal_prev, line_base_prev), np.dot(line_normal_next, line_base_next)]).reshape(2,1)
+    M = np.array([line_normal_prev, line_normal_next], dtype=np.float64)
+    rhs = np.array([np.dot(line_normal_prev, line_base_prev), np.dot(line_normal_next, line_base_next)], dtype=np.float64).reshape(2,1)
     weird_p_2d = np.linalg.solve(M, rhs)
 
     return to_world_coords(weird_p_2d, *local_basis)
@@ -308,7 +308,7 @@ def solve_for_weird_intersection_point(center_point_3d, prev_point_3d, next_poin
 def solve_2d_line_line_intersection(a0, a1, b0, b1):
     a_dir = a1 - a0
     b_dir = b1 - b0
-    M = np.array([a_dir, -b_dir]).T
+    M = np.array([a_dir, -b_dir], dtype=np.float64).T
     det = np.linalg.det(M)
     if abs(det) <= 1e-4:
         # skip intersection test for near parallel lines
@@ -396,12 +396,12 @@ def compute_min_area_bounding_box_transformation(points):
         p_B = points[convex_hull_indices[i + 1]]
         local_ax_X = p_B - p_A
         local_ax_X = local_ax_X / np.linalg.norm(local_ax_X)
-        local_ax_Y = np.array([-local_ax_X[1], local_ax_X[0]])
+        local_ax_Y = np.array([-local_ax_X[1], local_ax_X[0]], dtype=np.float64)
 
-        min_corner = np.array([np.inf, np.inf])
-        max_corner = np.array([-np.inf, -np.inf])
+        min_corner = np.array([np.inf, np.inf], dtype=np.float64)
+        max_corner = np.array([-np.inf, -np.inf], dtype=np.float64)
         for p in points:
-            local_coords_p = np.array([np.dot(p - p_A, local_ax_X), np.dot(p - p_A, local_ax_Y)])
+            local_coords_p = np.array([np.dot(p - p_A, local_ax_X), np.dot(p - p_A, local_ax_Y)], dtype=np.float64)
             min_corner = np.minimum(min_corner, local_coords_p)
             max_corner = np.maximum(max_corner, local_coords_p)
 

@@ -18,6 +18,7 @@ from . import utils
 from . import units
 from .zambonipolice import check_if_build_step_numbers_exist_and_make_sense, all_components_have_unfoldings, check_if_page_numbers_and_transforms_exist_for_all_components
 from .callbacks import CallbackGlobals
+from .papermodel import PaperModel
 
 def _active_object_is_mesh(context : bpy.types.Context):
     active_object = context.active_object
@@ -60,7 +61,7 @@ class InitializeCuttingOperator(bpy.types.Operator):
         self.normals_are_okay = np.all([edge.is_contiguous or edge.is_boundary for edge in bm.edges])
         self.double_connected_face_pair_present = False
         self.non_triangulatable_faces_present = False
-        self.max_planarity_score = max([compute_planarity_score([np.array(v.co) for v in face.verts]) for face in bm.faces])
+        self.max_planarity_score = max([compute_planarity_score([np.array(v.co, dtype=np.float64) for v in face.verts]) for face in bm.faces])
 
         if not self.selected_mesh_is_manifold:
             wm = context.window_manager
@@ -444,6 +445,7 @@ class ZamboniCutDesignOperator(bpy.types.Operator):
     def poll(cls, context):
         return _active_object_is_mesh_with_paper_model(context) and context.mode == 'EDIT_MESH' and not bpy.context.window_manager.polyzamboni_in_page_edit_mode
 
+auto_cuts_timeout_seconds = 10
 class AutoCutsOperator(bpy.types.Operator):
     """ Automatically generate cuts """
     bl_label = "Auto Unfold"
@@ -500,6 +502,10 @@ class AutoCutsOperator(bpy.types.Operator):
     def execute(self, context):
         ao = context.active_object
         ao_mesh = ao.data
+
+        # create paper model
+        self._paper_model = PaperModel.from_existing(ao_mesh)
+
         # progress bar setup
         self._running = True
         wm = context.window_manager
@@ -509,8 +515,15 @@ class AutoCutsOperator(bpy.types.Operator):
 
         if self.cutting_algorithm == "GREEDY":
             def compute_and_report_progress():
-                for progress in greedy_auto_cuts(ao_mesh, self.quality_level, self.loop_alignment, self.max_pieces_per_component):
-                    wm.polyzamboni_auto_cuts_progress = progress
+                try:
+                    for progress in greedy_auto_cuts(self._paper_model, self.quality_level, self.loop_alignment, self.max_pieces_per_component):
+                        wm.polyzamboni_auto_cuts_progress = progress
+                except Exception:
+                    print("POLYZAMBONI ERROR: Exception while computing auto cuts!")
+                    self._paper_model.valid = False
+                    wm.polyzamboni_auto_cuts_running = False
+                    self._running = False
+                    raise
                 self._running = False
                 wm.polyzamboni_auto_cuts_running = False
             threading.Thread(target=compute_and_report_progress).start()
@@ -524,6 +537,7 @@ class AutoCutsOperator(bpy.types.Operator):
                 if region.active_panel_category == 'PolyZamboni':
                     region.tag_redraw()
             if not self._running:
+                self._paper_model.close()
                 update_all_polyzamboni_drawings(None, context)
                 update_all_page_layout_drawings(None, context)
                 return {'FINISHED'}
@@ -1125,7 +1139,7 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
                 if np.linalg.norm(self.rotation_center - mouse_pos_np) <= 1e-2:
                     self.rotation_base_to = np.eye(2)
                 else:
-                    self.rotation_base_to = np.array(construct_orthogonal_basis_at_2d_edge(self.rotation_center, mouse_pos_np)).T
+                    self.rotation_base_to = np.array(construct_orthogonal_basis_at_2d_edge(self.rotation_center, mouse_pos_np), dtype=np.float64).T
                 rotation = AffineTransform2D(linear_part=self.rotation_base_to @ self.rotation_base_from)
                 cog_to_orig = AffineTransform2D(affine_part=-self.currently_rotating_object_cog)
                 edit_transform = cog_to_orig.inverse() @ rotation @ cog_to_orig

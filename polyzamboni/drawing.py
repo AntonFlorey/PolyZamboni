@@ -281,7 +281,7 @@ def build_step_numbers_draw_callback(numbers_with_positions, font_size, transpar
             blf.color(0, 0, 0, 0, transparency)
             step_number = num_with_pos[0]
             dim = blf.dimensions(0, str(step_number))
-            position = num_with_pos[1] / scale - np.array([dim[0] / 2, dim[1] / 2])
+            position = num_with_pos[1] / scale - np.array([dim[0] / 2, dim[1] / 2], dtype=np.float64)
             blf.position(0, position[0], position[1], 0)
             blf.draw(0, str(step_number))
 

@@ -484,8 +484,8 @@ class PaperModel():
         other_join_point_2 = component_2.unfolding_affine_transforms[join_face_index_2] * geometry.to_local_coords(join_verts_2[1].co, *self.local_coord_system_per_face[join_face_index_2])
         x_ax_1, y_ax_1 = geometry.construct_orthogonal_basis_at_2d_edge(join_point_1, other_join_point_1)
         x_ax_2, y_ax_2 = geometry.construct_orthogonal_basis_at_2d_edge(join_point_2, other_join_point_2)
-        basis_mat_1 = np.array([x_ax_1, y_ax_1]).T
-        basis_mat_2 = np.array([x_ax_2, y_ax_2]).T
+        basis_mat_1 = np.array([x_ax_1, y_ax_1], dtype=np.float64).T
+        basis_mat_2 = np.array([x_ax_2, y_ax_2], dtype=np.float64).T
         rotate_edges_together = geometry.AffineTransform2D(linear_part=basis_mat_2 @ np.linalg.inv(basis_mat_1))
         # full transformation
         transform_first_unfolding : geometry.AffineTransform2D = orig_to_join_point_2 @ rotate_edges_together @ join_point_1_to_orig
