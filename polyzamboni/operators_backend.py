@@ -197,7 +197,7 @@ def export_draw_func(operator : bpy.types.Operator):
             # set target model height
             general_settings_props.target_model_height = curr_scale_factor * operator.mesh_height
         
-        if general_settings_props.sizing_scale > operator.max_fit_scaling:
+        if general_settings_props.sizing_scale > compute_max_fit_scaling_factor(operator.max_component_dimensions, general_settings_props):
             general_settings.row().label(icon="ERROR", text="A piece does not fit on one page!")
         # margin
         write_custom_split_property_row(general_settings, "Page margin", general_settings_props, "page_margin", 0.6)
@@ -300,7 +300,7 @@ def page_layout_draw_func(operator : bpy.types.Operator):
         # set target model height
         operator.page_layout_options.target_model_height = curr_scale_factor * operator.mesh_height
     
-    if operator.page_layout_options.sizing_scale > operator.max_fit_scaling:
+    if operator.page_layout_options.sizing_scale > compute_max_fit_scaling_factor(operator.max_component_dimensions, operator.page_layout_options):
         layout.row().label(icon="ERROR", text="A piece does not fit on one page!")
 
     # one mat per page
@@ -344,20 +344,18 @@ def create_exporter_for_operator(operator, output_format="pdf"):
     exporter = exporters.MatplotlibBasedExporter(output_format=output_format, export_settings=export_settings)
     return exporter
 
-def compute_max_fit_scaling_factor(ao : bpy.types.Object, settings):
-    all_component_bb_dims_cm = [units.blender_distance_to_cm(bb_dim) for bb_dim in printprepper.compute_all_connected_components_bb_dimensions(ao)]
-    max_fit_scaling = np.inf
-    if len(all_component_bb_dims_cm) > 0:
-        page_margin_in_cm = units.blender_distance_to_cm(settings.page_margin)
-        if settings.paper_size != "Custom":
-            curr_page_size = exporters.paper_sizes[settings.paper_size]
-        else:
-            curr_page_size = (units.blender_distance_to_cm(settings.custom_page_width), units.blender_distance_to_cm(settings.custom_page_height))
-        effective_page_dim_asc = sorted([curr_page_size[0] - 2 * page_margin_in_cm, curr_page_size[1] - 2 * page_margin_in_cm])
-        for component_bb_dim in all_component_bb_dims_cm:
-            bb_asc = sorted(component_bb_dim)
-            max_fit_scaling = min(effective_page_dim_asc[0] / bb_asc[0], effective_page_dim_asc[1] / bb_asc[1], max_fit_scaling)
-    return max_fit_scaling
+def compute_max_piece_dimensions(ao : bpy.types.Object):
+    all_component_bb_dims_cm = np.array([units.blender_distance_to_cm(bb_dim) for bb_dim in printprepper.compute_all_connected_components_bb_dimensions(ao)])
+    return np.max(np.sort(all_component_bb_dims_cm), axis=0)
+
+def compute_max_fit_scaling_factor(max_component_dimensions, settings):
+    page_margin_in_cm = units.blender_distance_to_cm(settings.page_margin)
+    if settings.paper_size != "Custom":
+        curr_page_size = exporters.paper_sizes[settings.paper_size]
+    else:
+        curr_page_size = (units.blender_distance_to_cm(settings.custom_page_width), units.blender_distance_to_cm(settings.custom_page_height))
+    effective_page_dim_asc = sorted([curr_page_size[0] - 2 * page_margin_in_cm, curr_page_size[1] - 2 * page_margin_in_cm])
+    return min(effective_page_dim_asc[0] / max_component_dimensions[0], effective_page_dim_asc[1] / max_component_dimensions[1])
 
 #################################
 #      Page Layout Editing      #

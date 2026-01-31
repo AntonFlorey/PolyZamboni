@@ -597,15 +597,16 @@ class PolyZamboniExportPDFOperator(bpy.types.Operator, ExportHelper):
         ao = context.active_object
         active_mesh = ao.data
         self.build_steps_valid = check_if_build_step_numbers_exist_and_make_sense(active_mesh)
-        self.max_fit_scaling = operators_backend.compute_max_fit_scaling_factor(ao, self.general_settings)
+        self.max_component_dimensions = operators_backend.compute_max_piece_dimensions(ao)
 
         self.mesh_height = utils.compute_mesh_height(active_mesh)
         if self.mesh_height == 0:
             print("POLYZAMBONI WARNING: Mesh has zero height!")
             self.mesh_height = 1 # to prevent crashes
 
-        self.general_settings.sizing_scale = 0.99 * self.max_fit_scaling
-        self.general_settings.target_model_height = 0.99 * self.max_fit_scaling * self.mesh_height
+        max_fit_scaling = operators_backend.compute_max_fit_scaling_factor(self.max_component_dimensions, self.general_settings)
+        self.general_settings.sizing_scale = 0.99 * max_fit_scaling
+        self.general_settings.target_model_height = 0.99 * max_fit_scaling * self.mesh_height
 
         # if it exists, load existing page layout
         self.user_defined_page_layout_exists = check_if_page_numbers_and_transforms_exist_for_all_components(active_mesh)
@@ -676,15 +677,16 @@ class PolyZamboniExportSVGOperator(bpy.types.Operator, ExportHelper):
         ao = context.active_object
         active_mesh = ao.data
         self.build_steps_valid = check_if_build_step_numbers_exist_and_make_sense(active_mesh)
-        self.max_fit_scaling = operators_backend.compute_max_fit_scaling_factor(ao, self.general_settings)
+        self.max_component_dimensions = operators_backend.compute_max_piece_dimensions(ao)
 
         self.mesh_height = utils.compute_mesh_height(active_mesh)
         if self.mesh_height == 0:
             print("POLYZAMBONI WARNING: Mesh has zero height!")
             self.mesh_height = 1 # to prevent crashes
         
-        self.general_settings.sizing_scale = 0.99 * self.max_fit_scaling
-        self.general_settings.target_model_height = 0.99 * self.max_fit_scaling * self.mesh_height
+        max_fit_scaling = operators_backend.compute_max_fit_scaling_factor(self.max_component_dimensions, self.general_settings)
+        self.general_settings.sizing_scale = 0.99 * max_fit_scaling
+        self.general_settings.target_model_height = 0.99 * max_fit_scaling * self.mesh_height
 
         # if it exists, load existing page layout
         self.user_defined_page_layout_exists = check_if_page_numbers_and_transforms_exist_for_all_components(active_mesh)
@@ -742,15 +744,16 @@ class PolyZamboniPageLayoutOperator(bpy.types.Operator):
         ao = context.active_object
         active_mesh = ao.data
         self.build_steps_valid = check_if_build_step_numbers_exist_and_make_sense(active_mesh)
-        self.max_fit_scaling = operators_backend.compute_max_fit_scaling_factor(ao, self.page_layout_options)
+        self.max_component_dimensions = operators_backend.compute_max_piece_dimensions(ao)
         
         self.mesh_height = utils.compute_mesh_height(active_mesh)
         if self.mesh_height == 0:
             print("POLYZAMBONI WARNING: Mesh has zero height!")
             self.mesh_height = 1 # to prevent crashes
 
-        self.page_layout_options.sizing_scale = 0.99 * self.max_fit_scaling
-        self.page_layout_options.target_model_height = 0.99 * self.max_fit_scaling * self.mesh_height
+        max_fit_scaling = operators_backend.compute_max_fit_scaling_factor(self.max_component_dimensions, self.page_layout_options)
+        self.page_layout_options.sizing_scale = 0.99 * max_fit_scaling
+        self.page_layout_options.target_model_height = 0.99 * max_fit_scaling * self.mesh_height
 
         wm = context.window_manager
         return wm.invoke_props_dialog(self, title="Page Layout Options")
