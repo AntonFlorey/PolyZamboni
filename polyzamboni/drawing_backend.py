@@ -2,13 +2,18 @@
 Functions in this file provide all data necessary for rendering feedback.
 """
 
+import bpy
 from bpy.types import Mesh
 from bmesh.types import BMesh, BMFace
 import numpy as np
 import mathutils
 import math
+import gpu
 from enum import Enum
 import time
+from dataclasses import dataclass
+import typing
+import numpy.typing
 
 from . import io
 from . import utils
@@ -44,6 +49,15 @@ def make_dotted_lines(line_array, target_line_length, max_segments = 100, linest
             style_index = (style_index + 2) % style_len
         line_index += 2
     return dotted_lines_array
+
+def make_arc_length_array(vertex_position_array):
+    res = []
+    for i in range(0,len(vertex_position_array),2): 
+        v_from = np.asarray(vertex_position_array[i])
+        v_to = np.asarray(vertex_position_array[i + 1])
+        res.append(0)
+        res.append(np.linalg.norm(v_to - v_from))
+    return res
 
 def linear_to_srgb(linear_color):
     if linear_color is None:
@@ -342,23 +356,8 @@ class LayoutRenderData(Enum):
     BG_VERTS = 2
     BG_COLORS = 3
     STEP_NUMBER = 4
-
-class GroupedLayoutRenderData():
-    """ Contains all layout render data for a group of connected components """
-
-    def __init__(self, layout_render_data_of_components, outline_color, transparency, inner_color = BLACK, outline_width = 1.5, other_lines_width = 1.5):
-        self.shared_outline_color = (*outline_color[:3], transparency)
-        self.shared_inner_lines_color = (*inner_color[:3], transparency)
-        self.transparency = transparency
-        self.outline_width = outline_width
-        self.inner_lines_width = other_lines_width
-        self.combined_render_data = {
-            LayoutRenderData.OUTLINE_LINES : [p for component_data in layout_render_data_of_components for p in component_data[LayoutRenderData.OUTLINE_LINES]],
-            LayoutRenderData.INNER_LINES : [p for component_data in layout_render_data_of_components for p in component_data[LayoutRenderData.INNER_LINES]],
-            LayoutRenderData.BG_VERTS : [p for component_data in layout_render_data_of_components for p in component_data[LayoutRenderData.BG_VERTS]],
-            LayoutRenderData.BG_COLORS : [(*c[:3], transparency) for component_data in layout_render_data_of_components for c in component_data[LayoutRenderData.BG_COLORS]]
-        }
-        self.step_numbers = [component_data[LayoutRenderData.STEP_NUMBER] for component_data in layout_render_data_of_components]
+    BG_UVS = 5
+    BG_TEXTURES = 6
 
 def compute_page_layout_render_data_of_component(component : ComponentPrintData, paper_size, fold_angle_th, page_index, pages_per_row = 2.0, margin_between_pages = 1.0):
     row_index = page_index % pages_per_row
@@ -372,6 +371,8 @@ def compute_page_layout_render_data_of_component(component : ComponentPrintData,
     concave_lines = []
     bg_verts = []
     bg_colors = []
+    bg_uvs = []
+    bg_texture_paths = []
 
     cut_edges_coords = [cut_edge.coords for cut_edge in component.cut_edges]
     for glue_flap_data in component.glue_flaps:
@@ -397,17 +398,26 @@ def compute_page_layout_render_data_of_component(component : ComponentPrintData,
             convex_lines += coords
         else:
             concave_lines += coords
+
+    section_plus_step_number = ""
+    if component.build_section_name is not None:
+        section_plus_step_number += component.build_section_name + " "
+    section_plus_step_number += str(component.build_step_number)
     view_coords = full_transform * component.build_step_number_position
-    render_data[LayoutRenderData.STEP_NUMBER] = (component.build_step_number, view_coords)
+    render_data[LayoutRenderData.STEP_NUMBER] = (section_plus_step_number, view_coords)
     tri_data : ColoredTriangleData
     for tri_data in component.colored_triangles:
         bg_verts += [full_transform * coord for coord in tri_data.coords]
-        bg_colors += [linear_to_srgb(tri_data.color if tri_data.color is not None else (1,1,1,1))] * 3
+        bg_colors.append(linear_to_srgb(tri_data.color if tri_data.color is not None else (1,1,1,1)))
+        bg_uvs += tri_data.uvs
+        bg_texture_paths.append(str(tri_data.absolute_texture_path))
 
     render_data[LayoutRenderData.OUTLINE_LINES] = full_lines
     render_data[LayoutRenderData.INNER_LINES] = make_dotted_lines(convex_lines, 0.2) + make_dotted_lines(concave_lines, 0.2, linestyle=[1,1,4,1])
     render_data[LayoutRenderData.BG_VERTS] = bg_verts
     render_data[LayoutRenderData.BG_COLORS] = bg_colors
+    render_data[LayoutRenderData.BG_UVS] = bg_uvs
+    render_data[LayoutRenderData.BG_TEXTURES] = bg_texture_paths
 
     return render_data
 
@@ -420,24 +430,70 @@ def compute_page_layout_render_data_of_all_components(components_per_page, paper
                                                                                                                         page_index, pages_per_row, margin_between_pages)
     return render_data_per_component
 
-def combine_layout_render_data_of_all_components(render_data_per_component, selected_component = None, 
-                                                 components_in_selected_section : set = set(), unselected_component_transparency = 1.0):
-    layout_rd_selected_component = []
-    layout_rd_selected_section = []
-    layout_rd_default = []
-    
-    selected_transparency = 1.0
-    for component_id, render_data in render_data_per_component.items():
-        if selected_component is not None and component_id == selected_component:
-            layout_rd_selected_component.append(render_data)
-            if component_id not in components_in_selected_section:
-                selected_transparency = unselected_component_transparency
-            continue
-        if component_id in components_in_selected_section:
-            layout_rd_selected_section.append(render_data)
-        else:
-            layout_rd_default.append(render_data)
+@dataclass
+class PageLayoutPreviewIslandTriangleData:
+    texture : gpu.types.GPUTexture | None
+    coords : list[typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[2, 1]"]]
+    uvs : list[typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[2, 1]"]]
+    colors : list[tuple[float, float, float , float]]
 
-    return [GroupedLayoutRenderData(layout_rd_selected_component, ORANGE, selected_transparency, outline_width=2), 
-            GroupedLayoutRenderData(layout_rd_selected_section, BLACK, 1.0),
-            GroupedLayoutRenderData(layout_rd_default, BLACK, unselected_component_transparency)]
+@dataclass
+class PageLayoutPreviewIslandEdgeData:
+    colors : list[tuple[float, float, float , float]]
+    coords : list[typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[2, 1]"]]
+
+@dataclass
+class PageLayoutPreviewIslandNumbersData:
+    nums_with_positions : list[tuple[str, typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[2, 1]"]]]    
+    transparency : list[float]
+
+@dataclass
+class PageLayoutPreviewIslandRenderData:
+    triangles : list[PageLayoutPreviewIslandTriangleData]
+    edges : list[PageLayoutPreviewIslandEdgeData]
+    page_numbers : list[PageLayoutPreviewIslandNumbersData]
+
+def combine_layout_render_data_of_all_components(render_data_per_component, 
+                                                 selected_component = None, 
+                                                 components_in_selected_section : set = set(), 
+                                                 unselected_component_transparency = 1.0, 
+                                                 show_step_numbers = True):
+    triangle_batches : dict[str, PageLayoutPreviewIslandTriangleData] = {}
+    lines = PageLayoutPreviewIslandEdgeData([], [])
+    thick_lines = PageLayoutPreviewIslandEdgeData([], [])
+    step_numbers = PageLayoutPreviewIslandNumbersData([], [])
+
+    for component_id, render_data in render_data_per_component.items():
+        component_transparency = 1.0 if component_id in components_in_selected_section else unselected_component_transparency
+        # triangles
+        for triangle_id, texture_path in enumerate(render_data[LayoutRenderData.BG_TEXTURES]):
+            if texture_path not in triangle_batches:
+                texture = None
+                if texture_path != "None":
+                    texture = gpu.texture.from_image(bpy.data.images.load(filepath=texture_path, check_existing=True))
+                triangle_batches[texture_path] = PageLayoutPreviewIslandTriangleData(texture, [], [], [])
+            current_batch = triangle_batches[texture_path]
+            current_color = render_data[LayoutRenderData.BG_COLORS][triangle_id]
+            current_batch.colors += [(*current_color[:3], component_transparency)] * 3
+            i = triangle_id * 3
+            current_batch.coords += render_data[LayoutRenderData.BG_VERTS][i:i + 3]
+            current_batch.uvs += render_data[LayoutRenderData.BG_UVS][i:i + 3]
+        
+        # edges
+        lines.coords += render_data[LayoutRenderData.INNER_LINES]
+        lines.colors += [(0,0,0,component_transparency)] * len(render_data[LayoutRenderData.INNER_LINES])
+        if selected_component is not None and component_id == selected_component:
+            thick_lines.coords += render_data[LayoutRenderData.OUTLINE_LINES]
+            thick_lines.colors += [(*ORANGE[:3], component_transparency)] * len(render_data[LayoutRenderData.OUTLINE_LINES])
+        else:
+            lines.coords += render_data[LayoutRenderData.OUTLINE_LINES]
+            lines.colors += [(0,0,0,component_transparency)] * len(render_data[LayoutRenderData.OUTLINE_LINES])
+        
+        # step numbers
+        if not show_step_numbers:
+            continue
+
+        step_numbers.nums_with_positions.append(render_data[LayoutRenderData.STEP_NUMBER])
+        step_numbers.transparency.append(component_transparency)
+
+    return triangle_batches, lines, thick_lines, step_numbers
