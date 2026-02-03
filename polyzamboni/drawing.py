@@ -102,6 +102,20 @@ def colored_dashed_lines_draw_callack(vertex_positions, vertex_colors, vertex_ar
     gpu.state.line_width_set(prev_line_width)
     gpu.state.blend_set(prev_blend)
 
+def colored_dash_dots_lines_draw_callack(vertex_positions, vertex_colors, vertex_arc_lengths, dash_length, width = 3.0):
+    shader = shaders.dash_dot_lines_shader
+    prev_line_width = gpu.state.line_width_get()
+    prev_blend = gpu.state.blend_get()
+    gpu.state.line_width_set(width)
+    gpu.state.blend_set('ALPHA')
+    batch = batch_for_shader(shader, 'LINES', {"pos" : vertex_positions, "arcLength" : vertex_arc_lengths, "color" : vertex_colors})
+    shader.bind()
+    shader.uniform_float("dashLength", dash_length)
+    shader.uniform_float("viewProjectionMatrix", gpu.matrix.get_projection_matrix())   
+    batch.draw(shader)
+    gpu.state.line_width_set(prev_line_width)
+    gpu.state.blend_set(prev_blend)
+
 def uniform_color_dashed_lines_draw_callack(vertex_positions, vertex_arc_lengths, color, dash_length, width = 3.0):
     shader = shaders.create_uniform_color_dashed_lines_shader()
     prev_line_width = gpu.state.line_width_get()
@@ -112,8 +126,11 @@ def uniform_color_dashed_lines_draw_callack(vertex_positions, vertex_arc_lengths
     batch = batch_for_shader(shader, 'LINES', {"pos" : vertex_positions, "arcLength" : vertex_arc_lengths})
     shader.bind()
     shader.uniform_float("dashLength", dash_length)
-    shader.uniform_float("color", color)      
-    shader.uniform_float("viewProjectionMatrix", bpy.context.region_data.perspective_matrix)
+    shader.uniform_float("color", color)
+    proj_matrix = gpu.matrix.get_projection_matrix()
+    if bpy.context.region_data is not None:
+        proj_matrix = bpy.context.region_data.perspective_matrix
+    shader.uniform_float("viewProjectionMatrix", proj_matrix)
     batch.draw(shader)
     gpu.state.line_width_set(prev_line_width)
     gpu.state.blend_set(prev_blend)
@@ -330,8 +347,7 @@ def build_step_numbers_draw_callback(numbers_with_positions, font_size, transpar
             blf.draw(0, step_number)
 
 def components_page_preview_draw_callback(triangle_batches : dict[str, drawing_backend.PageLayoutPreviewIslandTriangleData],
-                                          lines : drawing_backend.PageLayoutPreviewIslandEdgeData,
-                                          thick_lines : drawing_backend.PageLayoutPreviewIslandEdgeData,
+                                          lines : list[drawing_backend.PageLayoutPreviewIslandEdgeData],
                                           step_numbers : drawing_backend.PageLayoutPreviewIslandNumbersData,
                                           show_page_numbers, 
                                           apply_material_color, 
@@ -346,8 +362,16 @@ def components_page_preview_draw_callback(triangle_batches : dict[str, drawing_b
         for triangle_batch in triangle_batches.values():
             triangles_2D_draw_callback(triangle_batch.coords, WHITE, True)
 
-    multicolored_lines_2D_draw_callback(lines.coords, lines.colors, 1.5)
-    multicolored_lines_2D_draw_callback(thick_lines.coords, thick_lines.colors, 2.0)
+    for line_data in lines:
+        match (line_data.linestyle):
+            case drawing_backend.PageLayoutLinestyle.FULL:
+                multicolored_lines_2D_draw_callback(line_data.coords, line_data.colors, line_data.thickness)
+            case drawing_backend.PageLayoutLinestyle.DASHED:
+                vertex_arc_length = drawing_backend.make_arc_length_array(line_data.coords)
+                colored_dashed_lines_draw_callack(line_data.coords, line_data.colors, vertex_arc_length, 0.15, line_data.thickness)
+            case drawing_backend.PageLayoutLinestyle.DASH_DOT:
+                vertex_arc_length = drawing_backend.make_arc_length_array(line_data.coords)
+                colored_dash_dots_lines_draw_callack(line_data.coords, line_data.colors, vertex_arc_length, 0.25, line_data.thickness)
 
     if show_page_numbers:
         build_step_numbers_draw_callback(step_numbers.nums_with_positions, font_size, step_numbers.transparency)

@@ -853,8 +853,9 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
         self.hide_all_drawings()
         screenspace_anchor_pos = np.array(context.region.view2d.view_to_region(self.rotation_center[0], self.rotation_center[1]))
         screenspace_mouse_pos = np.array([event.mouse_region_x, event.mouse_region_y])
-        dotted_line_array = drawing_backend.make_dotted_lines([screenspace_anchor_pos, screenspace_mouse_pos], 10.0)
-        PolyZamboniPageLayoutEditingOperator._drawing_handle = bpy.types.SpaceImageEditor.draw_handler_add(uniform_lines_2D_draw_callback, (dotted_line_array, ORANGE, 1), "WINDOW", "POST_PIXEL")
+        arc_length = [0.0, np.linalg.norm(screenspace_mouse_pos - screenspace_anchor_pos)]
+        callback_args = ([screenspace_anchor_pos, screenspace_mouse_pos], arc_length, drawing_backend.srgb_to_linear(ORANGE), 10, 1.5)
+        PolyZamboniPageLayoutEditingOperator._drawing_handle = bpy.types.SpaceImageEditor.draw_handler_add(uniform_color_dashed_lines_draw_callack, callback_args, "WINDOW", "POST_PIXEL")
 
     def invoke(self, context, event):
         ao = context.active_object
@@ -925,7 +926,12 @@ class PolyZamboniPageLayoutEditingOperator(bpy.types.Operator):
         for component_id, step_number in fresh_step_numbers.items():
             if component_id in self.render_data_per_component:
                 old_step_num_info = self.render_data_per_component[component_id][drawing_backend.LayoutRenderData.STEP_NUMBER]
-                self.render_data_per_component[component_id][drawing_backend.LayoutRenderData.STEP_NUMBER] = (step_number, old_step_num_info[1])
+                split_index = None
+                for i in range(len(old_step_num_info[0])):
+                    if old_step_num_info[0][i] == " ":
+                        split_index = i
+                hacky_section_string = "" if split_index == None else old_step_num_info[0][:split_index+1]
+                self.render_data_per_component[component_id][drawing_backend.LayoutRenderData.STEP_NUMBER] = (hacky_section_string + str(step_number), old_step_num_info[1])
         PolyZamboniPageLayoutEditingOperator._refresh_step_numbers_on_next_event = False
 
     def get_mouse_image_coords(self, context : bpy.types.Context, event :bpy.types.Event):

@@ -23,33 +23,6 @@ from .utils import mesh_edge_is_cut, find_bmesh_edge_of_halfedge
 from .glueflaps import component_has_overlapping_glue_flaps, flap_is_overlapping, compute_3d_glue_flap_coords_in_glued_face
 from .printprepper import ComponentPrintData, FoldEdgeData, FoldEdgeAtGlueFlapData, ColoredTriangleData
 
-def make_dotted_lines(line_array, target_line_length, max_segments = 100, linestyle = (1,1)):
-    if target_line_length <= 0:
-        return line_array
-    dotted_lines_array = []
-    line_index = 0
-    while line_index < len(line_array):
-        v_from = np.asarray(line_array[line_index])
-        v_to = np.asarray(line_array[line_index + 1])
-
-        line_len = np.linalg.norm(v_from - v_to)
-        segments = min(int(line_len / target_line_length), max_segments)
-        
-        total_segments = 2 * segments + 1
-        segment_start_index = 0
-        style_len = len(linestyle)
-        assert (style_len % 2) == 0
-        style_index = 0
-        while segment_start_index < total_segments:
-            t_from = segment_start_index / total_segments
-            t_to = min((segment_start_index + linestyle[style_index]) / total_segments, 1.0)
-            dotted_lines_array.append((1.0 - t_from) * v_from + t_from * v_to)
-            dotted_lines_array.append((1.0 - t_to) * v_from + t_to * v_to)
-            segment_start_index += linestyle[style_index] + linestyle[style_index + 1]
-            style_index = (style_index + 2) % style_len
-        line_index += 2
-    return dotted_lines_array
-
 def make_arc_length_array(vertex_position_array):
     res = []
     for i in range(0,len(vertex_position_array),2): 
@@ -62,9 +35,16 @@ def make_arc_length_array(vertex_position_array):
 def linear_to_srgb(linear_color):
     if linear_color is None:
         return None
-    linear_color = np.array(linear_color, dtype=np.float64)
-    srgb_color = np.where(linear_color <= 0.0031308, 12.92 * linear_color, 1.055 * np.power(linear_color, 1/2.4) - 0.055)
-    return srgb_color
+    linear_rgb = np.array(linear_color[:3], dtype=np.float64)
+    srgb_color = np.where(linear_rgb <= 0.0031308, 12.92 * linear_rgb, 1.055 * np.power(linear_rgb, 1/2.4) - 0.055)
+    return np.array((*srgb_color, linear_color[3]), dtype=np.float64)
+
+def srgb_to_linear(srgba_color):
+    if srgba_color is None:
+        return None
+    srgba_rgb = np.array(srgba_color[:3], dtype=np.float64)
+    linear_rgb = np.where(srgba_rgb <= 0.040449936, srgba_rgb / 12.92, np.power((srgba_rgb + 0.055) / 1.055, 2.4))
+    return np.array((*linear_rgb, srgba_color[3]))
 
 class ComponentQuality(Enum):
     PERFECT_REGION = 0
@@ -330,6 +310,10 @@ def get_lines_array_per_glue_flap_quality(mesh : Mesh, bmesh : BMesh, face_offse
         quality_dict[GlueFlapQuality.GLUE_FLAP_NO_OVERLAPS] += flap_line_array
     return quality_dict
 
+#################################
+#          Page Preview         #
+#################################
+
 def compute_backgound_paper_render_data(num_pages, paper_size, selected_page = None, margin_between_pages = 1.0, pages_per_row = 2.0):
     selected_page_lines = []
     page_verts = []
@@ -352,12 +336,13 @@ def compute_backgound_paper_render_data(num_pages, paper_size, selected_page = N
 
 class LayoutRenderData(Enum):
     OUTLINE_LINES = 0
-    INNER_LINES = 1
-    BG_VERTS = 2
-    BG_COLORS = 3
-    STEP_NUMBER = 4
-    BG_UVS = 5
-    BG_TEXTURES = 6
+    CONCAVE_FOLDS = 1
+    CONVEX_FOLDS = 2
+    BG_VERTS = 3
+    BG_COLORS = 4
+    STEP_NUMBER = 5
+    BG_UVS = 6
+    BG_TEXTURES = 7
 
 def compute_page_layout_render_data_of_component(component : ComponentPrintData, paper_size, fold_angle_th, page_index, pages_per_row = 2.0, margin_between_pages = 1.0):
     row_index = page_index % pages_per_row
@@ -413,7 +398,8 @@ def compute_page_layout_render_data_of_component(component : ComponentPrintData,
         bg_texture_paths.append(str(tri_data.absolute_texture_path))
 
     render_data[LayoutRenderData.OUTLINE_LINES] = full_lines
-    render_data[LayoutRenderData.INNER_LINES] = make_dotted_lines(convex_lines, 0.2) + make_dotted_lines(concave_lines, 0.2, linestyle=[1,1,4,1])
+    render_data[LayoutRenderData.CONVEX_FOLDS] = convex_lines
+    render_data[LayoutRenderData.CONCAVE_FOLDS] = concave_lines
     render_data[LayoutRenderData.BG_VERTS] = bg_verts
     render_data[LayoutRenderData.BG_COLORS] = bg_colors
     render_data[LayoutRenderData.BG_UVS] = bg_uvs
@@ -430,6 +416,11 @@ def compute_page_layout_render_data_of_all_components(components_per_page, paper
                                                                                                                         page_index, pages_per_row, margin_between_pages)
     return render_data_per_component
 
+class PageLayoutLinestyle(Enum):
+    FULL = 0
+    DASHED = 1
+    DASH_DOT = 2
+
 @dataclass
 class PageLayoutPreviewIslandTriangleData:
     texture : gpu.types.GPUTexture | None
@@ -439,6 +430,8 @@ class PageLayoutPreviewIslandTriangleData:
 
 @dataclass
 class PageLayoutPreviewIslandEdgeData:
+    linestyle : PageLayoutLinestyle
+    thickness : float
     colors : list[tuple[float, float, float , float]]
     coords : list[typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[2, 1]"]]
 
@@ -459,8 +452,10 @@ def combine_layout_render_data_of_all_components(render_data_per_component,
                                                  unselected_component_transparency = 1.0, 
                                                  show_step_numbers = True):
     triangle_batches : dict[str, PageLayoutPreviewIslandTriangleData] = {}
-    lines = PageLayoutPreviewIslandEdgeData([], [])
-    thick_lines = PageLayoutPreviewIslandEdgeData([], [])
+    convex_fold_lines = PageLayoutPreviewIslandEdgeData(PageLayoutLinestyle.DASHED, 1.5, [], [])
+    concave_fold_lines = PageLayoutPreviewIslandEdgeData(PageLayoutLinestyle.DASH_DOT, 1.5, [], [])
+    outlines = PageLayoutPreviewIslandEdgeData(PageLayoutLinestyle.FULL, 1.5, [], [])
+    thick_lines = PageLayoutPreviewIslandEdgeData(PageLayoutLinestyle.FULL, 2.0, [], [])
     step_numbers = PageLayoutPreviewIslandNumbersData([], [])
 
     for component_id, render_data in render_data_per_component.items():
@@ -480,14 +475,16 @@ def combine_layout_render_data_of_all_components(render_data_per_component,
             current_batch.uvs += render_data[LayoutRenderData.BG_UVS][i:i + 3]
         
         # edges
-        lines.coords += render_data[LayoutRenderData.INNER_LINES]
-        lines.colors += [(0,0,0,component_transparency)] * len(render_data[LayoutRenderData.INNER_LINES])
+        def fill_edge_data(container : PageLayoutPreviewIslandEdgeData, position_array, color):
+            container.coords += position_array
+            container.colors += [(*color[:3], component_transparency)] * len(position_array)
+
+        fill_edge_data(convex_fold_lines, render_data[LayoutRenderData.CONVEX_FOLDS], BLACK)
+        fill_edge_data(concave_fold_lines, render_data[LayoutRenderData.CONCAVE_FOLDS], BLACK)
         if selected_component is not None and component_id == selected_component:
-            thick_lines.coords += render_data[LayoutRenderData.OUTLINE_LINES]
-            thick_lines.colors += [(*ORANGE[:3], component_transparency)] * len(render_data[LayoutRenderData.OUTLINE_LINES])
+            fill_edge_data(thick_lines, render_data[LayoutRenderData.OUTLINE_LINES], ORANGE)
         else:
-            lines.coords += render_data[LayoutRenderData.OUTLINE_LINES]
-            lines.colors += [(0,0,0,component_transparency)] * len(render_data[LayoutRenderData.OUTLINE_LINES])
+            fill_edge_data(outlines, render_data[LayoutRenderData.OUTLINE_LINES], BLACK)
         
         # step numbers
         if not show_step_numbers:
@@ -496,4 +493,4 @@ def combine_layout_render_data_of_all_components(render_data_per_component,
         step_numbers.nums_with_positions.append(render_data[LayoutRenderData.STEP_NUMBER])
         step_numbers.transparency.append(component_transparency)
 
-    return triangle_batches, lines, thick_lines, step_numbers
+    return triangle_batches, [convex_fold_lines, concave_fold_lines, outlines, thick_lines], step_numbers
