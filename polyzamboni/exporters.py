@@ -404,20 +404,20 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
             page_number = 1
             for components_on_page in print_ready_pages:
                 # create a new figure for this page
-                    fig, ax = self.__create_page_figure(components_on_page, self.export_settings.apply_main_texture and not self.export_settings.two_sided_with_texture, False)
+                fig, ax = self.__create_page_figure(components_on_page, self.export_settings.apply_main_texture and not self.export_settings.two_sided_with_texture, False)
+                # save everything and close current figure
+                fig.savefig(output_file_name_prefix + "_page" + str(page_number) + ".svg")
+                fig.clear()
+                plt.close(fig)
+                page_number += 1
+                # two sided printing
+                if self.export_settings.apply_main_texture and self.export_settings.two_sided_with_texture:
+                    fig, ax = self.__create_page_figure(components_on_page, True, True)
                     # save everything and close current figure
                     fig.savefig(output_file_name_prefix + "_page" + str(page_number) + ".svg")
                     fig.clear()
                     plt.close(fig)
                     page_number += 1
-                    # two sided printing
-                    if self.export_settings.apply_main_texture and self.export_settings.two_sided_with_texture:
-                        fig, ax = self.__create_page_figure(components_on_page, True, True)
-                        # save everything and close current figure
-                        fig.savefig(output_file_name_prefix + "_page" + str(page_number) + ".svg")
-                        fig.clear()
-                        plt.close(fig)
-                        page_number += 1
 
         plt.close("all")
         print("POLYZAMBONI INFO: Paper model instructions successfully created!")

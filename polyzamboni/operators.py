@@ -693,6 +693,8 @@ class PolyZamboniExportSVGOperator(bpy.types.Operator, ExportHelper):
         if self.user_defined_page_layout_exists:
             self.general_settings.use_custom_layout = True
             self.general_settings.paper_size = active_mesh.polyzamboni_general_mesh_props.paper_size
+            self.general_settings.custom_page_width = active_mesh.polyzamboni_general_mesh_props.custom_page_width
+            self.general_settings.custom_page_height = active_mesh.polyzamboni_general_mesh_props.custom_page_height
             # collect all component print data
             self.custom_components_on_pages = operators_backend.read_custom_page_layout(ao)
 
