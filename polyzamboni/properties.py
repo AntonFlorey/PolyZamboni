@@ -389,10 +389,23 @@ class LineExportSettings(bpy.types.PropertyGroup):
         subtype="DISTANCE"
     )
 
+texture_qualities = [
+    ("low", "low", "512x512", "", 0),
+    ("medium", "medium", "1024x1024", "", 1),
+    ("high", "high", "2048x2048", "", 2),
+    ("super", "super", "4096x4096", "", 3),
+    ("ultra", "ultra", "8192x8192", "", 4),
+]
+
 class TextureExportSettings(bpy.types.PropertyGroup):
     apply_textures : BoolProperty(
         name="Apply textures",
         description="Applies some texture to all faces. If no texture can be found in a materials node tree, the diffuse color is used",
+        default=True
+    )
+    apply_glue_flap_color : BoolProperty(
+        name="Color glue flaps",
+        description="Enable this to color glue flap faces. This is helpful for knowing what has to be glued",
         default=True
     )
     print_two_sided : BoolProperty(
@@ -400,14 +413,12 @@ class TextureExportSettings(bpy.types.PropertyGroup):
         description="When selected, build instructions and textures are printed on separate pages for two-sided printing",
         default=False
     )
-    triangle_bleed : FloatProperty(
-        name="Triangle bleed",
-        description="Each textured triangle drawn gets thickened by this amount. Increase this value to close visible gaps in your prints. A high value will lead to visible seams due to misalignment",
-        subtype="DISTANCE",
-        min=0,
-        default=0.0001
+    apply_textures_back : BoolProperty(
+        name="Apply textures",
+        description="Applies some texture to all faces. If no texture can be found in a materials node tree, the diffuse color is used",
+        default=True
     )
-    apply_glue_flap_color : BoolProperty(
+    apply_glue_flap_color_back : BoolProperty(
         name="Color glue flaps",
         description="Enable this to color glue flap faces. This is helpful for knowing what has to be glued",
         default=True
@@ -418,6 +429,12 @@ class TextureExportSettings(bpy.types.PropertyGroup):
         default=[0.8,0.8,0.8],
         min=0,
         max=1
+    )
+    texture_quality : EnumProperty(
+        name="Texture quality",
+        description="Determines the size of the texture buffer. The \"super\" setting will give you a bit more than 300dpi on a DinA4 page",
+        items=texture_qualities,
+        default="super"
     )
 
 class PageLayoutCreationSettings(bpy.types.PropertyGroup):

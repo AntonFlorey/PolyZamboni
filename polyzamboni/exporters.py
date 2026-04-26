@@ -4,6 +4,9 @@ So far only one exporter that uses matplotlib to create PDS as SVG
 """
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
+import typing
+import numpy.typing
 from typing import NamedTuple
 import platform
 from matplotlib import axes
@@ -18,6 +21,13 @@ import numpy as np
 from .geometry import AffineTransform2D
 from .printprepper import ComponentPrintData, ColoredTriangleData, CutEdgeData, FoldEdgeData, GlueFlapData, FoldEdgeAtGlueFlapData
 
+import gpu
+import bpy
+from gpu_extras.presets import draw_circle_2d
+from gpu_extras.batch import batch_for_shader
+from mathutils import Matrix, Vector
+from .shaders import create_2d_textured_triangle_shader_no_color
+
 # when testing on macosx, closing a matplotlib plot crashes blender. This is a workaround that kind of works. 
 # if anyone knows a better way of dealing with this problem let me know :)
 if platform.system() == "Darwin":
@@ -25,7 +35,7 @@ if platform.system() == "Darwin":
     matplotlib.use("agg") # try to use a different backend 
 
 # feel free to add more paper sizes (in cm)
-paper_sizes = {
+paper_sizes : dict[str, tuple[int, int]] = {
     "A0" : (84.1, 118.8),
     "A1" : (59.4, 84.1),
     "A2" : (42.0, 59.4),
@@ -38,6 +48,15 @@ paper_sizes = {
     "Letter" : (21.6, 27.9),
     "Legal" : (21.6, 35.6),
     "Tabloid" : (27.9, 43.2)
+}
+
+# lookup table for texture quality
+texture_resolutions : dict[str, int] = {
+    "low" : 512,
+    "medium" : 1024,
+    "high" : 2048,
+    "super" : 4096,
+    "ultra" : 8192
 }
 
 # feel free to add more linestyles (see https://matplotlib.org/stable/gallery/lines_bars_and_markers/linestyles.html)
@@ -61,18 +80,21 @@ class ExportSettings(NamedTuple):
     edge_number_font_size : int = 10,
     edge_number_offset : float = 0.1,
     show_build_step_numbers : bool = True,
-    apply_main_texture : bool = False, 
     prints_on_model_inside : bool = True, 
-    two_sided_with_texture : bool = False,
     color_of_cut_edges : list[float] = [0,0,0],
     color_of_convex_fold_edges : list[float] = [0,0,0],
     color_of_concave_fold_edges : list[float] = [0,0,0],
     color_of_edge_numbers : list[float] = [0,0,0],
     color_of_build_steps : list[float] = [0,0,0],
     build_step_font_size : int = 10,
-    triangle_bleed : float = 0.01,
-    color_glue_flaps : bool = False,
-    color_of_glue_flaps : list[float] = [0.5,0.1,0.1]
+    texture_quality : str = "high"
+    color_of_glue_flaps : list[float] = [0.5,0.1,0.1],
+    two_sided_pages : bool = False,
+    apply_texture_front : bool = True
+    apply_texture_back : bool = False
+    color_glue_flaps_front : bool = False,
+    color_glue_flaps_back : bool = False
+    
 
 class PolyzamboniExporter(ABC):
     """ Base class for all export classes. """
@@ -80,11 +102,18 @@ class PolyzamboniExporter(ABC):
     def __init__(self, output_format : str, export_settings : ExportSettings):
         self.output_format = output_format
         self.export_settings = export_settings
-        self.texture_images = {}
+        self.textures : dict[str, bpy.types.Image] = {}
 
     @abstractmethod
     def export(self, print_ready_pages, output_file_name_prefix):
         pass
+
+@dataclass
+class ColoredTriangleBatch:
+    texture_path : str | None
+    coords : list[typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[2, 1]"]]
+    uvs : list[typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[2, 1]"]]
+    colors : list[tuple[float, float, float , float]]
 
 class MatplotlibBasedExporter(PolyzamboniExporter):
     """ 
@@ -113,6 +142,7 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
         ax.set_aspect('equal')
         ax.axis("off")
         fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
+        fig.set_dpi(600)
 
         return fig, ax
 
@@ -123,7 +153,7 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
         paper_width, paper_height = self.export_settings.paper_size
         page_flip_transform = AffineTransform2D(np.array([[-1,0], [0,1]], dtype=np.float64), np.array([paper_width,0], dtype=np.float64))
         return page_flip_transform * page_coords
-    
+
     def __transform_component_line_coords_to_page_coord(self, component_line_coords, page_transform : AffineTransform2D, flip_along_short_side):
         page_coord_from = self.__transform_component_coord_to_page_coord(component_line_coords[0], page_transform, flip_along_short_side)
         page_coord_to = self.__transform_component_coord_to_page_coord(component_line_coords[1], page_transform, flip_along_short_side)
@@ -249,103 +279,100 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
             page_coords = self.__transform_component_line_coords_to_page_coord(flap_edge_coords, page_transform, page_flipped)
             self.__draw_line(ax, page_coords, self.export_settings.glue_flap_ls, color=self.__linear_to_srgb(self.export_settings.color_of_cut_edges), zorder=-2, clip_path=mask_path)
 
-    def __create_thickened_triangle_coords(self, triangle_coords, eps):
-        a_t, b_t, c_t = tuple(np.asarray(v) for v in triangle_coords)
+    def __create_page_render_data(self, components_on_page : list[ComponentPrintData], page_flipped = False):
+        solid_color_triangle_batch = None
+        textured_triangle_batches : dict[str, ColoredTriangleBatch]= {}
 
-        ab = b_t - a_t
-        bc = c_t - b_t
-        ca = a_t - c_t
+        for component_data in components_on_page:
+            page_transform = component_data.page_transform
+            for triangle_data in component_data.colored_triangles:
+                if triangle_data.absolute_texture_path is None:
+                    if triangle_data.color is None:
+                        continue
+                    if solid_color_triangle_batch is None:
+                        solid_color_triangle_batch = ColoredTriangleBatch(None, [], [], [])
+                    solid_color_triangle_batch.coords += list(self.__transform_component_coords_tuple_to_page_coords_tuple(triangle_data.coords, page_transform, page_flipped))
+                    solid_color_triangle_batch.colors += [self.__linear_to_srgb(triangle_data.color)] * 3
+                else:
+                    curr_batch = textured_triangle_batches.setdefault(triangle_data.absolute_texture_path, 
+                                                                      ColoredTriangleBatch(triangle_data.absolute_texture_path, [], [], []))
+                    curr_batch.coords += list(self.__transform_component_coords_tuple_to_page_coords_tuple(triangle_data.coords, page_transform, page_flipped))
+                    curr_batch.uvs += triangle_data.uvs
+        return solid_color_triangle_batch, textured_triangle_batches
 
-        def normalize_np(np_arr):
-            return np_arr / np.linalg.norm(np_arr)
+    def __draw_colored_triangles(self, ax : axes.Axes, 
+                                 colored_tris : ColoredTriangleBatch | None, 
+                                 textured_tris : dict[str, ColoredTriangleBatch]):
+        TEXTURE_SIZE = texture_resolutions[self.export_settings.texture_quality]
+        # Render batches into off-screen buffer and then let a np array read from that buffer
+        offscreen = gpu.types.GPUOffScreen(TEXTURE_SIZE, TEXTURE_SIZE)
+        np_image = np.empty(shape=(TEXTURE_SIZE, TEXTURE_SIZE, 4), dtype=np.uint8)  
+        np_buffer = gpu.types.Buffer("UBYTE", np_image.shape, np_image)
+        max_page_len = max(self.export_settings.paper_size)
 
-        a_thick = a_t + eps * normalize_np(ca - ab)
-        b_thick = b_t + eps * normalize_np(ab - bc)
-        c_thick = c_t + eps * normalize_np(bc - ca)
+        with offscreen.bind():
+            fb : gpu.types.GPUFrameBuffer = gpu.state.active_framebuffer_get()
+            fb.clear(color=(1.0, 1.0, 1.0, 0.0))
+            with gpu.matrix.push_pop():
+                # Page coords -> normalized device coordinates [-1, 1].
+                ndc_scaling = Matrix.Scale(2.0 / max_page_len, 4)
+                ndc_translation = Matrix.Translation(Vector([-1,-1,0]))
+                gpu.matrix.load_matrix(Matrix.Identity(4))
+                gpu.matrix.load_projection_matrix(ndc_translation @ ndc_scaling)
+                
+                if colored_tris is not None:
+                    shader = gpu.shader.from_builtin("FLAT_COLOR")
+                    data = {
+                        "pos" : colored_tris.coords,
+                        "color" : colored_tris.colors
+                    }
+                    batch = batch_for_shader(shader, 'TRIS', data)
+                    shader.bind()
+                    batch.draw(shader)
 
-        return (a_thick, b_thick, c_thick)
+                for triangle_batch in textured_tris.values():
+                    if triangle_batch.texture_path not in self.textures:
+                        self.textures[triangle_batch.texture_path] = bpy.data.images.load(filepath=triangle_batch.texture_path, check_existing=True)
+                    texture = gpu.texture.from_image(self.textures[triangle_batch.texture_path])
+                    shader = create_2d_textured_triangle_shader_no_color()
+                    # prepare and draw batch
+                    data = {
+                        "pos" : triangle_batch.coords,
+                        "uv" : triangle_batch.uvs
+                    }
+                    batch = batch_for_shader(shader, 'TRIS', data)
+                    shader.bind()
+                    shader.uniform_sampler("image", texture)
+                    shader.uniform_float("viewProjectionMatrix", gpu.matrix.get_projection_matrix())
+                    batch.draw(shader)
+                        
+            fb.read_color(0, 0, TEXTURE_SIZE, TEXTURE_SIZE, 4, 0, 'UBYTE', data=np_buffer)
 
-    def __affine_transform_from_uv_to_vertices(self, vertices, uvs):
-        a_t, b_t, c_t = tuple(np.asarray(v) for v in vertices)
-        a_uv, b_uv, c_uv = tuple(uvs)
+        offscreen.free()
+        # draw image
+        ax.imshow(np_image, zorder=-1, extent=(0, max_page_len, 0, max_page_len), origin="lower")
 
-        o_t = a_t
-        o_uv = a_uv
-        x_t = b_t - a_t
-        y_t = c_t - a_t
-        x_uv = b_uv - a_uv
-        y_uv = c_uv - a_uv
-        
-        A_t = np.hstack((x_t.reshape((2,1)), y_t.reshape((2,1))))
-        A_uv = np.hstack((x_uv.reshape((2,1)), y_uv.reshape((2,1))))
 
-        if np.allclose(np.linalg.det(A_uv), 0):
-            print("POLYZAMBONI ERROR: Bad UVs")
-            print("Debug data:", uvs, a_uv, b_uv, c_uv)
-        # linear part
-        linear_transform = A_t @ np.linalg.inv(A_uv)
-
-        # affine part
-        translation = np.dot(linear_transform, -o_uv) + o_t
-
-        # transformation matrix
-        affine_mat = np.eye(3)
-        affine_mat[:2, :2] = linear_transform
-        affine_mat[:2, 2] = translation
-
-        # construct affine transformation
-        return mtransforms.Affine2D(matrix=affine_mat)
-
-    def __retrieve_texture_image(self, image_path):
-        if image_path not in self.texture_images.keys():
-            img = mpimg.imread(image_path)
-            self.texture_images[image_path] = img
-
-    def __draw_textured_triangle(self, ax : axes.Axes, triangle_coords, triangle_uvs, image_path):
-        clip_polygon = patches.Polygon(triangle_coords, closed=True, fill=None, transform=ax.transData)
-        # make sure the image texture exists
-        self.__retrieve_texture_image(image_path)
-        texture_transform = self.__affine_transform_from_uv_to_vertices(triangle_coords, triangle_uvs)
-        image_transform = texture_transform + ax.transData
-        im = ax.imshow(self.texture_images[image_path], origin='upper', extent = (0,1,0,1), transform=image_transform, zorder=-1)
-        im.set_clip_path(clip_polygon)
-
-    def __draw_solid_color_triangle(self, ax : axes.Axes, triangle_coords, color):
-        draw_polygon = patches.Polygon(triangle_coords, closed=True, fill=True, facecolor=tuple(color))
-        ax.add_patch(draw_polygon)
-
-    def __draw_colored_triangle(self, ax : axes.Axes, colored_tri_data : ColoredTriangleData, page_transform : AffineTransform2D, page_flipped = False):
-        if colored_tri_data.absolute_texture_path is None and colored_tri_data.color is None:
-            return # nothing to draw here
-        
-        triangle_page_coords = self.__transform_component_coords_tuple_to_page_coords_tuple(colored_tri_data.coords, page_transform, page_flipped)
-        thickened_triangle_coords = self.__create_thickened_triangle_coords(triangle_page_coords, self.export_settings.triangle_bleed)
-
-        if colored_tri_data.absolute_texture_path is not None:
-            # draw texture
-            self.__draw_textured_triangle(ax, thickened_triangle_coords, colored_tri_data.uvs, colored_tri_data.absolute_texture_path)
-        elif colored_tri_data.color is not None:
-            # fill with solid color
-            srgb_color = self.__linear_to_srgb(colored_tri_data.color)
-            self.__draw_solid_color_triangle(ax, thickened_triangle_coords, srgb_color)
-
-    def __create_page_figure(self, components_on_page, draw_textures = True, only_textures=False):
+    def __create_page_figure(self, components_on_page : list[ComponentPrintData], draw_textures = True, fill_glue_flaps = True, only_textures=False):
         # create a new figure for this page
         fig, ax = self.__create_new_page()
 
-        component_print_data : ComponentPrintData
-        if draw_textures and only_textures:
+        flip_drawings = (only_textures != self.export_settings.prints_on_model_inside)
+
+        if draw_textures:
+            colored_tris, textured_tris = self.__create_page_render_data(components_on_page, page_flipped=flip_drawings)
+            self.__draw_colored_triangles(ax, colored_tris, textured_tris)
+
+        if fill_glue_flaps:
             for component_print_data in components_on_page:
-                colored_triangle_data : ColoredTriangleData
-                for colored_triangle_data in component_print_data.colored_triangles:
-                    self.__draw_colored_triangle(ax, colored_triangle_data, component_print_data.page_transform, page_flipped=(not self.export_settings.prints_on_model_inside))
-                if self.export_settings.color_glue_flaps:
-                    component_mask = self.__create_glue_flap_mask_of_component(ax, component_print_data, component_print_data.page_transform, (not self.export_settings.prints_on_model_inside))
-                    for glue_flap_data in component_print_data.glue_flaps:
-                        self.__draw_glue_flap_faces(ax, glue_flap_data, component_mask, component_print_data.page_transform, (not self.export_settings.prints_on_model_inside))
+                component_mask = self.__create_glue_flap_mask_of_component(ax, component_print_data, component_print_data.page_transform, flip_drawings)
+                for glue_flap_data in component_print_data.glue_flaps:
+                    self.__draw_glue_flap_faces(ax, glue_flap_data, component_mask, component_print_data.page_transform, flip_drawings)
+
+        if only_textures:
             return fig, ax
 
-        # draw all lines and text and maybe colored triangles
+        # draw all lines and text
         for component_print_data in components_on_page:
             component_mask = self.__create_glue_flap_mask_of_component(ax, component_print_data, component_print_data.page_transform, self.export_settings.prints_on_model_inside)
             if self.export_settings.show_build_step_numbers:
@@ -362,13 +389,8 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
                 self.__draw_fold_edge_at_glue_flap(ax, fold_edge_at_flap_print_data, component_print_data.page_transform, self.export_settings.prints_on_model_inside)
 
             for glue_flap_data in component_print_data.glue_flaps:
-                if self.export_settings.color_glue_flaps:
-                    self.__draw_glue_flap_faces(ax, glue_flap_data, component_mask, component_print_data.page_transform, self.export_settings.prints_on_model_inside)
                 self.__draw_glue_flap_edges(ax, glue_flap_data, component_mask, component_print_data.page_transform, self.export_settings.prints_on_model_inside)
 
-            if draw_textures:
-                for colored_triangle_data in component_print_data.colored_triangles:
-                    self.__draw_colored_triangle(ax, colored_triangle_data, component_print_data.page_transform, self.export_settings.prints_on_model_inside)
         return fig, ax
 
     def export(self, print_ready_pages, output_file_name_prefix):
@@ -380,14 +402,14 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
             with PdfPages(output_file_name_prefix + ".pdf") as pdf:
                 for components_on_page in print_ready_pages:
                     # create a new figure for this page
-                    fig, ax = self.__create_page_figure(components_on_page, self.export_settings.apply_main_texture and not self.export_settings.two_sided_with_texture, False)
+                    fig, _ = self.__create_page_figure(components_on_page, self.export_settings.apply_texture_front, self.export_settings.color_glue_flaps_front, False)
                     # save everything and close current figure
                     pdf.savefig(fig)
                     fig.clear()
                     plt.close(fig)
                     # two sided printing
-                    if self.export_settings.apply_main_texture and self.export_settings.two_sided_with_texture:
-                        fig, ax = self.__create_page_figure(components_on_page, True, True)
+                    if self.export_settings.two_sided_pages:
+                        fig, _ = self.__create_page_figure(components_on_page, self.export_settings.apply_texture_back, self.export_settings.color_glue_flaps_back, True)
                         # save everything and close current figure
                         pdf.savefig(fig)
                         fig.clear()
@@ -404,15 +426,15 @@ class MatplotlibBasedExporter(PolyzamboniExporter):
             page_number = 1
             for components_on_page in print_ready_pages:
                 # create a new figure for this page
-                fig, ax = self.__create_page_figure(components_on_page, self.export_settings.apply_main_texture and not self.export_settings.two_sided_with_texture, False)
+                fig, _ = self.__create_page_figure(components_on_page, self.export_settings.apply_texture_front, self.export_settings.color_glue_flaps_front, False)
                 # save everything and close current figure
                 fig.savefig(output_file_name_prefix + "_page" + str(page_number) + ".svg")
                 fig.clear()
                 plt.close(fig)
                 page_number += 1
                 # two sided printing
-                if self.export_settings.apply_main_texture and self.export_settings.two_sided_with_texture:
-                    fig, ax = self.__create_page_figure(components_on_page, True, True)
+                if self.export_settings.two_sided_pages:
+                    fig, _ = self.__create_page_figure(components_on_page, self.export_settings.apply_texture_back, self.export_settings.color_glue_flaps_back, True)
                     # save everything and close current figure
                     fig.savefig(output_file_name_prefix + "_page" + str(page_number) + ".svg")
                     fig.clear()

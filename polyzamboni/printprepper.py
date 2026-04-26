@@ -55,11 +55,11 @@ class ComponentPrintData():
         self.og_component_id = 0
         self.lower_left = np.inf * np.ones(2) # post page transform bounding box
         self.upper_right = -np.inf * np.ones(2) # post page transform bounding box
-        self.cut_edges = []
-        self.fold_edges = []
-        self.fold_edges_at_flaps = []
-        self.glue_flaps = []
-        self.colored_triangles = []
+        self.cut_edges : list[CutEdgeData] = []
+        self.fold_edges : list[FoldEdgeData] = []
+        self.fold_edges_at_flaps : list[FoldEdgeAtGlueFlapData] = []
+        self.glue_flaps : list[GlueFlapData] = []
+        self.colored_triangles : list[ColoredTriangleData] = []
         self.dominating_mat_index = 0 # we need this if different materials should be printed on different pages
         self.build_step_number = 0
         self.build_section_name = None

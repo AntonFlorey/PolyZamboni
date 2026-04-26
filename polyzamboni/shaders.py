@@ -34,6 +34,44 @@ def create_2d_textured_triangle_shader():
     colored_triangle_shader = gpu.shader.create_from_info(shader_info)
     return colored_triangle_shader
 
+def create_2d_textured_triangle_shader_no_color():
+    vert_out = gpu.types.GPUStageInterfaceInfo("custom_interface")
+    vert_out.smooth('VEC2', "uvInterp")
+
+    shader_info = gpu.types.GPUShaderCreateInfo()
+    shader_info.push_constant('MAT4', "viewProjectionMatrix")
+    shader_info.sampler(0, 'FLOAT_2D', "image")
+    shader_info.vertex_in(0, 'VEC2', "pos")
+    shader_info.vertex_in(1, 'VEC2', "uv")
+    shader_info.vertex_out(vert_out)
+    shader_info.fragment_out(0, 'VEC4', "FragColor")
+
+    shader_info.vertex_source(
+        "void main()"
+        "{"
+        "  uvInterp = uv;"
+        "  gl_Position = viewProjectionMatrix * vec4(pos, 0.0, 1.0);"
+        "}"
+    )
+
+    shader_info.fragment_source(
+        "vec4 fromLinear(vec4 linearRGB)"
+        "{"
+        "    bvec3 cutoff = lessThan(linearRGB.rgb, vec3(0.0031308));"
+        "    vec3 higher = vec3(1.055)*pow(linearRGB.rgb, vec3(1.0/2.4)) - vec3(0.055);"
+        "    vec3 lower = linearRGB.rgb * vec3(12.92);"
+        ""
+        "    return vec4(mix(higher, lower, cutoff), linearRGB.a);"
+        "}"
+        "void main()"
+        "{"
+        "  FragColor = fromLinear(texture(image, uvInterp));"
+        "}"
+    )
+
+    colored_triangle_shader = gpu.shader.create_from_info(shader_info)
+    return colored_triangle_shader
+
 def create_dashed_lines_shader():
     vert_out = gpu.types.GPUStageInterfaceInfo("custom_interface")
     vert_out.smooth('FLOAT', "v_ArcLengthInterp")

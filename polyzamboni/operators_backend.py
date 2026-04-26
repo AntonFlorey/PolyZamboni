@@ -19,7 +19,6 @@ from .papermodel import PaperModel
 from .printprepper import create_print_data_for_all_components, fit_components_on_pages, ComponentPrintData, ColoredTriangleData, GlueFlapData
 from .exporters import paper_sizes, ExportSettings
 
-
 #################################
 #    Init, delete and update    #
 #################################
@@ -235,7 +234,7 @@ def export_draw_func(operator : bpy.types.Operator):
         step_num_warning_row.label(icon="ERROR", text="Sure about the step numbers?")
 
     # Line settings
-    layout.label(text="Detailed line settings", icon="LINE_DATA")
+    layout.label(text="Line settings", icon="LINE_DATA")
     line_settings = layout.box()
     # line width
     write_custom_split_property_row(line_settings, "Line width (pt)", line_settings_props, "line_width", 0.6)
@@ -257,20 +256,29 @@ def export_draw_func(operator : bpy.types.Operator):
 
     # Coloring / Texturing
     layout.label(text="Texture settings", icon="TEXTURE")
-    glue_flap_color_settings = layout.box()
-    glue_flap_color_row = glue_flap_color_settings.row().split(factor=0.6, align=True)
-    glue_flap_col_1, glue_flap_col_2 = (glue_flap_color_row.column(), glue_flap_color_row.column())
-    glue_flap_col_1.prop(texture_settings_props, "apply_glue_flap_color", toggle=1, text="Color glue flaps")
-    glue_flap_col_2.prop(texture_settings_props, "glue_flap_color", text="")
-    glue_flap_color_settings.active = texture_settings_props.apply_glue_flap_color
-
+    
     texture_settings = layout.box()
-    texture_row = texture_settings.row().column_flow(columns=2, align=True)
-    show_textures_col, double_sided_col = (texture_row.column(align=True), texture_row.column(align=True))
-    show_textures_col.prop(texture_settings_props, "apply_textures", toggle=1)
-    double_sided_col.prop(texture_settings_props, "print_two_sided", toggle=1)
-    double_sided_col.active = texture_settings_props.apply_textures
-    write_custom_split_property_row(texture_settings, "Triangle bleed", texture_settings_props, "triangle_bleed", 0.6, texture_settings_props.apply_textures)
+
+    # glue flaps
+    glue_flap_color_active = texture_settings_props.apply_glue_flap_color or (texture_settings_props.print_two_sided and texture_settings_props.apply_glue_flap_color_back)
+    write_custom_split_property_row(texture_settings, "Glue glap color", texture_settings_props, "glue_flap_color", 0.6, glue_flap_color_active)
+    # offscreen texture rendering buffer size
+    write_custom_split_property_row(texture_settings, "Texture Quality", texture_settings_props, "texture_quality", 0.6)
+    # two-sided printing?
+    texture_settings.row().prop(texture_settings_props, "print_two_sided", toggle=1, text="Print on both sides of paper")
+
+    # front page
+    texture_settings_front = layout.box()
+    texture_settings_front.row().label(text="Front", icon="FILE")
+    write_custom_split_property_row(texture_settings_front, "Apply textures", texture_settings_props, "apply_textures", 0.6)
+    write_custom_split_property_row(texture_settings_front, "Color glue flaps", texture_settings_props, "apply_glue_flap_color", 0.6)
+
+    # optional back side
+    if texture_settings_props.print_two_sided:
+        texture_settings_back = layout.box()
+        texture_settings_back.row().label(text="Back", icon="LOOP_BACK")
+        write_custom_split_property_row(texture_settings_back, "Apply textures", texture_settings_props, "apply_textures_back", 0.6)
+        write_custom_split_property_row(texture_settings_back, "Color glue flaps", texture_settings_props, "apply_glue_flap_color_back", 0.6)
 
 def page_layout_draw_func(operator : bpy.types.Operator):
     layout : bpy.types.UILayout = operator.layout
@@ -327,18 +335,20 @@ def create_exporter_for_operator(operator, output_format="pdf"):
         edge_number_font_size=general_settings.edge_number_font_size,
         edge_number_offset=units.blender_distance_to_cm(line_settings.edge_number_offset),
         show_build_step_numbers=general_settings.show_step_numbers,
-        apply_main_texture=texture_settings.apply_textures,
         prints_on_model_inside=general_settings.print_on_inside,
-        two_sided_with_texture=texture_settings.print_two_sided,
         color_of_cut_edges=line_settings.lines_color,
         color_of_convex_fold_edges=line_settings.convex_fold_edges_color,
         color_of_concave_fold_edges = line_settings.concave_fold_edges_color,
         color_of_edge_numbers=general_settings.edge_number_color,
         color_of_build_steps=general_settings.steps_color,
         build_step_font_size=general_settings.build_steps_font_size,
-        triangle_bleed=units.blender_distance_to_cm(texture_settings.triangle_bleed),
-        color_glue_flaps=texture_settings.apply_glue_flap_color,
-        color_of_glue_flaps=texture_settings.glue_flap_color
+        color_of_glue_flaps=texture_settings.glue_flap_color,
+        apply_texture_front=texture_settings.apply_textures,
+        apply_texture_back=texture_settings.apply_textures_back,
+        color_glue_flaps_front=texture_settings.apply_glue_flap_color,
+        color_glue_flaps_back=texture_settings.apply_glue_flap_color_back,
+        texture_quality=texture_settings.texture_quality,
+        two_sided_pages=texture_settings.print_two_sided,
     )
 
     exporter = exporters.MatplotlibBasedExporter(output_format=output_format, export_settings=export_settings)
@@ -346,6 +356,8 @@ def create_exporter_for_operator(operator, output_format="pdf"):
 
 def compute_max_piece_dimensions(ao : bpy.types.Object):
     all_component_bb_dims_cm = np.array([units.blender_distance_to_cm(bb_dim) for bb_dim in printprepper.compute_all_connected_components_bb_dimensions(ao)])
+    if len(all_component_bb_dims_cm) == 0:
+        return np.ones(2)
     return np.max(np.sort(all_component_bb_dims_cm), axis=0)
 
 def compute_max_fit_scaling_factor(max_component_dimensions, settings):
