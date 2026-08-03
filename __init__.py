@@ -24,11 +24,12 @@ else:
     from .polyzamboni import operators
     from .polyzamboni import ui
     from .polyzamboni import callbacks
-    from .polyzamboni import translations
+    from .polyzamboni.translations import register as register_translations
+    from .polyzamboni.translations import unregister as unregister_translations
 
 def register():
     # Translations first
-    translations.register()
+    register_translations()
     # Properties first!
     properties.register()
     # Other stuff later
@@ -45,7 +46,7 @@ def unregister():
     operators.unregister()
     ui.unregister()
     properties.unregister()
-    translations.unregister()
+    unregister_translations()
     if callbacks.post_load_handler in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.remove(callbacks.post_load_handler)
     if callbacks.redraw_3D_view_callback in bpy.app.handlers.undo_post:

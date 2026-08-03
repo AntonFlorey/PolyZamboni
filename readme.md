@@ -136,3 +136,55 @@ Make sure to give the correct path to the requirements file by replacing `some_p
 ### Some notes:
 - Make sure that you have permission to write and modify files in the python folder. The easiest way would be to open your shell as admin.
 - This installation guide uses Windows path formats, but the same steps should also do the trick on Linux and macOS systems (not tested yet).
+
+## Contributing Translations
+
+PolyZamboni supports internationalization (i18n) via Blender's built-in translation system. Translations are stored in `polyzamboni/translations/` with one file per language.
+
+### How to add a new language
+
+1. Copy an existing translation file (e.g., `en_US.py`) as a template
+2. Rename it to your language code (e.g., `fr_FR.py`, `zh_CN.py`)
+3. Translate all values in the dictionary — keep the keys (English strings) unchanged
+4. The file will be auto-discovered and loaded on addon registration
+
+### Translation file format
+
+Each file exports a `translations` dictionary:
+
+```python
+translations = {
+    ("Operator", "Unfold this mesh"): "Déplier ce maillage",
+    ("Panel", "Build Sections"): "Sections de construction",
+    # ... more translations
+}
+```
+
+The first element of each key is the context:
+- **Operator** — operator labels, descriptions, enum items, dialog titles, UI strings
+- **Panel** — panel titles
+- **Property** — property names shown in the UI
+- **Menu** — menu labels
+
+### Currently supported languages
+
+| Language | Code | Status |
+|----------|------|--------|
+| English | en_US | Complete |
+| Russian | ru_RU | Complete |
+| Ukrainian | uk_UA | Complete |
+| Spanish | es_ES | Complete |
+| French | fr_FR | Complete |
+| German | de_DE | Complete |
+| Chinese (Simplified) | zh_CN | Complete |
+| Japanese | ja_JP | Complete |
+| Korean | ko_KR | Complete |
+| Portuguese (Brazilian) | pt_BR | Complete |
+| Italian | it_IT | Complete |
+
+### Testing translations
+
+1. Install the addon in Blender
+2. Go to **Edit → Preferences → Interface → Translation**
+3. Select your language from the list
+4. All UI elements should appear in the selected language
