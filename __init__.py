@@ -16,6 +16,7 @@ if "bpy" in locals():
     importlib.reload(locals()["properties"])
     importlib.reload(locals()["drawing"])
     importlib.reload(locals()["callbacks"])
+    importlib.reload(locals()["translations"])
 else:
     import bpy
     from .polyzamboni import properties
@@ -23,8 +24,11 @@ else:
     from .polyzamboni import operators
     from .polyzamboni import ui
     from .polyzamboni import callbacks
+    from .polyzamboni import translations
 
 def register():
+    # Translations first
+    translations.register()
     # Properties first!
     properties.register()
     # Other stuff later
@@ -41,6 +45,7 @@ def unregister():
     operators.unregister()
     ui.unregister()
     properties.unregister()
+    translations.unregister()
     if callbacks.post_load_handler in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.remove(callbacks.post_load_handler)
     if callbacks.redraw_3D_view_callback in bpy.app.handlers.undo_post:
