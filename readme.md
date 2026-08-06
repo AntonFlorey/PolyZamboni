@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="readme.md">EN</a> · <a href="README_ru.md">RU</a> · <a href="README_ua.md">UA</a> · <a href="README_es.md">ES</a> · <a href="README_fr.md">FR</a> · <a href="README_de.md">DE</a> · <a href="README_zh.md">ZH</a> · <a href="README_ja.md">JA</a> · <a href="README_ko.md">KO</a> · <a href="README_pt.md">PT</a> · <a href="README_it.md">IT</a>
+  <a href="readme.md">EN</a> · <a href="docs/README_ru.md">RU</a> · <a href="docs/README_ua.md">UA</a> · <a href="docs/README_es.md">ES</a> · <a href="docs/README_fr.md">FR</a> · <a href="docs/README_de.md">DE</a> · <a href="docs/README_zh.md">ZH</a> · <a href="docs/README_ja.md">JA</a> · <a href="docs/README_ko.md">KO</a> · <a href="docs/README_pt.md">PT</a> · <a href="docs/README_it.md">IT</a>
 </p>
 
 # PolyZamboni - Papercraft in Blender

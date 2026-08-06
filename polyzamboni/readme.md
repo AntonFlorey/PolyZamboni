@@ -1,0 +1,194 @@
+<p align="center">
+  <a href="readme.md">EN</a> · <a href="README_ru.md">RU</a> · <a href="README_ua.md">UA</a> · <a href="README_es.md">ES</a> · <a href="README_fr.md">FR</a> · <a href="README_de.md">DE</a> · <a href="README_zh.md">ZH</a> · <a href="README_ja.md">JA</a> · <a href="README_ko.md">KO</a> · <a href="README_pt.md">PT</a> · <a href="README_it.md">IT</a>
+</p>
+
+# PolyZamboni - Papercraft in Blender
+
+![banner](images/PolyZamboniBannerNoText.jpg)
+
+Turn your low-poly creations into papercraft instructions with this Blender addon. You no longer need any additional software or good faith in some automatic unfolding algorithm. PolyZamboni provides you with all tools necessary to create high quality paper models!  
+
+<a href="https://www.github.com/AntonFlorey/PolyZamboni/releases"><img src="https://img.shields.io/github/v/release/AntonFlorey/PolyZamboni" alt="Badge displaying release version." style="height:20px"/></a> <a href="https://www.github.com/AntonFlorey/PolyZamboni/releases"><img src="https://img.shields.io/github/downloads/AntonFlorey/PolyZamboni/total.svg" alt="Repo total downloads count." style="height:20px"/></a> <a href="https://github.com/AntonFlorey/PolyZamboni/blob/main/LICENSE"><img src="https://img.shields.io/github/license/AntonFlorey/PolyZamboni" alt="Badge displaying license." style="height:20px"/></a> <a href="https://github.com/AntonFlorey/PolyZamboni"><img src="https://img.shields.io/github/stars/AntonFlorey/PolyZamboni?style=social" alt="Badge displaying count of GitHub stars." style="height:20px"/></a>
+
+<a href="https://buymeacoffee.com/antonflorei" target="_blank"><img src="https://www.buymeacoffee.com/assets/img/custom_images/yellow_img.png" alt="Buy Me A Coffee" style="height: 37px !important;width: 170px !important;box-shadow: 0px 3px 2px 0px rgba(190, 190, 190, 0.5) !important;-webkit-box-shadow: 0px 3px 2px 0px rgba(190, 190, 190, 0.5) !important;" ></a>
+
+## Addon installation
+To add polyzamboni to Blender, clone this repository and zip the `PolyZamboni` folder containing this readme file and the `__init__.py` file. Then go into Blender and go to **Edit-><ins>P</ins>references**. On the top left of the **Add-ons** tab, you can now click on **<ins>I</ins>nstall from Disk** and select the zipped `PolyZamboni` folder. If all [required python packages](#requirements) are installed, the addon should now be enabled and ready to go.
+
+![screenshot](images/addon_install_from_disc.png)
+
+### PolyZamboni as a Blender Extension
+If you are using Blender version 4.3, you can install polyzamboni as a Blender Extension. This comes with the benefit of all external python packages being taken care of (hopefully) automatically. You can find several builds of this addon [here](https://github.com/AntonFlorey/PolyZamboni/releases).
+
+#### Great News 
+This addon got approved by Blender! Just go to **Edit-><ins>P</ins>references->Get Extensions** and search for "PolyZamboni" and install the addon with one click.
+
+## Usage
+With the addon enabled, select any mesh object and navigate to the PolyZamboni panel in the viewport sidebar (toggle with `'N'`) and click on the `Unfold this mesh` button. This starts the unfolding process of the selected mesh with no initial cuts.  
+Not all meshes can be processed by PolyZamboni. The following things prevent this addon from working for your mesh:
+
+1. Non-manifold vertices or edges
+2. Faces that touch at more than one edge
+3. Faces that can not be triangulated via PolyZambonis custom triangulation angorithm
+4. Faces that are highly non-planar
+
+You will get a warning whenever one of these fail-cases occur and the option to select all faces that need to be fixed.
+
+### Interactive paper model editing
+
+<p float="middle">
+    <img src ="images/SpotUnfoldingProcess.gif" width=370>
+    <img src ="images/SpotUnfoldingResult.png" width=370>
+</p>
+
+To transform your 3D model into printable mesh pieces that can be glued together to create an awesome paper model, you have to define where the mesh should be cut open and where to place flaps for glueing. You can edit cuts and glue flaps by entering `Edit Mode`. Here, you have access to plenty of powerful tools:
+
+- `Separate Materials` adds cuts between all faces that have different materials assigned to them.
+- `Auto Unfold` automatically adds cuts until the entire mesh can be unfolded. The algorithm tries to create loops of connected faces. You can choose whether these loops should wrap around the `X`, `Y` or `Z` axis. You can also give a maximum number of connected faces.
+- `Remove Auto Cuts` removes all automatically added cuts. In case you are not happy with the results of the previously listed operation.
+- `Recompute Flaps` places glue flaps at all cut edges. The greedy algorithm tries to avoid overlaps of the printed pieces. There is also a toggle next to the button that lets you decide whether flaps should alternate along patch boundaries.
+- `Alt+C` opens the manual cuts pie menu. Here you can cut, clear or glue all selected edges. Glued edges can not be cut by the `Auto Unfold` operator and have no other purpose. You can also select multiple faces and mark them as one connected region via the `Define Region` operator. This automatically cuts all edges between selected and non-selected faces.
+- `Alt+X` opens the glue flaps pie menu. Here you can add, remove and flip the glue flaps attached to all selected edges. 
+
+### Intuitive feedback
+PolyZamboni renders feedback on top of your models. Dotted lines on top of mesh edges indicate one of the following:
+- **Red edges:** Manually added cuts
+- **Green edges:** Manually glued edges (can't be automatically cut)
+- **Blue edges:** Atomatically added cuts
+
+All connected face regions, separated by cut edges, are visualized via colored patches on top of mesh faces. These regions are colored based on their quality:
+- **Red regions:** These regions can not be unfolded onto a piece of paper. If any of these regions exist, no paper model can be created.
+- **Orange regions:** Although all faces can be unfolded, they would overlap on the plane. This makes the resulting instructions fairly unusable in practice.
+- **Yellow regions:** Almost perfect regions. Only the flaps used to glue pieces together overlap on the final print.
+- **Green regions:** These regions can be unfolded without any overlaps. If all regions are green, you are usually good to go!
+
+Glue flaps are also visualized on top of faces at the position they will have in the papercraft version of your mesh. If any flap overlaps with something in the instruction, it will be colored red. 
+
+<p float="middle">
+    <img src ="images/SpotFeedbackAnnotated.png">
+</p>
+
+### Build sections and step numbers
+To make the papermodel construction easier, you can partition the papermodel pieces into build sections. For this, go to the `Build Sections` panel where you can see a list of all build sections and have the following options:
+- Create a build section: This creates a build section from all pieces of selected mesh faces.
+- Remove the selected build section.
+- Change the islands of the selected build section.
+- Select all mesh faces that belong to the selected build section.
+- Lock and unlock build sections: Normally when adding pieces to a section, the pieces get removed from the sections that previously contained it (a piece can only be in one section at the time). Locking a section prevents this from happening.
+- Rename the build sections (directly in the list).
+
+You can also generate build step numbers for each piece, that tell you in which order to put them all together. While in `Edit Mode`, press the `Compute Build Order` button. Now all pieces inside a build section of size n will be numbered 1 to n. 
+
+In the final instructions, each piece will be printed with its build section name and build step number. 
+
+### Edit the page layout
+Before exporting the instructions for your model, PolyZamboni allows you to edit the final page layout. For this go to the `UV or Image-Editor` and open the sidebar. After clicking on `Create print review` and setting some layout options, a preview of all pages and papermodel pieces should appear on your screen.
+
+<p float="middle">
+    <img src ="images/PieceSelectionAnim.gif">
+</p>
+
+You can then edit the layout by clicking on `Edit page layout`. Here you can do the following things:
+- Select pieces by left-clicking on them.
+- Move a selected piece by pressing `g`. Behaves similar to Blender's move operator.
+- Rotate a selected piece by pressing `r`. Behaves similar to Blender's rotate operator.
+- Change the build step number of a selected piece by pressing `f`.
+
+**Note:** Changes to the papermodel cuts will remove all existing page layout information. Make sure you are happy with your cuts and resulting pieces before you finalize the page layout.
+
+### Exporting instruction sheets 
+Once you are satisfied with your edits, you can export the paper model instruction. Go to **File-><ins>E</ins>xport->Polyzamboni Export PDF/SVG** or just click in the respective buttons in the sidebar. PolyZamboni lets you fully customize the instructions appearance. Here is a list of export options:
+- Size of the final model. You can either specify a target model height or directly define the model scale.
+- Paper size, page margin and distance between mesh pieces.
+- Font sizes and colors.
+- Edge appearance (width, color, linestyle, and more...)
+- Texturing of mesh faces (nothing, solid color or texture image)
+
+**Tip:** Model size and margins are measured in the units of the current blender scene. I recommend to set the scenes length unit to something like cm, unless you are planning to create huge models. Change this setting at **Scene Properties->Units**.
+
+## And now: Get creative!
+I am thrilled to see what you can create with this addon. Share your cool papercraft creations with me and the world!
+
+![banner](images/MyCreations.png)
+
+## Additional features
+I want to explain a couple more neat things built into this addon. These features might need some more work in the future as they are not as flexible and intuitive as the rest.
+
+**Face texturing:** If your mesh has materials assigned to faces, you can transfer them to the paper model instructions. So far, only solid colors or single texture images are supported. PolyZamboni automatically searches for `Principled BSDF` shader nodes to get the base color of a material. A texture image is taken from an `Image Texture` shader node. Multiple textures are not supported (you would get a single random texture in such a case). Feel free to adjust the code to make this feature more powerful. I have little to no experience with texturing in blender and this is the best I could come up with.
+
+![image](images/TexCube.png)
+
+## Requirements
+This addon uses some external packages not included in the Python installation that comes with Blender. All required packages (without dependencies) are listed in `requirements.txt`.
+
+### Here is one way of installing these packages via pip:
+Open your preferred command shell and navigate to the Python binary folder of your Blender installation.  
+
+```bash
+cd 'some_path_prefix\Blender Foundation\Blender 4.3\4.3\python\bin'
+```
+For reference, on my Windows machine the exact path to the folder is    
+`'C:\Program Files\Blender Foundation\Blender 4.3\4.3\python\bin'`.
+
+Then install the missing packages using pip.
+
+```bash
+./python -m pip install -r "some_path_prefix\PolyZamboni\requirements.txt" --target="..\lib\site-packages" --upgrade
+```
+Make sure to give the correct path to the requirements file by replacing `some_path_prefix` with the location of the PolyZamboni folder on your computer.
+
+### Some notes:
+- Make sure that you have permission to write and modify files in the python folder. The easiest way would be to open your shell as admin.
+- This installation guide uses Windows path formats, but the same steps should also do the trick on Linux and macOS systems (not tested yet).
+
+## Contributing Translations
+
+PolyZamboni supports internationalization (i18n) via Blender's built-in translation system. Translations are stored in `polyzamboni/translations/` with one file per language.
+
+### How to add a new language
+
+1. Copy an existing translation file (e.g., `en_US.py`) as a template
+2. Rename it to your language code (e.g., `fr_FR.py`, `zh_CN.py`)
+3. Translate all values in the dictionary — keep the keys (English strings) unchanged
+4. The file will be auto-discovered and loaded on addon registration
+
+### Translation file format
+
+Each file exports a `translations` dictionary:
+
+```python
+translations = {
+    ("Operator", "Unfold this mesh"): "Déplier ce maillage",
+    ("Panel", "Build Sections"): "Sections de construction",
+    # ... more translations
+}
+```
+
+The first element of each key is the context:
+- **Operator** — operator labels, descriptions, enum items, dialog titles, UI strings
+- **Panel** — panel titles
+- **Property** — property names shown in the UI
+- **Menu** — menu labels
+
+### Currently supported languages
+
+| Language | Code | Status |
+|----------|------|--------|
+| English | en_US | Complete |
+| Russian | ru_RU | Complete |
+| Ukrainian | uk_UA | Complete |
+| Spanish | es_ES | Complete |
+| French | fr_FR | Complete |
+| German | de_DE | Complete |
+| Chinese (Simplified) | zh_CN | Complete |
+| Japanese | ja_JP | Complete |
+| Korean | ko_KR | Complete |
+| Portuguese (Brazilian) | pt_BR | Complete |
+| Italian | it_IT | Complete |
+
+### Testing translations
+
+1. Install the addon in Blender
+2. Go to **Edit → Preferences → Interface → Translation**
+3. Select your language from the list
+4. All UI elements should appear in the selected language
